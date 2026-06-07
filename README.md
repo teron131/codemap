@@ -13,6 +13,18 @@ Codemap is an agent-facing source navigation and refactor-scoping tool. It bring
 - `signals` are neutral refactor evidence, not lint findings.
 - Saved outputs are opt-in: `artifacts` writes `.context-graph`; `semantic init` creates the semantic index.
 
+## Install
+
+Use `pnpm` for repo dependencies and builds, then use `npm` for the global CLI install:
+
+```sh
+pnpm install
+pnpm run build
+npm install -g .
+```
+
+For agent use, enable the Codemap skill in the matching agent guidance so agents know when to reach for `codemap` before broad refactor or architecture work.
+
 ## Command Surface
 
 <table>
