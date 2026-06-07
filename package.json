@@ -17,7 +17,6 @@
 		"dev": "tsx src/codemap/cli.ts",
 		"format": "biome format src test/*.ts package.json tsconfig.json tsconfig.build.json",
 		"format:write": "biome format --write src test/*.ts package.json tsconfig.json tsconfig.build.json",
-		"install:global": "bash scripts/install-global.sh",
 		"lint": "biome lint src test/*.ts package.json tsconfig.json tsconfig.build.json",
 		"test": "vitest run",
 		"typecheck": "tsc -p tsconfig.json --noEmit"
