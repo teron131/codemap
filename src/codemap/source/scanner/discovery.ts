@@ -157,6 +157,10 @@ export function discoverRipgrepFiles(targetPath: string): string[] | null {
 		if (!rawPath) {
 			continue;
 		}
+		const pathParts = rawPath.split(/[\\/]/);
+		if (pathParts.slice(0, -1).some((part) => !shouldScanDir(part))) {
+			continue;
+		}
 		const filePath = path.join(targetPath, rawPath);
 		if (isFile(filePath) && shouldScanFile(filePath)) {
 			files.push(filePath);

@@ -84,6 +84,7 @@ export {
 export {
 	SIGNAL_OUTPUT_ROW_LIMIT,
 	SIGNAL_SECTION_CHOICES,
+	SIGNAL_TOP_ROW_LIMIT,
 	type SignalSection,
 } from "./schema.js";
 export { buildUsageSection, metricNames } from "./usage.js";

@@ -127,7 +127,7 @@ export function loadUpdateState(
 	const currentFingerprintsPath = fingerprintsPath(root);
 	if (!existsSync(currentGraphPath) || !existsSync(currentFingerprintsPath)) {
 		return {
-			message: `No existing artifacts/fingerprints at ${currentGraphPath}. Run artifacts create first.`,
+			message: `No artifacts: ${currentGraphPath}\nRun: codemap artifacts create --project-root ${root}`,
 			returncode: 1,
 		};
 	}

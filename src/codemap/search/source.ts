@@ -49,9 +49,38 @@ export type SourceMatch = {
 	text: string;
 };
 
+export type SourceFallbackGroup = {
+	term: string;
+	matches: SourceMatch[];
+	truncated: boolean;
+};
+
 export type JsonMatchParser = (
 	payload: Record<string, unknown>,
 ) => SourceMatch | null;
+
+const FALLBACK_TERM_LIMIT = 8;
+const FALLBACK_MATCHES_PER_TERM = 2;
+const FALLBACK_CANDIDATE_MULTIPLIER = 4;
+
+const SEARCH_STOP_WORDS = new Set([
+	"about",
+	"and",
+	"are",
+	"can",
+	"for",
+	"from",
+	"how",
+	"into",
+	"the",
+	"this",
+	"that",
+	"what",
+	"when",
+	"where",
+	"which",
+	"with",
+]);
 
 /** Searches source text and symbols across target files. */
 export function sourceMatches(
@@ -80,6 +109,127 @@ export function sourceMatches(
 		}
 	}
 	return matches;
+}
+
+/** Finds partial source matches when a full phrase has no direct hits. */
+export function sourceFallbackMatches(
+	root: string,
+	searchText: string,
+	{ limit }: { limit: number },
+): SourceFallbackGroup[] {
+	const groups: SourceFallbackGroup[] = [];
+	const seenMatches = new Set<string>();
+	for (const term of fallbackTerms(searchText).slice(0, FALLBACK_TERM_LIMIT)) {
+		const matches: SourceMatch[] = [];
+		const candidates = rankFallbackMatches(
+			sourceMatches(root, term, {
+				limit: Math.max(
+					limit * FALLBACK_CANDIDATE_MULTIPLIER,
+					FALLBACK_TERM_LIMIT,
+				),
+			}),
+		);
+		for (const match of candidates) {
+			appendMatch(matches, seenMatches, match, {
+				limit: FALLBACK_MATCHES_PER_TERM,
+			});
+			if (matches.length >= FALLBACK_MATCHES_PER_TERM) {
+				break;
+			}
+		}
+		if (matches.length === 0) {
+			continue;
+		}
+		groups.push({
+			term,
+			matches,
+			truncated: candidates.length > matches.length,
+		});
+		if (groups.length >= limit) {
+			break;
+		}
+	}
+	return groups;
+}
+
+/** Builds meaningful fallback terms from a phrase. */
+function fallbackTerms(searchText: string): string[] {
+	const terms: string[] = [];
+	const seen = new Set<string>();
+	for (const token of searchText.match(/[A-Za-z0-9_$]+/g) ?? []) {
+		for (const term of fallbackTermVariants(token)) {
+			const key = term.toLowerCase();
+			if (seen.has(key)) {
+				continue;
+			}
+			seen.add(key);
+			terms.push(term);
+		}
+	}
+	return terms;
+}
+
+/** Expands one fallback term into simple source-search variants. */
+function fallbackTermVariants(token: string): string[] {
+	const normalized = token.trim();
+	const lower = normalized.toLowerCase();
+	if (normalized.length < 3 || SEARCH_STOP_WORDS.has(lower)) {
+		return [];
+	}
+	if (lower.endsWith("ies") && normalized.length > 4) {
+		return [`${normalized.slice(0, -3)}y`, normalized];
+	}
+	if (/[cs]hes$|xes$|zes$|ses$/.test(lower) && normalized.length > 4) {
+		return [normalized.slice(0, -2), normalized];
+	}
+	if (lower.endsWith("s") && normalized.length > 4) {
+		return [normalized.slice(0, -1), normalized];
+	}
+	return [normalized];
+}
+
+/** Ranks fallback matches toward source code over config, docs, and tests. */
+function rankFallbackMatches(matches: SourceMatch[]): SourceMatch[] {
+	return matches.slice().sort((left, right) => {
+		const leftRank = fallbackMatchRank(left);
+		const rightRank = fallbackMatchRank(right);
+		return (
+			leftRank - rightRank ||
+			compareText(left.filePath, right.filePath) ||
+			left.line - right.line ||
+			left.column - right.column
+		);
+	});
+}
+
+/** Scores one fallback match by how useful it is as a next code-reading lead. */
+function fallbackMatchRank(match: SourceMatch): number {
+	const filePath = match.filePath.replace(/^\.\//, "");
+	const lower = filePath.toLowerCase();
+	let rank = 0;
+	if (!lower.startsWith("src/")) {
+		rank += 4;
+	}
+	if (
+		lower.includes("/test") ||
+		lower.includes(".test.") ||
+		lower.includes("_test.")
+	) {
+		rank += 3;
+	}
+	if (
+		lower.endsWith(".md") ||
+		lower.endsWith(".json") ||
+		lower.endsWith(".yaml") ||
+		lower.endsWith(".yml") ||
+		lower.endsWith(".toml")
+	) {
+		rank += 5;
+	}
+	if (match.engine === "ast-grep") {
+		rank -= 1;
+	}
+	return rank;
 }
 
 /** Finds likely symbol matches with ast-grep before rg fallback. */
@@ -347,6 +497,17 @@ function arrayValue(value: unknown): unknown[] {
 /** Escapes text for literal use inside regular expressions. */
 function escapeRegExp(value: string): string {
 	return value.replace(/[\\^$*+?.()|[\]{}]/g, "\\$&");
+}
+
+/** Sorts text values with stable lexical ordering. */
+function compareText(left: string, right: string): number {
+	if (left < right) {
+		return -1;
+	}
+	if (left > right) {
+		return 1;
+	}
+	return 0;
 }
 
 /** Locates a Python function, async function, or class definition line. */

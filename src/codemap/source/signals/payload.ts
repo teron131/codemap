@@ -1,5 +1,6 @@
 /** Builds JSON signal payload sections for CLI output. */
 import { PY_SUFFIXES, TYPESCRIPT_SUFFIXES } from "../scanner/index.js";
+import { SIGNAL_TOP_ROW_LIMIT } from "./schema.js";
 
 export const STRUCTURAL_SUFFIXES = new Set([
 	...PY_SUFFIXES,
@@ -56,7 +57,7 @@ export function buildSignalPayload(
 				...payload,
 				files: fileRows,
 			},
-			limit,
+			Math.min(limit, SIGNAL_TOP_ROW_LIMIT),
 		),
 		...payload,
 	};

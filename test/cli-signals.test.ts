@@ -72,4 +72,44 @@ describe("signals CLI", () => {
 			],
 		});
 	});
+
+	it("keeps the aggregate top signal payload small", () => {
+		const functionBlocks = Array.from({ length: 24 }, (_, idx) =>
+			[
+				`export function candidate${idx}(value: string) {`,
+				"  const next = value.trim();",
+				"  return next;",
+				"}",
+			].join("\n"),
+		).join("\n\n");
+		writeFileSync(path.join(workDir, "src", "app.ts"), functionBlocks, "utf8");
+
+		const result = spawnSync(
+			"pnpm",
+			[
+				"exec",
+				"tsx",
+				"src/codemap/cli.ts",
+				"signals",
+				"--project-root",
+				workDir,
+				"--json",
+				"top",
+			],
+			{ cwd: workspaceRoot, encoding: "utf8" },
+		);
+
+		expect(result.status).toBe(0);
+		expect(result.stderr).toBe("");
+		const payload = JSON.parse(result.stdout);
+		expect(payload.top.functions.longFunctions).toHaveLength(20);
+		expect(payload.top.functions.lowUseDefinitions.length).toBeLessThanOrEqual(
+			20,
+		);
+		expect(
+			payload.top.variables.leastUsedDefinitions.length,
+		).toBeLessThanOrEqual(20);
+		expect(payload.top.variables.broadNamePools.length).toBeLessThanOrEqual(20);
+		expect(payload.top.files.denseFiles.length).toBeLessThanOrEqual(20);
+	});
 });

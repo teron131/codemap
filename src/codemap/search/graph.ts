@@ -1,5 +1,6 @@
 /** Searches derived graph relationship context for matching text. */
 import {
+	type GraphEdge,
 	type GraphNode,
 	type GraphPayload,
 	relatedEdges,
@@ -81,13 +82,54 @@ export function renderGraphMatchLines(
 		return lines;
 	}
 	for (const node of matches) {
-		lines.push(`  - ${node.id} :: ${node.summary ?? ""}`);
+		lines.push(`  - ${graphNodeLabel(node)}: ${node.summary ?? ""}`);
 		const hops = relatedEdges(graph, String(node.id)).slice(0, 5);
 		for (const edge of hops) {
-			lines.push(`      ${edge.source} --${edge.type}--> ${edge.target}`);
+			lines.push(`      ${graphEdgeLabel(edge, node, graph)}`);
 		}
 	}
 	return lines;
+}
+
+/** Formats one graph node without exposing internal node ids. */
+function graphNodeLabel(node: GraphNode): string {
+	const name = String(node.name ?? "");
+	const filePath = String(node.filePath ?? "");
+	const nodeType = String(node.type ?? "");
+	if (["function", "class"].includes(nodeType) && name && filePath) {
+		return `${name} in ${filePath}`;
+	}
+	return filePath || name || String(node.id ?? "");
+}
+
+/** Formats one related graph edge from the matched node's point of view. */
+function graphEdgeLabel(
+	edge: GraphEdge,
+	node: GraphNode,
+	graph: GraphPayload,
+): string {
+	const nodeId = String(node.id ?? "");
+	const otherId = String(edge.source === nodeId ? edge.target : edge.source);
+	const otherNode = (graph.nodes ?? []).find(
+		(candidate) => candidate.id === otherId,
+	);
+	const otherLabel = otherNode ? graphNodeLabel(otherNode) : otherId;
+	return `${edgeRelationshipLabel(edge, nodeId)}: ${otherLabel}`;
+}
+
+/** Names a graph edge direction in CLI-friendly language. */
+function edgeRelationshipLabel(edge: GraphEdge, nodeId: string): string {
+	const outgoing = edge.source === nodeId;
+	if (edge.type === "imports") {
+		return outgoing ? "imports" : "imported by";
+	}
+	if (edge.type === "calls") {
+		return outgoing ? "calls" : "called by";
+	}
+	if (edge.type === "contains") {
+		return outgoing ? "contains" : "in";
+	}
+	return outgoing ? String(edge.type) : `${String(edge.type)} by`;
 }
 
 /** Attaches printable graph-edge context to a search target node. */
