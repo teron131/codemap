@@ -104,7 +104,8 @@ export function runRecipe(
 	{
 		apply = false,
 		jsonOutput = false,
-	}: { apply?: boolean; jsonOutput?: boolean },
+		limit = null,
+	}: { apply?: boolean; jsonOutput?: boolean; limit?: number | null },
 ): number {
 	if (recipe.inlineRule) {
 		const [matches, rewrites] = runInlineRuleRecipe(root, recipe, paths, {
@@ -119,7 +120,7 @@ export function runRecipe(
 				),
 			);
 		} else {
-			printInlineRuleResult(recipe, matches, rewrites);
+			printInlineRuleResult(recipe, matches, rewrites, { limit });
 		}
 		return 0;
 	}
@@ -135,6 +136,7 @@ export function runRecipe(
 			{
 				apply,
 				jsonOutput,
+				limit,
 			},
 		);
 		if (stepReturncode === 127) {
@@ -166,7 +168,8 @@ export function runRecipeStep(
 	{
 		apply = false,
 		jsonOutput = false,
-	}: { apply?: boolean; jsonOutput?: boolean },
+		limit = null,
+	}: { apply?: boolean; jsonOutput?: boolean; limit?: number | null },
 ): [number, Record<string, unknown> | null] {
 	if (step.rewrite) {
 		const rewriteResults = syntaxRewrite(
@@ -186,6 +189,7 @@ export function runRecipeStep(
 			printRecipeStepResult(recipe, step, {
 				matches: null,
 				rewrites: rewriteResults,
+				limit,
 			});
 		}
 		return [
@@ -198,14 +202,17 @@ export function runRecipeStep(
 		];
 	}
 
-	const matches = syntaxMatches(root, step.lang, step.pattern, paths);
+	const fetchLimit = !jsonOutput && limit !== null ? limit + 1 : null;
+	const matches = syntaxMatches(root, step.lang, step.pattern, paths, {
+		limit: fetchLimit,
+	});
 	if (matches === null) {
 		console.log("Unavailable: ast-grep-py not installed.");
 		return [127, null];
 	}
 	const returncode = matches.length > 0 ? 0 : 1;
 	if (!jsonOutput) {
-		printRecipeStepResult(recipe, step, { matches, rewrites: null });
+		printRecipeStepResult(recipe, step, { matches, rewrites: null, limit });
 	}
 	return [
 		returncode,
@@ -280,11 +287,12 @@ export function printInlineRuleResult(
 	recipe: SyntaxRecipe,
 	matches: SyntaxMatch[] | null,
 	rewrites: SyntaxRewriteResult[] | null,
+	{ limit = null }: { limit?: number | null } = {},
 ): void {
 	console.log(`# ${recipe.name}`);
 	console.log("- ast-grep inline rule");
 	if (matches && matches.length > 0) {
-		printSyntaxMatches(matches, { jsonOutput: false });
+		printLimitedSyntaxMatches(matches, { limit });
 	} else if (rewrites && rewrites.length > 0) {
 		printRewriteResults(rewrites);
 	} else {
@@ -299,9 +307,11 @@ export function printRecipeStepResult(
 	{
 		matches,
 		rewrites,
+		limit = null,
 	}: {
 		matches: SyntaxMatch[] | null;
 		rewrites: SyntaxRewriteResult[] | null;
+		limit?: number | null;
 	},
 ): void {
 	console.log(`# ${recipe.name}: ${step.name}`);
@@ -310,11 +320,24 @@ export function printRecipeStepResult(
 		console.log(`- rewrite: ${step.rewrite}`);
 	}
 	if (matches && matches.length > 0) {
-		printSyntaxMatches(matches, { jsonOutput: false });
+		printLimitedSyntaxMatches(matches, { limit });
 	} else if (rewrites && rewrites.length > 0) {
 		printRewriteResults(rewrites);
 	} else {
 		console.log("No matches");
+	}
+}
+
+/** Prints syntax matches with an optional text output limit marker. */
+function printLimitedSyntaxMatches(
+	matches: SyntaxMatch[],
+	{ limit }: { limit: number | null },
+): void {
+	const visible =
+		limit === null ? matches : matches.slice(0, Math.max(0, limit));
+	printSyntaxMatches(visible, { jsonOutput: false });
+	if (limit !== null && matches.length > limit) {
+		console.log("...");
 	}
 }
 

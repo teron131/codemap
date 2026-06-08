@@ -29,14 +29,15 @@ export function renderAgentBrief(
 	lines.push("");
 	lines.push("## Relationships");
 	lines.push(
-		`- Python import edges: ${String(relationships.pythonImportEdges ?? 0)}`,
+		`- Python import edges: ${relationshipCount(relationships, "pythonImportEdges")}`,
 	);
 	lines.push(
-		`- TypeScript import edges: ${String(relationships.typescriptImportEdges ?? 0)}`,
+		`- TypeScript import edges: ${relationshipCount(relationships, "typescriptImportEdges")}`,
 	);
 	lines.push(
 		`- Entrypoint-like files: ${String(relationships.entrypointLikeFiles ?? 0)}`,
 	);
+	appendRelationshipFallback(lines, relationships);
 	lines.push("");
 	lines.push("## Long Functions");
 	const longFunctions = recordValue(metrics.longFunctions);
@@ -137,7 +138,7 @@ export function renderHotspotsText(metrics: Row): string {
 		const parts = [
 			`signals ${String(item.total)}`,
 			`defines ${String(item.defines)}`,
-			`imports ${String(item.imports_local)}`,
+			`local imports ${String(item.imports_local)}`,
 		];
 		lines.push(`- ${String(item.file)}: ${parts.join(", ")} (${samples})`);
 	}
@@ -169,9 +170,12 @@ export function renderSummaryText(
 		`${fileCount} ${fileCount === 1 ? "file" : "files"} analyzed from the current tree.`,
 		"",
 		"## Source Shape",
-		`- Python imports: ${String(relationships.pythonImportEdges ?? 0)}`,
-		`- TypeScript imports: ${String(relationships.typescriptImportEdges ?? 0)}`,
+		`- Python imports: ${relationshipCount(relationships, "pythonImportEdges")}`,
+		`- TypeScript imports: ${relationshipCount(relationships, "typescriptImportEdges")}`,
 		`- Entrypoint-like files: ${String(relationships.entrypointLikeFiles ?? 0)}`,
+	];
+	appendRelationshipFallback(lines, relationships);
+	lines.push(
 		"",
 		"## Inventory",
 		`- Languages: ${formatCountItems(rowArray(inventory.languages))}`,
@@ -179,7 +183,7 @@ export function renderSummaryText(
 		`- Top roots: ${formatCountItems(rowArray(inventory.rootHotspots))}`,
 		"",
 		"## Likely Entries",
-	];
+	);
 	for (const entry of rowArray(architecture.likelyEntries).slice(0, 5)) {
 		lines.push(`- ${String(entry.title)}: ${String(entry.description)}`);
 	}
@@ -275,6 +279,25 @@ function arrayValue(value: unknown): unknown[] {
 /** Reads table rows from unknown section data. */
 function rowArray(value: unknown): Row[] {
 	return Array.isArray(value) ? (value as Row[]) : [];
+}
+
+/** Formats relationship counts that are unavailable in lightweight fallback mode. */
+function relationshipCount(relationships: Row, key: string): string {
+	if (relationships.importCountsUnavailable === true) {
+		return "unknown (fallback)";
+	}
+	return String(relationships[key] ?? 0);
+}
+
+/** Appends a concise fallback note when relationship graph counts were skipped. */
+function appendRelationshipFallback(lines: string[], relationships: Row): void {
+	if (relationships.importCountsUnavailable !== true) {
+		return;
+	}
+	const note = String(
+		relationships.importCountsNote || "relationship graph skipped",
+	);
+	lines.push(`- Fallback: ${note}`);
 }
 
 /** Sorts text values with stable lexical ordering. */

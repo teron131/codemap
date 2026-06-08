@@ -58,6 +58,7 @@ export function appendEdgeSection(
 	for (const edge of edges.slice(0, limit)) {
 		lines.push(`- ${edgeEndpoint(edge, nodeId, nodesById)}`);
 	}
+	appendLimitMarker(lines, edges.length, limit);
 }
 
 /** Appends contained child nodes to inspection text. */
@@ -76,6 +77,7 @@ export function appendContainsSection(
 		const child = nodesById[String(edge.target)] ?? {};
 		lines.push(`- ${nodeLabel(child)}`);
 	}
+	appendLimitMarker(lines, contains.length, limit);
 }
 
 /** Appends related import and symbol sections to inspection output. */
@@ -160,9 +162,21 @@ export function renderInspection(
 		for (const item of candidates.slice(1, limit)) {
 			lines.push(`- ${nodeLabel(item)}`);
 		}
+		appendLimitMarker(lines, candidates.length - 1, limit - 1);
 	}
 	return lines
 		.filter((line) => line !== undefined && line !== null)
 		.join("\n")
 		.trim();
+}
+
+/** Marks list sections that were shortened by the display limit. */
+function appendLimitMarker(
+	lines: string[],
+	total: number,
+	shown: number,
+): void {
+	if (total > shown) {
+		lines.push("- ...");
+	}
 }

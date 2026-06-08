@@ -1,7 +1,11 @@
 /** Registers CLI commands that search text, graph nodes, symbols, and calls. */
 import type { Command } from "commander";
 
-import { resolveProjectRoot, semanticIndexPath } from "../common.js";
+import {
+	DETAILED_ANALYSIS_FILE_LIMIT,
+	resolveProjectRoot,
+	semanticIndexPath,
+} from "../common.js";
 import {
 	renderGraphMatchLines,
 	type SourceFallbackGroup,
@@ -17,6 +21,7 @@ import {
 	semanticIndexExists,
 	semanticMatches,
 } from "../search/semantic/index.js";
+import { runScan } from "../source/extraction/index.js";
 import { currentTreeGraph } from "../source/graph/index.js";
 import { addProjectRootArgument, parseIntegerOption } from "./options.js";
 import {
@@ -89,16 +94,30 @@ export async function commandSearch(
 		const graph = currentTreeGraph(root, { includeSignals: false });
 		console.log(renderGraphMatchLines(graph, searchText, limit).join("\n"));
 	} else {
-		const matches = sourceMatches(root, searchText, { limit });
+		const textOnlySearch = shouldUseTextOnlySourceSearch(root);
+		const matches = sourceMatches(root, searchText, {
+			limit,
+			textOnly: textOnlySearch,
+		});
+		const searchNote = textOnlySearch
+			? "Fallback: large repo; structural search skipped."
+			: "";
 		if (matches.length === 0) {
-			const fallbackGroups = sourceFallbackMatches(root, searchText, { limit });
+			const fallbackGroups = sourceFallbackMatches(root, searchText, {
+				limit,
+				textOnly: textOnlySearch,
+			});
 			if (fallbackGroups.length > 0) {
-				printSourceFallbackMatches(fallbackGroups);
+				printSourceFallbackMatches(fallbackGroups, {
+					note: textOnlySearch
+						? "Fallback: large repo; structural partial search skipped."
+						: "",
+				});
 			} else {
-				printSourceMatches(matches);
+				printSourceMatches(matches, { note: searchNote });
 			}
 		} else {
-			printSourceMatches(matches);
+			printSourceMatches(matches, { note: searchNote });
 		}
 		const card = searchTargetCard(root, searchText, matches, { limit });
 		if (card !== null) {
@@ -113,8 +132,14 @@ export async function commandSearch(
 }
 
 /** Prints source search matches in CLI text format. */
-export function printSourceMatches(matches: SourceMatch[]): void {
+export function printSourceMatches(
+	matches: SourceMatch[],
+	{ note = "" }: { note?: string } = {},
+): void {
 	console.log("\nSource matches:");
+	if (note) {
+		console.log(`  ${note}`);
+	}
 	if (matches.length === 0) {
 		console.log("  none");
 	}
@@ -129,11 +154,15 @@ export function printSourceMatches(matches: SourceMatch[]): void {
 /** Prints partial source matches for a no-hit phrase query. */
 export function printSourceFallbackMatches(
 	groups: SourceFallbackGroup[],
+	{ note = "" }: { note?: string } = {},
 ): void {
 	if (groups.length === 0) {
 		return;
 	}
 	console.log("\nNo matches, fallback to partial matches:");
+	if (note) {
+		console.log(`  ${note}`);
+	}
 	for (const group of groups) {
 		console.log(`  ${group.term}:`);
 		for (const item of group.matches) {
@@ -146,6 +175,14 @@ export function printSourceFallbackMatches(
 			console.log("    ...");
 		}
 	}
+}
+
+/** Uses text-only source search when detailed structural work is too broad. */
+function shouldUseTextOnlySourceSearch(root: string): boolean {
+	return (
+		runScan(root, { persist: false }).files.length >
+		DETAILED_ANALYSIS_FILE_LIMIT
+	);
 }
 
 /** Prints semantic search results or setup guidance. */
