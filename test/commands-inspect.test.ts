@@ -73,6 +73,64 @@ describe("inspect command handler", () => {
 		expect(output).toContain("## Contains");
 		expect(output).not.toContain("## Other Matches");
 	});
+
+	it("marks limited directory sections with an ellipsis", () => {
+		for (const name of ["a", "b", "c"]) {
+			writeFileSync(
+				path.join(workDir, "src", `${name}.ts`),
+				`export function ${name}() {\n  return "${name}";\n}\n`,
+				"utf8",
+			);
+		}
+
+		expect(commandInspect("src", { projectRoot: workDir, limit: "2" })).toBe(0);
+
+		const output = logLines().join("\n");
+		expect(output).toContain("## Dense Files");
+		expect(output).toContain("## Files");
+		expect(output).toContain("- ...");
+	});
+
+	it("uses a file-local fallback for large repo file inspection", () => {
+		mkdirSync(path.join(workDir, "bulk"), { recursive: true });
+		for (let index = 0; index < 5001; index += 1) {
+			writeFileSync(
+				path.join(workDir, "bulk", `filler-${index}.ts`),
+				`export const filler${index} = ${index};\n`,
+				"utf8",
+			);
+		}
+		writeFileSync(
+			path.join(workDir, "src", "helper.ts"),
+			"export function helper() {\n  return 'ok';\n}\n",
+			"utf8",
+		);
+		writeFileSync(
+			path.join(workDir, "src", "large.ts"),
+			[
+				"import { helper } from './helper';",
+				"",
+				"export function run() {",
+				"  return helper();",
+				"}",
+			].join("\n"),
+			"utf8",
+		);
+
+		expect(commandInspect("src/large.ts", { projectRoot: workDir })).toBe(0);
+
+		const output = logLines().join("\n");
+		expect(output).toContain("# src/large.ts");
+		expect(output).toContain(
+			"Fallback: detailed graph skipped above 5000 files; incoming imports not computed.",
+		);
+		expect(output).toContain("## Imports From File");
+		expect(output).toContain("- ./helper");
+		expect(output).toContain("## Contains");
+		expect(output).toContain("- run in src/large.ts:3");
+		expect(output).toContain("local_imports=1");
+		expect(output).not.toContain("imported by:");
+	}, 10000);
 });
 
 /** Collects mocked console output as printable test lines. */

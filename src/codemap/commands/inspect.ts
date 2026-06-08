@@ -1,14 +1,21 @@
 /** Defines CLI behavior for focused source inspection targets. */
-import { existsSync, statSync } from "node:fs";
+import { statSync } from "node:fs";
 import path from "node:path";
 import type { Command } from "commander";
 
 import { DETAILED_ANALYSIS_FILE_LIMIT, resolveProjectRoot } from "../common.js";
 import { runScan, type ScanEntry } from "../source/extraction/index.js";
+import { structureForFile } from "../source/extraction/structure.js";
 import {
 	currentTreeInspectGraph,
 	renderInspection,
 } from "../source/inspection/index.js";
+import { metricsForFiles } from "../source/inspection/metrics.js";
+import {
+	appendFileProfile,
+	fileMetricsForPath,
+} from "../source/inspection/profiles.js";
+import { type FileMetrics, scanFile } from "../source/scanner/index.js";
 import { addProjectRootArgument, parseIntegerOption } from "./options.js";
 
 type InspectOptions = {
@@ -19,6 +26,8 @@ type InspectOptions = {
 type RootOptions = {
 	projectRoot?: string;
 };
+
+type InspectTargetKind = "directory" | "file";
 
 /** Registers the inspect command and its output options. */
 export function addInspectParser(program: Command): void {
@@ -57,13 +66,18 @@ export function commandInspect(
 		options.projectRoot ?? rootOptions.projectRoot,
 	);
 	const limit = inspectLimit(options.limit);
-	if (isDirectoryTarget(root, target)) {
+	const pathTargetKind = inspectPathTargetKind(root, target);
+	if (pathTargetKind !== null) {
 		const scan = runScan(root, { persist: false });
 		if (scan.files.length > DETAILED_ANALYSIS_FILE_LIMIT) {
-			console.log(
-				lightweightDirectoryInspection(root, target, scan.files, { limit }),
-			);
-			return 0;
+			const inspection =
+				pathTargetKind === "directory"
+					? lightweightDirectoryInspection(root, target, scan.files, { limit })
+					: lightweightFileInspection(root, target, scan.files, { limit });
+			if (inspection !== null) {
+				console.log(inspection);
+				return 0;
+			}
 		}
 	}
 	const [graph, metrics] = currentTreeInspectGraph(root, target);
@@ -81,14 +95,58 @@ export function commandInspect(
 	return 0;
 }
 
-/** Checks whether an inspect target names a directory. */
-function isDirectoryTarget(root: string, target: string): boolean {
+/** Classifies a target that directly names a filesystem path. */
+function inspectPathTargetKind(
+	root: string,
+	target: string,
+): InspectTargetKind | null {
 	const targetPath = path.resolve(root, target);
 	try {
-		return existsSync(targetPath) && statSync(targetPath).isDirectory();
+		const stats = statSync(targetPath);
+		if (stats.isDirectory()) {
+			return "directory";
+		}
+		return stats.isFile() ? "file" : null;
 	} catch {
-		return false;
+		return null;
 	}
+}
+
+/** Renders file inspection from one target file when whole-repo graphing is too large. */
+function lightweightFileInspection(
+	root: string,
+	target: string,
+	files: ScanEntry[],
+	{ limit }: { limit: number },
+): string | null {
+	const relTarget = directoryRelTarget(root, target);
+	const scanEntry = files.find((entry) => entry.path === relTarget);
+	if (scanEntry === undefined) {
+		return null;
+	}
+	const filePath = path.join(root, relTarget);
+	const metrics = scanFile(filePath, { displayRoot: root });
+	const structure = structureForFile(root, scanEntry, {
+		metricsByPath: { [relTarget]: metrics },
+	});
+	const functionCount =
+		structure?.functions.length ?? metrics.functionSpans.length;
+	const classCount = structure?.classes.length ?? 0;
+	const lines = [
+		`# ${relTarget}`,
+		"",
+		`${relTarget}: ${scanEntry.fileCategory} file in ${scanEntry.language}; ${scanEntry.sizeLines} lines; ${functionCount} functions, ${classCount} classes.`,
+		`Fallback: detailed graph skipped above ${DETAILED_ANALYSIS_FILE_LIMIT} files; incoming imports not computed.`,
+	];
+	appendFileImportSpecs(lines, metrics, { limit });
+	appendFileContains(lines, relTarget, structure, { limit });
+	const fileMetrics = metricsForFiles(root, [scanEntry], {
+		[relTarget]: metrics,
+	});
+	appendFileProfile(lines, fileMetricsForPath(fileMetrics, relTarget), {
+		limit,
+	});
+	return lines.join("\n").trim();
 }
 
 /** Renders directory inspection from scan data when graph artifacts are absent. */
@@ -126,8 +184,62 @@ function lightweightDirectoryInspection(
 				`- ${item.path}: ${item.sizeLines} lines, ${item.language}, ${item.fileCategory}`,
 			);
 		}
+		if (rows.length > denseRows.length) {
+			lines.push("- ...");
+		}
 	}
 	return lines.join("\n").trim();
+}
+
+/** Appends raw imports seen in the inspected file. */
+function appendFileImportSpecs(
+	lines: string[],
+	metrics: FileMetrics,
+	{ limit }: { limit: number },
+): void {
+	const imports = uniqueRows([
+		...metrics.pyImportTargets,
+		...metrics.typescriptImportTargets,
+		...metrics.typescriptReexportTargets.map((target) => `re-export ${target}`),
+	]);
+	if (imports.length === 0) {
+		return;
+	}
+	lines.push("");
+	lines.push("## Imports From File");
+	for (const item of imports.slice(0, limit)) {
+		lines.push(`- ${item}`);
+	}
+	appendLimitMarker(lines, imports.length, limit);
+}
+
+/** Appends file-local functions and classes from lightweight structure. */
+function appendFileContains(
+	lines: string[],
+	relPath: string,
+	structure: ReturnType<typeof structureForFile>,
+	{ limit }: { limit: number },
+): void {
+	if (structure === null) {
+		return;
+	}
+	const contains = [
+		...structure.functions.map(
+			(item) => `${item.name} in ${relPath}:${item.startLine}`,
+		),
+		...structure.classes.map(
+			(item) => `${item.name} class in ${relPath}:${item.startLine}`,
+		),
+	];
+	if (contains.length === 0) {
+		return;
+	}
+	lines.push("");
+	lines.push("## Contains");
+	for (const item of contains.slice(0, limit)) {
+		lines.push(`- ${item}`);
+	}
+	appendLimitMarker(lines, contains.length, limit);
 }
 
 /** Formats a directory target relative to the display root. */
@@ -135,6 +247,31 @@ function directoryRelTarget(root: string, target: string): string {
 	const resolved = path.resolve(root, target);
 	const relative = path.relative(root, resolved).split(path.sep).join("/");
 	return relative || ".";
+}
+
+/** Deduplicates rows while keeping first-seen order. */
+function uniqueRows(rows: string[]): string[] {
+	const seen = new Set<string>();
+	const unique: string[] = [];
+	for (const row of rows) {
+		if (seen.has(row)) {
+			continue;
+		}
+		seen.add(row);
+		unique.push(row);
+	}
+	return unique;
+}
+
+/** Marks list sections that were shortened by the display limit. */
+function appendLimitMarker(
+	lines: string[],
+	total: number,
+	shown: number,
+): void {
+	if (total > shown) {
+		lines.push("- ...");
+	}
 }
 
 /** Parses the inspect output limit option. */

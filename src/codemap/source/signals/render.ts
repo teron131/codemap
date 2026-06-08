@@ -239,7 +239,7 @@ export function appendFiles(lines: string[], rows: Row[]): void {
 	lines.push("## File Profiles");
 	for (const item of rows) {
 		lines.push(
-			`- ${item.file}: signals=${item.total}, defines=${item.defines}, imports=${item.imports_local}, exports=${item.exports}, reexports=${item.reexports_local}, decorators=${item.decorators}`,
+			`- ${item.file}: signals=${item.total}, defines=${item.defines}, local_imports=${item.imports_local}, exports=${item.exports}, reexports=${item.reexports_local}, decorators=${item.decorators}`,
 		);
 	}
 	lines.push("");
@@ -301,7 +301,7 @@ export function appendDenseFileRows(
 	}
 	for (const item of rows) {
 		lines.push(
-			`- ${item.file}: signals=${item.total}, defines=${item.defines}, imports=${item.imports_local}`,
+			`- ${item.file}: signals=${item.total}, defines=${item.defines}, local_imports=${item.imports_local}`,
 		);
 	}
 }

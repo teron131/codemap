@@ -71,6 +71,8 @@ export function buildOverviewView(
 			pythonImportEdges: relationships.pythonImportEdges ?? 0,
 			typescriptImportEdges: relationships.typescriptImportEdges ?? 0,
 			entrypointLikeFiles: relationships.entrypointLikeFiles ?? 0,
+			importCountsUnavailable: relationships.importCountsUnavailable ?? false,
+			importCountsNote: relationships.importCountsNote ?? "",
 		},
 		inventory: architecture.inventory ?? {},
 		intent: architecture.intent ?? {},

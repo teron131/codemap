@@ -56,6 +56,7 @@ export type SyntaxRecipeOptions = {
 	projectRoot?: string | undefined;
 	name?: string | undefined;
 	paths?: string[] | undefined;
+	limit?: string | number | undefined;
 	json?: boolean | undefined;
 	apply?: boolean | undefined;
 	yes?: boolean | undefined;
@@ -259,6 +260,7 @@ export function commandSyntaxRecipe(options: SyntaxRecipeOptions): number {
 	return runRecipe(root, recipe, paths, {
 		apply: Boolean(options.apply),
 		jsonOutput: Boolean(options.json),
+		limit: recipeTextLimit(options.limit),
 	});
 }
 
@@ -302,6 +304,16 @@ export function commandSyntaxRule(options: SyntaxRuleOptions): number {
 /** Resolves the project root option for syntax command handlers. */
 function resolveCommandRoot(rawRoot: string | undefined): string {
 	return path.resolve(expandUser(rawRoot ?? "."));
+}
+
+/** Parses the recipe text match limit. */
+function recipeTextLimit(value: string | number | undefined): number | null {
+	if (value === undefined) {
+		return null;
+	}
+	const parsed =
+		typeof value === "number" ? value : Number.parseInt(String(value), 10);
+	return Number.isNaN(parsed) || parsed < 0 ? null : parsed;
 }
 
 /** Expands tilde-prefixed filesystem paths. */

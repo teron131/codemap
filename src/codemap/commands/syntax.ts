@@ -169,6 +169,11 @@ export function addSyntaxRecipeParsers(command: Command): void {
 			).choices(Object.keys(SYNTAX_RECIPES).sort()),
 		)
 		.argument("[paths...]", "Project-relative target paths.")
+		.option(
+			"--limit <count>",
+			"Maximum text matches per step.",
+			parseIntegerOption,
+		)
 		.option("--context <count>", "Context lines.", parseIntegerOption, 2)
 		.option(
 			"--strictness <strictness>",

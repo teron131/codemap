@@ -1,4 +1,5 @@
 {
+	"$schema": "https://www.schemastore.org/package.json",
 	"name": "codemap",
 	"version": "0.0.0",
 	"private": true,
@@ -11,7 +12,7 @@
 		"dist/codemap"
 	],
 	"scripts": {
-		"build": "pnpm run clean && tsc -p tsconfig.build.json",
+		"build": "pnpm run clean && tsc -p tsconfig.build.json && chmod +x dist/codemap/cli.js",
 		"check": "pnpm run typecheck && biome check src test/*.ts package.json tsconfig.json tsconfig.build.json && pnpm run test",
 		"clean": "rm -rf dist",
 		"dev": "tsx src/codemap/cli.ts",
