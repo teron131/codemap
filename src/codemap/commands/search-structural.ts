@@ -128,11 +128,11 @@ export function addSearchRuleParser(command: Command): void {
 
 /** Runs explicit ast-grep pattern search and prints matches. */
 export function commandSearchMatch(options: SearchMatchOptions): number {
-	const root = resolveProjectRoot(options.projectRoot ?? ".");
+	const root = resolveProjectRoot(options.projectRoot);
 	const paths = resolveTargetPaths(root, options.paths ?? []);
 	const matches = structuralMatches(root, options.lang, options.pattern, paths);
 	if (matches === null) {
-		console.log("ast-grep-py is not installed.");
+		console.log("Unavailable: ast-grep-py not installed.");
 		return 127;
 	}
 	printSyntaxMatches(matches, { jsonOutput: Boolean(options.json) });
@@ -141,11 +141,11 @@ export function commandSearchMatch(options: SearchMatchOptions): number {
 
 /** Runs structural call-site search and prints matches. */
 export function commandSearchCalls(options: SearchCallsOptions): number {
-	const root = resolveProjectRoot(options.projectRoot ?? ".");
+	const root = resolveProjectRoot(options.projectRoot);
 	const paths = resolveTargetPaths(root, options.paths ?? []);
 	const matches = callMatches(root, options.lang, options.name, paths);
 	if (matches === null) {
-		console.log("ast-grep-py is not installed.");
+		console.log("Unavailable: ast-grep-py not installed.");
 		return 127;
 	}
 	printSyntaxMatches(matches, { jsonOutput: Boolean(options.json) });
@@ -154,7 +154,7 @@ export function commandSearchCalls(options: SearchCallsOptions): number {
 
 /** Runs read-only ast-grep YAML rule search and prints matches. */
 export function commandSearchRule(options: SearchRuleOptions): number {
-	const root = resolveProjectRoot(options.projectRoot ?? ".");
+	const root = resolveProjectRoot(options.projectRoot);
 	const paths = resolveTargetPaths(root, options.paths ?? []);
 	const rulePath = resolveProjectFile(root, options.rule);
 	const matches = searchRuleMatches(root, rulePath, paths);
@@ -173,7 +173,7 @@ export function commandSearchRule(options: SearchRuleOptions): number {
 	} else if (matches && matches.length > 0) {
 		printSyntaxMatches(matches, { jsonOutput: false });
 	} else {
-		console.log("No matches.");
+		console.log("No matches");
 	}
 	return matches && matches.length > 0 ? 0 : 1;
 }

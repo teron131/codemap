@@ -98,9 +98,7 @@ export function commandSyntaxReplace(options: SyntaxRewriteOptions): number {
 	const root = resolveCommandRoot(options.projectRoot);
 	const paths = resolveTargetPaths(root, options.paths ?? []);
 	if (options.apply && !options.yes) {
-		console.log(
-			"Refusing to write without --yes. Run without --apply to preview first.",
-		);
+		console.log("Refusing write: add --yes or preview without --apply.");
 		return 1;
 	}
 	const results = syntaxRewrite(
@@ -112,7 +110,7 @@ export function commandSyntaxReplace(options: SyntaxRewriteOptions): number {
 		{ apply: Boolean(options.apply) },
 	);
 	if (results === null) {
-		console.log("ast-grep-py is not installed.");
+		console.log("Unavailable: ast-grep-py not installed.");
 		return 127;
 	}
 	printRewriteResults(results);
@@ -196,7 +194,7 @@ export function commandSyntaxPreview(options: SyntaxPreviewOptions): number {
 			{ apply: false },
 		);
 		if (results === null) {
-			console.log("ast-grep-py is not installed.");
+			console.log("Unavailable: ast-grep-py not installed.");
 			return 127;
 		}
 		printRewriteResults(results);
@@ -253,9 +251,7 @@ export function commandSyntaxRecipe(options: SyntaxRecipeOptions): number {
 		return 1;
 	}
 	if (options.apply && !options.yes) {
-		console.log(
-			"Refusing to write without --yes. Run without --apply to preview first.",
-		);
+		console.log("Refusing write: add --yes or preview without --apply.");
 		return 1;
 	}
 	const root = resolveCommandRoot(options.projectRoot);
@@ -273,9 +269,7 @@ export function commandSyntaxRule(options: SyntaxRuleOptions): number {
 	const displayRulePath = expandUser(options.rule);
 	const rulePath = path.resolve(displayRulePath);
 	if (options.apply && !options.yes) {
-		console.log(
-			"Refusing to write without --yes. Run without --apply to preview first.",
-		);
+		console.log("Refusing write: add --yes or preview without --apply.");
 		return 1;
 	}
 	const [matches, rewrites] = ruleResults(root, rulePath, paths, {
@@ -298,7 +292,7 @@ export function commandSyntaxRule(options: SyntaxRuleOptions): number {
 	} else if (rewrites && rewrites.length > 0) {
 		printRewriteResults(rewrites);
 	} else {
-		console.log("No matches.");
+		console.log("No matches");
 	}
 	return (matches && matches.length > 0) || (rewrites && rewrites.length > 0)
 		? 0

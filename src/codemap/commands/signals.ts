@@ -9,6 +9,7 @@ import {
 	runSignalsExport,
 	SIGNAL_OUTPUT_ROW_LIMIT,
 	SIGNAL_SECTION_CHOICES,
+	SIGNAL_TOP_ROW_LIMIT,
 	selectPayloadSection,
 } from "../source/signals/index.js";
 import { addProjectRootArgument } from "./options.js";
@@ -65,7 +66,7 @@ export function commandSignals(
 		return 2;
 	}
 	const root = resolveProjectRoot(
-		options.projectRoot ?? rootOptions.projectRoot ?? ".",
+		options.projectRoot ?? rootOptions.projectRoot,
 	);
 	const scan = runScan(root, { persist: false });
 	if (scan.files.length > DETAILED_ANALYSIS_FILE_LIMIT) {
@@ -129,7 +130,7 @@ function lightweightSignalPayload(files: ScanEntry[]): Record<string, unknown> {
 			broadNamePools: [],
 		},
 		files: {
-			denseFiles,
+			denseFiles: denseFiles.slice(0, SIGNAL_TOP_ROW_LIMIT),
 		},
 	};
 	return {

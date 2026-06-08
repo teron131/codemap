@@ -18,7 +18,7 @@ export function buildParser(): Command {
 		.addHelpCommand(false)
 		.enablePositionalOptions()
 		.exitOverride()
-		.option("--project-root <path>", PROJECT_ROOT_HELP, ".");
+		.option("--project-root <path>", PROJECT_ROOT_HELP);
 
 	addSummaryParser(program);
 	addSignalsParser(program);

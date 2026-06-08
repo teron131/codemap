@@ -4,8 +4,10 @@ import type { Command } from "commander";
 import { resolveProjectRoot, semanticIndexPath } from "../common.js";
 import {
 	renderGraphMatchLines,
+	type SourceFallbackGroup,
 	type SourceMatch,
 	searchTargetCard,
+	sourceFallbackMatches,
 	sourceMatches,
 } from "../search/index.js";
 import {
@@ -80,7 +82,7 @@ export async function commandSearch(
 	const searchText = searchArgs.join(" ");
 	const limit = searchLimit(options.limit);
 	const root = resolveProjectRoot(
-		options.projectRoot ?? rootOptions.projectRoot ?? ".",
+		options.projectRoot ?? rootOptions.projectRoot,
 	);
 	console.log(`Search: ${searchText}`);
 	if (options.graph) {
@@ -88,7 +90,16 @@ export async function commandSearch(
 		console.log(renderGraphMatchLines(graph, searchText, limit).join("\n"));
 	} else {
 		const matches = sourceMatches(root, searchText, { limit });
-		printSourceMatches(matches);
+		if (matches.length === 0) {
+			const fallbackGroups = sourceFallbackMatches(root, searchText, { limit });
+			if (fallbackGroups.length > 0) {
+				printSourceFallbackMatches(fallbackGroups);
+			} else {
+				printSourceMatches(matches);
+			}
+		} else {
+			printSourceMatches(matches);
+		}
 		const card = searchTargetCard(root, searchText, matches, { limit });
 		if (card !== null) {
 			console.log("");
@@ -115,6 +126,28 @@ export function printSourceMatches(matches: SourceMatch[]): void {
 	}
 }
 
+/** Prints partial source matches for a no-hit phrase query. */
+export function printSourceFallbackMatches(
+	groups: SourceFallbackGroup[],
+): void {
+	if (groups.length === 0) {
+		return;
+	}
+	console.log("\nNo matches, fallback to partial matches:");
+	for (const group of groups) {
+		console.log(`  ${group.term}:`);
+		for (const item of group.matches) {
+			console.log(
+				`    - ${item.engine} ${item.filePath}:${item.line}:${item.column} [${item.kind}]`,
+			);
+			console.log(`        ${item.text}`);
+		}
+		if (group.truncated) {
+			console.log("    ...");
+		}
+	}
+}
+
 /** Prints semantic search results or setup guidance. */
 export async function printSemanticMatches(
 	root: string,
@@ -125,7 +158,7 @@ export async function printSemanticMatches(
 		if (!semanticIndexExists(root)) {
 			console.log("\nSemantic card matches:");
 			console.log(
-				`  unavailable: semantic index not found at ${semanticIndexPath(root)}`,
+				`  unavailable: no semantic index: ${semanticIndexPath(root)}`,
 			);
 			console.log(`  run: codemap semantic init --project-root ${root}`);
 			return 1;

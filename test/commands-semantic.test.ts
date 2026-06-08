@@ -53,7 +53,7 @@ describe("semantic command handlers", () => {
 
 		expect(commandSemanticStatus({ projectRoot: workDir })).toBe(1);
 		expect(logLines()).toEqual([
-			`No semantic index at ${semanticIndexPath(workDir)}`,
+			`No semantic index: ${semanticIndexPath(workDir)}`,
 		]);
 
 		logSpy.mockClear();
@@ -75,13 +75,13 @@ describe("semantic command handlers", () => {
 		]);
 	});
 
-	it("prints the Python setup message when no embedding key is configured", async () => {
+	it("prints the embedding setup message when no key is configured", async () => {
 		vi.stubEnv("GEMINI_API_KEY", "");
 		await expect(commandSemanticInit({ projectRoot: workDir })).resolves.toBe(
 			1,
 		);
 		expect(logLines()).toEqual([
-			"Semantic index requires embedding setup. Set GEMINI_API_KEY in the environment or project .env.",
+			"Missing embedding setup: set GEMINI_API_KEY in env or .env.",
 		]);
 	});
 });
