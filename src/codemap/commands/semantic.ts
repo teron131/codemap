@@ -69,13 +69,13 @@ export async function commandSemanticInit(
 	rootOptions: RootOptions = {},
 ): Promise<number> {
 	const root = resolveProjectRoot(
-		options.projectRoot ?? rootOptions.projectRoot ?? ".",
+		options.projectRoot ?? rootOptions.projectRoot,
 	);
 	try {
 		const config = loadEmbeddingConfig(root);
 		if (config === null) {
 			console.log(
-				"Semantic index requires embedding setup. Set GEMINI_API_KEY in the environment or project .env.",
+				"Missing embedding setup: set GEMINI_API_KEY in env or .env.",
 			);
 			return 1;
 		}
@@ -91,7 +91,7 @@ export async function commandSemanticInit(
 		return 0;
 	} catch (error) {
 		if (error instanceof EmbeddingSearchError) {
-			console.log(`Semantic index unavailable: ${error.message}`);
+			console.log(`Semantic unavailable: ${error.message}`);
 			return 1;
 		}
 		throw error;
@@ -104,10 +104,10 @@ export function commandSemanticStatus(
 	rootOptions: RootOptions = {},
 ): number {
 	const root = resolveProjectRoot(
-		options.projectRoot ?? rootOptions.projectRoot ?? ".",
+		options.projectRoot ?? rootOptions.projectRoot,
 	);
 	if (!semanticIndexExists(root)) {
-		console.log(`No semantic index at ${semanticIndexPath(root)}`);
+		console.log(`No semantic index: ${semanticIndexPath(root)}`);
 		return 1;
 	}
 	const index = loadSemanticIndex(root);

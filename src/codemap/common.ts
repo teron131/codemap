@@ -75,7 +75,7 @@ export function fileHash(filePath: string): string {
 
 /** Resolves and validates the project root path. */
 export function resolveProjectRoot(raw: string | null | undefined): string {
-	let root = expandUser(raw ?? ".");
+	let root = raw == null ? nearestGitRoot(process.cwd()) : expandUser(raw);
 	if (!path.isAbsolute(root)) {
 		root = path.resolve(process.cwd(), root);
 	}
@@ -83,6 +83,18 @@ export function resolveProjectRoot(raw: string | null | undefined): string {
 		throw new Error(`Project root is not a directory: ${root}`);
 	}
 	return root;
+}
+
+/** Finds the nearest git root for the current directory, falling back to cwd. */
+function nearestGitRoot(cwd: string): string {
+	const result = spawnSync("git", ["rev-parse", "--show-toplevel"], {
+		cwd,
+		encoding: "utf8",
+	});
+	if (result.status === 0 && result.stdout.trim()) {
+		return result.stdout.trim();
+	}
+	return cwd;
 }
 
 /** Locates the hidden codemap artifact directory under a project root. */

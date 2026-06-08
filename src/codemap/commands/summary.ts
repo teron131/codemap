@@ -39,7 +39,7 @@ export function commandSummary(
 	rootOptions: RootOptions = {},
 ): number {
 	const root = resolveProjectRoot(
-		options.projectRoot ?? rootOptions.projectRoot ?? ".",
+		options.projectRoot ?? rootOptions.projectRoot,
 	);
 	const scan = runScan(root, { persist: false });
 	const graph =

@@ -200,6 +200,8 @@ export function callEdgesForFunction(
 			!stripped ||
 			stripped.startsWith("def ") ||
 			stripped.startsWith("async def ") ||
+			stripped.startsWith("function ") ||
+			/^export\s+(?:async\s+)?function\b/.test(stripped) ||
 			stripped.startsWith("class ") ||
 			stripped.startsWith("import ") ||
 			stripped.startsWith("from ")
@@ -250,12 +252,34 @@ export function typescriptStructure(
 		startLine: span.startLine,
 		endLine: span.startLine + span.span - 1,
 	}));
+	let lines: string[] = [];
+	try {
+		lines = splitLines(readFileSync(filePath, "utf8"));
+	} catch {
+		lines = [];
+	}
+	const callGraph =
+		lines.length === 0
+			? []
+			: functions.flatMap((span) =>
+					callEdgesForFunction(
+						{
+							kind: "function",
+							name: span.name,
+							startLine: span.startLine,
+							lineIndex: span.startLine - 1,
+							endLine: span.endLine,
+							indent: 0,
+						},
+						lines,
+					),
+				);
 	return {
 		path: relPath,
 		functions,
 		classes: [],
 		exports: fileMetrics.functionNames.map((name) => ({ name })),
-		callGraph: [],
+		callGraph,
 	};
 }
 

@@ -48,7 +48,7 @@ describe("search command handler", () => {
 		expect(output).toContain("[symbol]");
 		expect(output).toContain("\nSemantic card matches:");
 		expect(output).toContain(
-			`  unavailable: semantic index not found at ${semanticIndexPath(workDir)}`,
+			`  unavailable: no semantic index: ${semanticIndexPath(workDir)}`,
 		);
 		expect(output).toContain(
 			`  run: codemap semantic init --project-root ${workDir}`,
@@ -60,6 +60,80 @@ describe("search command handler", () => {
 		expect(logLines()).toEqual([
 			"Search requires text or a search subcommand: match, calls, or rule.",
 		]);
+	});
+
+	it("prints partial fallback matches when the full phrase misses", async () => {
+		writeFileSync(
+			path.join(workDir, "package.json"),
+			'{ "artifact": true }\n',
+			"utf8",
+		);
+		writeFileSync(path.join(workDir, "README.md"), "artifact docs\n", "utf8");
+		writeFileSync(
+			path.join(workDir, "src", "pdf.ts"),
+			[
+				"export function writeManifest() {",
+				"  return 'artifact manifest source path';",
+				"}",
+				"",
+				"export function matchRows() {",
+				"  return 'match result rows';",
+				"}",
+			].join("\n"),
+			"utf8",
+		);
+
+		await expect(
+			commandSearch(["where", "artifacts", "matches", "saved"], {
+				projectRoot: workDir,
+				limit: "3",
+			}),
+		).resolves.toBe(0);
+
+		const output = logLines().join("\n");
+		expect(output).toContain("Search: where artifacts matches saved");
+		expect(output).not.toContain("\nSource matches:");
+		expect(output).toContain("\nNo matches, fallback to partial matches:");
+		expect(output).toContain("  artifact:");
+		expect(output).toContain("src/pdf.ts");
+		expect(output).not.toContain("package.json");
+		expect(output).toContain("artifact manifest source path");
+		expect(output).toContain("    ...");
+		expect(output).toContain("  match:");
+		expect(output).not.toContain("  matche:");
+	});
+
+	it("prints graph search relationships without internal edge syntax", async () => {
+		writeFileSync(
+			path.join(workDir, "src", "app.ts"),
+			[
+				"import { helper } from './helper';",
+				"export function run(value: string) {",
+				"  return helper(value);",
+				"}",
+			].join("\n"),
+			"utf8",
+		);
+		writeFileSync(
+			path.join(workDir, "src", "helper.ts"),
+			"export function helper(value: string) {\n  return value;\n}\n",
+			"utf8",
+		);
+
+		await expect(
+			commandSearch(["helper"], {
+				graph: true,
+				projectRoot: workDir,
+				limit: "2",
+			}),
+		).resolves.toBe(0);
+
+		const output = logLines().join("\n");
+		expect(output).toContain("\nRelationship matches:");
+		expect(output).toContain("helper in src/helper.ts");
+		expect(output).toContain("imported by: src/app.ts");
+		expect(output).not.toContain("--imports-->");
+		expect(output).not.toContain("function:src/");
 	});
 });
 

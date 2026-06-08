@@ -118,7 +118,7 @@ export function commandArtifactsCreate(
 	rootOptions: RootOptions = {},
 ): number {
 	const root = resolveProjectRoot(
-		options.projectRoot ?? rootOptions.projectRoot ?? ".",
+		options.projectRoot ?? rootOptions.projectRoot,
 	);
 	const result = createArtifacts(root);
 	console.log(result.message);
@@ -132,11 +132,11 @@ export function commandArtifactsStatus(
 	rootOptions: RootOptions = {},
 ): number {
 	const root = resolveProjectRoot(
-		options.projectRoot ?? rootOptions.projectRoot ?? ".",
+		options.projectRoot ?? rootOptions.projectRoot,
 	);
 	const currentGraphPath = graphPath(root);
 	if (!existsSync(currentGraphPath)) {
-		console.log(`No artifacts at ${currentGraphPath}`);
+		console.log(`No artifacts: ${currentGraphPath}`);
 		return 1;
 	}
 	const graph = readJson(currentGraphPath) as Record<string, unknown>;
@@ -166,7 +166,7 @@ export function commandArtifactsUpdate(
 	rootOptions: RootOptions = {},
 ): number {
 	const root = resolveProjectRoot(
-		options.projectRoot ?? rootOptions.projectRoot ?? ".",
+		options.projectRoot ?? rootOptions.projectRoot,
 	);
 	const result = updateArtifacts(root);
 	console.log(result.message);
@@ -180,13 +180,13 @@ export function commandArtifactsView(
 	rootOptions: RootOptions = {},
 ): number {
 	const root = resolveProjectRoot(
-		options.projectRoot ?? rootOptions.projectRoot ?? ".",
+		options.projectRoot ?? rootOptions.projectRoot,
 	);
 	if (TEXT_VIEW_FILES[viewName]) {
 		const filePath = path.join(viewsDir(root), TEXT_VIEW_FILES[viewName]);
 		if (!existsSync(filePath)) {
 			throw new Error(
-				`No ${viewName} artifact view found. Run artifacts create first: ${filePath}`,
+				`No ${viewName} view: ${filePath}\nRun: codemap artifacts create --project-root ${root}`,
 			);
 		}
 		console.log(readFileSync(filePath, "utf8").trim());
@@ -196,7 +196,7 @@ export function commandArtifactsView(
 		const filePath = path.join(viewsDir(root), "index.html");
 		if (!existsSync(filePath)) {
 			throw new Error(
-				`No HTML artifact report found. Run artifacts create first: ${filePath}`,
+				`No HTML report: ${filePath}\nRun: codemap artifacts create --project-root ${root}`,
 			);
 		}
 		console.log(filePath);
@@ -205,14 +205,14 @@ export function commandArtifactsView(
 	const filePath = path.join(viewsDir(root), `${viewName}.json`);
 	if (!existsSync(filePath)) {
 		throw new Error(
-			`No ${viewName} artifact view found. Run artifacts create first: ${filePath}`,
+			`No ${viewName} view: ${filePath}\nRun: codemap artifacts create --project-root ${root}`,
 		);
 	}
 	const payload = readJson(filePath);
 	const text = stringifyArtifactJson(payload, {
 		pretty: Boolean(options.pretty),
 	});
-	console.log(text.slice(0, maxChars(options.maxChars)));
+	console.log(truncateWithEllipsis(text, maxChars(options.maxChars)));
 	return 0;
 }
 
@@ -224,6 +224,17 @@ function maxChars(value: string | number | undefined): number {
 	const parsed =
 		typeof value === "number" ? value : Number.parseInt(String(value), 10);
 	return Number.isNaN(parsed) ? 6000 : parsed;
+}
+
+/** Trims artifact text and marks the cut visibly. */
+function truncateWithEllipsis(text: string, limit: number): string {
+	if (limit < 0 || text.length <= limit) {
+		return text;
+	}
+	if (limit <= 3) {
+		return "...".slice(0, limit);
+	}
+	return `${text.slice(0, limit - 3)}...`;
 }
 
 /** Reads a record field from untrusted JSON-like data. */

@@ -54,7 +54,7 @@ export function commandInspect(
 	rootOptions: RootOptions = {},
 ): number {
 	const root = resolveProjectRoot(
-		options.projectRoot ?? rootOptions.projectRoot ?? ".",
+		options.projectRoot ?? rootOptions.projectRoot,
 	);
 	const limit = inspectLimit(options.limit);
 	if (isDirectoryTarget(root, target)) {
@@ -71,9 +71,9 @@ export function commandInspect(
 		limit,
 	});
 	if (inspection === null) {
-		console.log(`No file or symbol matched: ${target}`);
+		console.log(`No match: ${target}`);
 		console.log(
-			`Try: codemap search --project-root ${root} ${pythonRepr(target)}`,
+			`Run: codemap search --project-root ${root} ${pythonRepr(target)}`,
 		);
 		return 1;
 	}
@@ -108,8 +108,7 @@ function lightweightDirectoryInspection(
 		`# ${title}/`,
 		"",
 		`Directory profile: ${rows.length} scanned files.`,
-		"Type: directory | Complexity: aggregate",
-		`Large-repo mode: detailed graph skipped above ${DETAILED_ANALYSIS_FILE_LIMIT} files.`,
+		`Fallback: detailed graph skipped above ${DETAILED_ANALYSIS_FILE_LIMIT} files.`,
 	];
 	const denseRows = rows
 		.slice()

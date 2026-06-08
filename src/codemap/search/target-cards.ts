@@ -27,7 +27,7 @@ export function searchTargetCard(
 	const fileCount = scan.files.length;
 	if (fileCount > AUTO_TARGET_CARD_FILE_LIMIT) {
 		const command = `codemap inspect --project-root ${shQuote(root)} ${shQuote(target)}`;
-		return `Focused target skipped: ${fileCount} files; run \`${command}\` when you want the relationship profile.`;
+		return `Focused target skipped: ${fileCount} files\nRun: ${command}`;
 	}
 	const [graph, metrics] = currentTreeInspectGraph(root, target);
 	const inspection = renderInspection(root, graph, metrics, target, { limit });

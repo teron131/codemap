@@ -14,8 +14,6 @@ import {
 } from "./profiles.js";
 import { inspectCandidates, nodeLabel, normalizeTarget } from "./targets.js";
 
-type Row = Record<string, unknown>;
-
 /** Renders the opposite endpoint and direction for a graph edge. */
 export function edgeEndpoint(
 	edge: GraphEdge,
@@ -25,8 +23,22 @@ export function edgeEndpoint(
 	const otherId = String(edge.source === nodeId ? edge.target : edge.source);
 	const other = nodesById[otherId];
 	const label = other ? nodeLabel(other) : otherId;
-	const direction = edge.source === nodeId ? "out" : "in";
-	return `${direction} ${edge.type}: ${label}`;
+	return `${edgeRelationshipLabel(edge, nodeId)}: ${label}`;
+}
+
+/** Names a graph edge direction in CLI-friendly language. */
+function edgeRelationshipLabel(edge: GraphEdge, nodeId: string): string {
+	const outgoing = edge.source === nodeId;
+	if (edge.type === "imports") {
+		return outgoing ? "imports" : "imported by";
+	}
+	if (edge.type === "calls") {
+		return outgoing ? "calls" : "called by";
+	}
+	if (edge.type === "contains") {
+		return outgoing ? "contains" : "in";
+	}
+	return outgoing ? String(edge.type) : `${String(edge.type)} by`;
 }
 
 /** Appends incoming or outgoing graph edges to inspection text. */
@@ -131,18 +143,7 @@ export function renderInspection(
 		(graph.nodes ?? []).map((item) => [String(item.id), item]),
 	) as Record<string, GraphNode | undefined>;
 	const relPath = String(node.filePath ?? "");
-	const lines = [
-		`# ${nodeLabel(node)}`,
-		"",
-		String(node.summary ?? "").trim(),
-		`Type: ${String(node.type)} | Complexity: ${String(node.complexity ?? "unknown")}`,
-	];
-	if (node.metrics) {
-		const nodeMetrics = node.metrics as Row;
-		lines.push(
-			`Lines: ${String(nodeMetrics.lines ?? 0)} | Fan-out: ${String(nodeMetrics.fanOut ?? 0)}`,
-		);
-	}
+	const lines = [`# ${nodeLabel(node)}`, "", String(node.summary ?? "").trim()];
 
 	appendSymbolProfile(lines, node);
 	appendRelatedSections(lines, graph, nodeId, nodesById, { limit });
@@ -150,7 +151,10 @@ export function renderInspection(
 		appendFileProfile(lines, fileMetricsForPath(metrics, relPath), { limit });
 	}
 
-	if (candidates.length > 1) {
+	if (
+		candidates.length > 1 &&
+		["function", "class", "variable"].includes(String(node.type ?? ""))
+	) {
 		lines.push("");
 		lines.push("## Other Matches");
 		for (const item of candidates.slice(1, limit)) {

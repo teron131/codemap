@@ -178,7 +178,7 @@ export function runRecipeStep(
 			{ apply },
 		);
 		if (rewriteResults === null) {
-			console.log("ast-grep-py is not installed.");
+			console.log("Unavailable: ast-grep-py not installed.");
 			return [127, null];
 		}
 		const returncode = rewriteResults.length > 0 ? 0 : 1;
@@ -200,7 +200,7 @@ export function runRecipeStep(
 
 	const matches = syntaxMatches(root, step.lang, step.pattern, paths);
 	if (matches === null) {
-		console.log("ast-grep-py is not installed.");
+		console.log("Unavailable: ast-grep-py not installed.");
 		return [127, null];
 	}
 	const returncode = matches.length > 0 ? 0 : 1;
@@ -282,13 +282,13 @@ export function printInlineRuleResult(
 	rewrites: SyntaxRewriteResult[] | null,
 ): void {
 	console.log(`# ${recipe.name}`);
-	console.log("- backend: ast-grep inline rule");
+	console.log("- ast-grep inline rule");
 	if (matches && matches.length > 0) {
 		printSyntaxMatches(matches, { jsonOutput: false });
 	} else if (rewrites && rewrites.length > 0) {
 		printRewriteResults(rewrites);
 	} else {
-		console.log("No matches.");
+		console.log("No matches");
 	}
 }
 
@@ -305,8 +305,7 @@ export function printRecipeStepResult(
 	},
 ): void {
 	console.log(`# ${recipe.name}: ${step.name}`);
-	console.log(`- language: ${step.lang}`);
-	console.log(`- pattern: ${step.pattern}`);
+	console.log(`- ${step.lang}: ${step.pattern}`);
 	if (step.rewrite) {
 		console.log(`- rewrite: ${step.rewrite}`);
 	}
@@ -315,7 +314,7 @@ export function printRecipeStepResult(
 	} else if (rewrites && rewrites.length > 0) {
 		printRewriteResults(rewrites);
 	} else {
-		console.log("No matches.");
+		console.log("No matches");
 	}
 }
 

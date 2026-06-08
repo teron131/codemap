@@ -111,15 +111,11 @@ export function appendFileProfileRow(lines: string[], rows: MetricRow[]): void {
 		.slice(0, 6)
 		.map((sample) => String(sample))
 		.join(", ");
-	const profileParts = [
-		`defines: ${String(profile.defines)}`,
-		`imports: ${String(profile.imports_local)}`,
-		`exports: ${String(profile.exports)}`,
-	];
 	lines.push("");
 	lines.push("## File Profile");
-	lines.push(`- total signals: ${String(profile.total)}`);
-	lines.push(`- ${profileParts.join(", ")}`);
+	lines.push(
+		`- signals=${String(profile.total)}, defines=${String(profile.defines)}, imports=${String(profile.imports_local)}, exports=${String(profile.exports)}`,
+	);
 	if (samples) {
 		lines.push(`- samples: ${samples}`);
 	}
@@ -155,14 +151,7 @@ export function renderVariableProfile(
 	if (rows.length === 0) {
 		return null;
 	}
-	const lines = [
-		`# ${target}`,
-		"",
-		"Variable profile.",
-		"Type: variable | Complexity: unknown",
-		"",
-		"## Definitions",
-	];
+	const lines = [`# ${target}`, "", "Variable profile.", "", "## Definitions"];
 	for (const item of rows.slice(0, limit)) {
 		const scope = item.moduleLevel ? "module" : "local";
 		lines.push(
@@ -203,9 +192,7 @@ export function renderDirectoryProfile(
 	const lines = [
 		`# ${title}/`,
 		"",
-		`Directory profile: ${rows.length} scanned files.`,
-		"Type: directory | Complexity: aggregate",
-		`Defines: ${totalDefines} | Local imports: ${totalImports}`,
+		`Directory profile: ${rows.length} scanned files; defines ${totalDefines}; local imports ${totalImports}.`,
 	];
 	const denseRows = rows
 		.slice()

@@ -11,9 +11,9 @@ export function printSyntaxMatches(
 		return;
 	}
 	for (const match of matches) {
-		console.log(
-			`${match.filePath}:${match.line}:${match.column}: ${match.text}`,
-		);
+		const lines = match.text.trimEnd().split(/\r?\n/);
+		const text = lines.length > 1 ? `${lines[0] ?? ""} ...` : (lines[0] ?? "");
+		console.log(`${match.filePath}:${match.line}:${match.column}: ${text}`);
 	}
 }
 

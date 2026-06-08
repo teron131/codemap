@@ -285,7 +285,7 @@ export function syntaxDebugPayload(
 				note: "Codemap debug reports parse summary; run raw ast-grep only when you need full CST/AST dumps.",
 			};
 		}
-		throw new Error("ast-grep-py is not installed");
+		throw new Error("Unavailable: ast-grep-py not installed.");
 	}
 	return {
 		language,

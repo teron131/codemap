@@ -162,10 +162,11 @@ export function renderSummaryText(
 	const relationships = recordValue(overview.relationships);
 	const inventory = recordValue(overview.inventory);
 	const intent = recordValue(overview.intent);
+	const fileCount = Number(counts.files ?? 0);
 	const lines = [
 		`# ${String(project.name ?? "project")}`,
 		"",
-		`${String(counts.files ?? 0)} files analyzed from the current tree.`,
+		`${fileCount} ${fileCount === 1 ? "file" : "files"} analyzed from the current tree.`,
 		"",
 		"## Source Shape",
 		`- Python imports: ${String(relationships.pythonImportEdges ?? 0)}`,
