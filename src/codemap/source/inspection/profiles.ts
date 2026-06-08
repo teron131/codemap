@@ -65,6 +65,7 @@ export function appendFileProfile(
 		for (const item of fileMetrics.longFunctions.slice(0, limit)) {
 			lines.push(`- ${String(item.identifier)}: ${String(item.count)} lines`);
 		}
+		appendLimitMarker(lines, fileMetrics.longFunctions.length, limit);
 	}
 	appendReferenceRows(
 		lines,
@@ -99,6 +100,7 @@ export function appendReferenceRows(
 			`- ${String(identifier)}: ${String(item.count ?? 0)} references`,
 		);
 	}
+	appendLimitMarker(lines, rows.length, limit);
 }
 
 /** Appends one file-profile row to inspection output. */
@@ -114,7 +116,7 @@ export function appendFileProfileRow(lines: string[], rows: MetricRow[]): void {
 	lines.push("");
 	lines.push("## File Profile");
 	lines.push(
-		`- signals=${String(profile.total)}, defines=${String(profile.defines)}, imports=${String(profile.imports_local)}, exports=${String(profile.exports)}`,
+		`- signals=${String(profile.total)}, defines=${String(profile.defines)}, local_imports=${String(profile.imports_local)}, exports=${String(profile.exports)}`,
 	);
 	if (samples) {
 		lines.push(`- samples: ${samples}`);
@@ -158,6 +160,7 @@ export function renderVariableProfile(
 			`- ${String(item.identifier)}: line ${String(item.line)}, ${scope}`,
 		);
 	}
+	appendLimitMarker(lines, rows.length, limit);
 	const rowFiles = new Set(rows.map((item) => item.file));
 	const fileRows = arrayRows(metrics.fileProfiles).filter((row) =>
 		rowFiles.has(row.file),
@@ -206,9 +209,10 @@ export function renderDirectoryProfile(
 		lines.push("## Dense Files");
 		for (const item of denseRows.slice(0, limit)) {
 			lines.push(
-				`- ${String(item.file)}: signals=${String(item.total)}, defines=${String(item.defines)}, imports=${String(item.imports_local)}`,
+				`- ${String(item.file)}: signals=${String(item.total)}, defines=${String(item.defines)}, local_imports=${String(item.imports_local)}`,
 			);
 		}
+		appendLimitMarker(lines, denseRows.length, limit);
 	}
 	const [incoming, outgoing] = importBoundaryRows(
 		graph,
@@ -228,6 +232,7 @@ export function renderDirectoryProfile(
 			.slice(0, limit)) {
 			lines.push(`- ${String(item.file)}`);
 		}
+		appendLimitMarker(lines, rows.length, limit);
 	}
 	return lines.join("\n").trim();
 }
@@ -258,6 +263,17 @@ export function appendBoundaryRows(
 	lines.push(`## ${title}`);
 	for (const row of rows) {
 		lines.push(`- ${row}`);
+	}
+}
+
+/** Marks list sections that were shortened by the display limit. */
+function appendLimitMarker(
+	lines: string[],
+	total: number,
+	shown: number,
+): void {
+	if (total > shown) {
+		lines.push("- ...");
 	}
 }
 

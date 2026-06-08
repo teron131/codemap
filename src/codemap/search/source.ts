@@ -86,11 +86,11 @@ const SEARCH_STOP_WORDS = new Set([
 export function sourceMatches(
 	root: string,
 	searchText: string,
-	{ limit }: { limit: number },
+	{ limit, textOnly = false }: { limit: number; textOnly?: boolean },
 ): SourceMatch[] {
 	const matches: SourceMatch[] = [];
 	const seen = new Set<string>();
-	if (IDENTIFIER_RE.test(searchText)) {
+	if (!textOnly && IDENTIFIER_RE.test(searchText)) {
 		for (const sourceMatch of astGrepSymbolMatches(root, searchText, {
 			limit,
 		})) {
@@ -115,20 +115,20 @@ export function sourceMatches(
 export function sourceFallbackMatches(
 	root: string,
 	searchText: string,
-	{ limit }: { limit: number },
+	{ limit, textOnly = false }: { limit: number; textOnly?: boolean },
 ): SourceFallbackGroup[] {
 	const groups: SourceFallbackGroup[] = [];
 	const seenMatches = new Set<string>();
 	for (const term of fallbackTerms(searchText).slice(0, FALLBACK_TERM_LIMIT)) {
 		const matches: SourceMatch[] = [];
-		const candidates = rankFallbackMatches(
-			sourceMatches(root, term, {
-				limit: Math.max(
-					limit * FALLBACK_CANDIDATE_MULTIPLIER,
-					FALLBACK_TERM_LIMIT,
-				),
-			}),
+		const candidateLimit = Math.max(
+			limit * FALLBACK_CANDIDATE_MULTIPLIER,
+			FALLBACK_TERM_LIMIT,
 		);
+		const candidatesForTerm = textOnly
+			? ripgrepMatches(root, term, { limit: candidateLimit })
+			: sourceMatches(root, term, { limit: candidateLimit });
+		const candidates = rankFallbackMatches(candidatesForTerm);
 		for (const match of candidates) {
 			appendMatch(matches, seenMatches, match, {
 				limit: FALLBACK_MATCHES_PER_TERM,

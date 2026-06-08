@@ -23,7 +23,12 @@ beforeEach(() => {
 
 afterEach(() => {
 	logSpy.mockRestore();
-	rmSync(workDir, { recursive: true, force: true });
+	rmSync(workDir, {
+		recursive: true,
+		force: true,
+		maxRetries: 3,
+		retryDelay: 10,
+	});
 });
 
 describe("search command handler", () => {
@@ -102,6 +107,68 @@ describe("search command handler", () => {
 		expect(output).toContain("  match:");
 		expect(output).not.toContain("  matche:");
 	});
+
+	it("uses text-only partial fallback for large repositories", async () => {
+		mkdirSync(path.join(workDir, "bulk"), { recursive: true });
+		for (let index = 0; index < 5001; index += 1) {
+			writeFileSync(
+				path.join(workDir, "bulk", `filler-${index}.ts`),
+				`export const filler${index} = ${index};\n`,
+				"utf8",
+			);
+		}
+		writeFileSync(
+			path.join(workDir, "src", "policy.ts"),
+			[
+				"export function resolveAttestation() {",
+				"  return 'attestation source';",
+				"}",
+			].join("\n"),
+			"utf8",
+		);
+
+		await expect(
+			commandSearch(["policy", "attestation", "mismatch"], {
+				projectRoot: workDir,
+				limit: "3",
+			}),
+		).resolves.toBe(0);
+
+		const output = logLines().join("\n");
+		expect(output).toContain("\nNo matches, fallback to partial matches:");
+		expect(output).toContain(
+			"  Fallback: large repo; structural partial search skipped.",
+		);
+		expect(output).toContain("  attestation:");
+		expect(output).toContain("    - rg ./src/policy.ts:");
+		expect(output).not.toContain("ast-grep");
+	}, 10000);
+
+	it("skips structural search for large repository identifier misses", async () => {
+		mkdirSync(path.join(workDir, "bulk"), { recursive: true });
+		for (let index = 0; index < 5001; index += 1) {
+			writeFileSync(
+				path.join(workDir, "bulk", `filler-${index}.ts`),
+				`export const filler${index} = ${index};\n`,
+				"utf8",
+			);
+		}
+
+		await expect(
+			commandSearch(["definitelyNoSuchIdentifierXyz"], {
+				projectRoot: workDir,
+				limit: "3",
+			}),
+		).resolves.toBe(0);
+
+		const output = logLines().join("\n");
+		expect(output).toContain("\nSource matches:");
+		expect(output).toContain(
+			"  Fallback: large repo; structural search skipped.",
+		);
+		expect(output).toContain("  none");
+		expect(output).not.toContain("ast-grep");
+	}, 10000);
 
 	it("prints graph search relationships without internal edge syntax", async () => {
 		writeFileSync(

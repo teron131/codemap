@@ -157,9 +157,18 @@ export function buildViews(
 	const nodes = graph.nodes;
 	const edges = graph.edges;
 	const layers = buildLayers(nodes);
-	const likelyEntries = buildLikelyEntries(nodes, edges);
+	let likelyEntries = buildLikelyEntries(nodes, edges);
 	const metrics = signalMetrics(graph.evidence.codeSignals ?? {});
-	const relationships = relationshipCountsFromGraph(nodes, edges);
+	const relationships: Row = relationshipCountsFromGraph(nodes, edges);
+	const importMapEvidence = recordValue(graph.evidence.importMap);
+	if (importMapEvidence.mode === "lightweight-summary") {
+		relationships.importCountsUnavailable = true;
+		relationships.importCountsNote = importMapEvidence.reason ?? "";
+		likelyEntries = likelyEntries.map((entry) => ({
+			...entry,
+			description: "Fallback entry candidate; detailed graph skipped.",
+		}));
+	}
 	const inventory = buildInventoryView(graph.stats, nodes);
 	const intent = buildIntentView(root, likelyEntries);
 	const refresh = refreshSummary ?? {};
