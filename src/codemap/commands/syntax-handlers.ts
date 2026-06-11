@@ -6,11 +6,14 @@ import {
 	matchJson,
 	printRewriteResults,
 	printSyntaxMatches,
+	renameIdentifiers,
 	resolveProjectFile,
 	rewriteJson,
 	ruleResults,
+	type SyntaxRewriteResult,
 	syntaxDebugPayload,
 	syntaxRewrite,
+	targetFiles,
 } from "../ast-grep/index.js";
 import {
 	canApply,
@@ -24,10 +27,17 @@ export const CALL_TARGET_RE =
 	/^[A-Za-z_$][A-Za-z0-9_$]*(\.[A-Za-z_$][A-Za-z0-9_$]*)*$/;
 export const DEBUG_FORMAT_CHOICES = ["pattern", "ast", "cst", "sexp"] as const;
 export const DEFAULT_STRICTNESS = "smart";
+const INFERRED_SYNTAX_LANGUAGES = [
+	{ language: "typescript", suffixes: new Set([".ts"]) },
+	{ language: "tsx", suffixes: new Set([".tsx"]) },
+	{ language: "javascript", suffixes: new Set([".js", ".mjs"]) },
+	{ language: "jsx", suffixes: new Set([".jsx"]) },
+	{ language: "python", suffixes: new Set([".py"]) },
+];
 
 export type SyntaxRewriteOptions = {
 	projectRoot?: string | undefined;
-	lang: string;
+	lang?: string | undefined;
 	pattern?: string | undefined;
 	rewrite?: string | undefined;
 	oldName?: string | undefined;
@@ -35,6 +45,7 @@ export type SyntaxRewriteOptions = {
 	paths?: string[] | undefined;
 	apply?: boolean | undefined;
 	yes?: boolean | undefined;
+	allowEmpty?: boolean | undefined;
 };
 
 export type SyntaxDebugOptions = {
@@ -46,7 +57,7 @@ export type SyntaxDebugOptions = {
 
 export type SyntaxPreviewOptions = {
 	projectRoot?: string | undefined;
-	lang: string;
+	lang?: string | undefined;
 	pattern: string;
 	rewrite: string;
 	codeFile?: string | undefined;
@@ -102,20 +113,39 @@ export function commandSyntaxReplace(options: SyntaxRewriteOptions): number {
 		console.log("Refusing write: add --yes or preview without --apply.");
 		return 1;
 	}
-	const results = syntaxRewrite(
-		root,
-		options.lang,
-		String(options.pattern ?? ""),
-		String(options.rewrite ?? ""),
-		paths,
-		{ apply: Boolean(options.apply) },
-	);
-	if (results === null) {
-		console.log("Unavailable: ast-grep-py not installed.");
-		return 127;
+	const languages = syntaxLanguages(root, paths, options.lang);
+	if (languages.length === 0) {
+		printNoSyntaxTargets(paths);
+		return options.allowEmpty ? 0 : 1;
+	}
+	const results: SyntaxRewriteResult[] = [];
+	for (const language of languages) {
+		const languageResults = syntaxRewrite(
+			root,
+			language,
+			String(options.pattern ?? ""),
+			String(options.rewrite ?? ""),
+			paths,
+			{ apply: Boolean(options.apply) },
+		);
+		if (languageResults === null) {
+			console.log(
+				`Unavailable: ast-grep is not available for language: ${language}.`,
+			);
+			return 127;
+		}
+		results.push(...languageResults);
+	}
+	if (results.length === 0) {
+		printNoRewriteMatches(
+			"syntax replace",
+			paths,
+			String(options.pattern ?? ""),
+		);
+		return options.allowEmpty ? 0 : 1;
 	}
 	printRewriteResults(results);
-	return results.length > 0 ? 0 : 1;
+	return 0;
 }
 
 /** Runs syntax identifier rename on selected files. */
@@ -132,11 +162,43 @@ export function commandSyntaxRename(options: SyntaxRewriteOptions): number {
 		);
 		return 1;
 	}
-	return commandSyntaxReplace({
-		...options,
-		pattern: options.oldName,
-		rewrite: options.newName,
-	});
+	const root = resolveCommandRoot(options.projectRoot);
+	const paths = resolveTargetPaths(root, options.paths ?? []);
+	if (options.apply && !options.yes) {
+		console.log("Refusing write: add --yes or preview without --apply.");
+		return 1;
+	}
+	const oldName = String(options.oldName);
+	const newName = String(options.newName);
+	const languages = syntaxLanguages(root, paths, options.lang);
+	if (languages.length === 0) {
+		printNoSyntaxTargets(paths);
+		return options.allowEmpty ? 0 : 1;
+	}
+	const results: SyntaxRewriteResult[] = [];
+	for (const language of languages) {
+		const languageResults =
+			language === "python"
+				? syntaxRewrite(root, language, oldName, newName, paths, {
+						apply: Boolean(options.apply),
+					})
+				: renameIdentifiers(root, language, oldName, newName, paths, {
+						apply: Boolean(options.apply),
+					});
+		if (languageResults === null) {
+			console.log(
+				`Unavailable: ast-grep is not available for language: ${language}.`,
+			);
+			return 127;
+		}
+		results.push(...languageResults);
+	}
+	if (results.length === 0) {
+		printNoRewriteMatches("syntax rename", paths, `${oldName} -> ${newName}`);
+		return options.allowEmpty ? 0 : 1;
+	}
+	printRewriteResults(results);
+	return 0;
 }
 
 /** Runs call-target replacement on selected files. */
@@ -180,26 +242,37 @@ export function commandSyntaxDebug(options: SyntaxDebugOptions): number {
 export function commandSyntaxPreview(options: SyntaxPreviewOptions): number {
 	const root = resolveCommandRoot(options.projectRoot);
 	const code = readSnippet(root, options.codeFile);
+	const language = options.lang ?? languageFromPreviewPath(options.codeFile);
 	const snippetPath = path.join(
 		root,
-		`.codemap-syntax-preview${previewSuffix(options.lang)}`,
+		`.codemap-syntax-preview${previewSuffix(language)}`,
 	);
 	writeFileSync(snippetPath, code, "utf8");
 	try {
 		const results = syntaxRewrite(
 			root,
-			options.lang,
+			language,
 			options.pattern,
 			options.rewrite,
 			[path.relative(root, snippetPath).split(path.sep).join("/")],
 			{ apply: false },
 		);
 		if (results === null) {
-			console.log("Unavailable: ast-grep-py not installed.");
+			console.log(
+				`Unavailable: ast-grep is not available for language: ${language}.`,
+			);
 			return 127;
 		}
+		if (results.length === 0) {
+			printNoRewriteMatches(
+				"syntax preview",
+				[options.codeFile ?? "stdin"],
+				options.pattern,
+			);
+			return 1;
+		}
 		printRewriteResults(results);
-		return results.length > 0 ? 0 : 1;
+		return 0;
 	} finally {
 		rmSync(snippetPath, { force: true });
 	}
@@ -314,6 +387,60 @@ function recipeTextLimit(value: string | number | undefined): number | null {
 	const parsed =
 		typeof value === "number" ? value : Number.parseInt(String(value), 10);
 	return Number.isNaN(parsed) || parsed < 0 ? null : parsed;
+}
+
+/** Returns explicit or target-inferred syntax languages for rewrite commands. */
+function syntaxLanguages(
+	root: string,
+	paths: string[],
+	explicitLanguage: string | undefined,
+): string[] {
+	if (explicitLanguage) {
+		return [explicitLanguage];
+	}
+	const languages: string[] = [];
+	for (const candidate of INFERRED_SYNTAX_LANGUAGES) {
+		const files = targetFiles(root, paths, candidate.language).filter(
+			(filePath) => candidate.suffixes.has(path.extname(filePath)),
+		);
+		if (files.length > 0) {
+			languages.push(candidate.language);
+		}
+	}
+	return languages;
+}
+
+/** Infers preview language from a code file extension when --lang is omitted. */
+function languageFromPreviewPath(codeFile: string | undefined): string {
+	if (!codeFile) {
+		return "typescript";
+	}
+	const suffix = path.extname(codeFile);
+	for (const candidate of INFERRED_SYNTAX_LANGUAGES) {
+		if (candidate.suffixes.has(suffix)) {
+			return candidate.language;
+		}
+	}
+	return "typescript";
+}
+
+/** Prints an explicit empty-result message for syntax rewrite commands. */
+function printNoRewriteMatches(
+	commandName: string,
+	paths: string[],
+	target: string,
+): void {
+	console.log(`No matches for ${commandName}: ${target}`);
+	console.log(`Searched: ${paths.length === 0 ? "." : paths.join(", ")}`);
+}
+
+/** Prints a focused message when language inference has no source files. */
+function printNoSyntaxTargets(paths: string[]): void {
+	console.log("No supported syntax files found.");
+	console.log(`Searched: ${paths.length === 0 ? "." : paths.join(", ")}`);
+	console.log(
+		"Add --lang when the target path is generated, unsuffixed, or piped.",
+	);
 }
 
 /** Expands tilde-prefixed filesystem paths. */

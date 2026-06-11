@@ -11,6 +11,7 @@ export {
 	META_VAR_RE,
 	matchConfigFromRule,
 	normalizeLanguage,
+	renameIdentifiers,
 	resolveProjectFile,
 	ruleMatches,
 	ruleResults,
