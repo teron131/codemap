@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	buildParser,
 	commandSyntaxRecipe,
+	commandSyntaxRename,
 	dispatch,
 } from "../src/codemap/commands/index.js";
 
@@ -89,6 +90,203 @@ describe("syntax command handlers", () => {
 		expect(output).toContain("console.log('two')");
 		expect(output).not.toContain("console.log('three')");
 		expect(output).toContain("\n...");
+	});
+
+	it("renames TypeScript identifiers in type positions", () => {
+		writeFileSync(
+			path.join(workDir, "src", "app.ts"),
+			[
+				"type ModelStatsSelectedModel = { value: number };",
+				"const buildLlmStatsModels = 1;",
+				"function use(model: ModelStatsSelectedModel) {",
+				"  return buildLlmStatsModels + model.value;",
+				"}",
+			].join("\n"),
+			"utf8",
+		);
+
+		expect(
+			commandSyntaxRename({
+				projectRoot: workDir,
+				lang: "ts",
+				oldName: "ModelStatsSelectedModel",
+				newName: "LlmStatsModel",
+				paths: ["src/app.ts"],
+			}),
+		).toBe(0);
+
+		const output = logLines().join("\n");
+		expect(output).toContain("type LlmStatsModel = { value: number };");
+		expect(output).toContain("function use(model: LlmStatsModel) {");
+		expect(output).not.toContain("ModelStatsSelectedModel");
+	});
+
+	it("infers language for rename from target files", async () => {
+		writeFileSync(
+			path.join(workDir, "src", "inferred.ts"),
+			[
+				"type OldModel = { value: number };",
+				"function use(model: OldModel) {",
+				"  return model.value;",
+				"}",
+			].join("\n"),
+			"utf8",
+		);
+
+		await expect(
+			dispatch(buildParser(), [
+				"node",
+				"codemap",
+				"syntax",
+				"rename",
+				"--project-root",
+				workDir,
+				"OldModel",
+				"NewModel",
+				"src/inferred.ts",
+			]),
+		).resolves.toBe(0);
+
+		const output = logLines().join("\n");
+		expect(output).toContain("type NewModel = { value: number };");
+		expect(output).toContain("function use(model: NewModel) {");
+	});
+
+	it("infers language for call target replacement", async () => {
+		writeFileSync(
+			path.join(workDir, "src", "calls.ts"),
+			[
+				"oldFn('one');",
+				"const value = oldFn('two');",
+				"const untouched = oldFn;",
+			].join("\n"),
+			"utf8",
+		);
+
+		await expect(
+			dispatch(buildParser(), [
+				"node",
+				"codemap",
+				"syntax",
+				"replace-call",
+				"--project-root",
+				workDir,
+				"oldFn",
+				"newFn",
+				"src/calls.ts",
+			]),
+		).resolves.toBe(0);
+
+		const output = logLines().join("\n");
+		expect(output).toContain("newFn('one');");
+		expect(output).toContain("const value = newFn('two');");
+		expect(output).toContain("const untouched = oldFn;");
+	});
+
+	it("preserves object keys when renaming shorthand identifiers", () => {
+		writeFileSync(
+			path.join(workDir, "src", "shorthand.ts"),
+			[
+				"const oldName = 1;",
+				"const output = { oldName };",
+				"const { oldName } = output;",
+				"console.log(oldName);",
+			].join("\n"),
+			"utf8",
+		);
+
+		expect(
+			commandSyntaxRename({
+				projectRoot: workDir,
+				lang: "ts",
+				oldName: "oldName",
+				newName: "newName",
+				paths: ["src/shorthand.ts"],
+			}),
+		).toBe(0);
+
+		const output = logLines().join("\n");
+		expect(output).toContain("const newName = 1;");
+		expect(output).toContain("const output = { oldName: newName };");
+		expect(output).toContain("const { oldName: newName } = output;");
+		expect(output).toContain("console.log(newName);");
+	});
+
+	it("prints no matches and can allow empty rename batches", async () => {
+		writeFileSync(path.join(workDir, "src", "empty.ts"), "const value = 1;\n");
+
+		await expect(
+			dispatch(buildParser(), [
+				"node",
+				"codemap",
+				"syntax",
+				"rename",
+				"--project-root",
+				workDir,
+				"--lang",
+				"ts",
+				"--allow-empty",
+				"missingName",
+				"newName",
+				"src",
+			]),
+		).resolves.toBe(0);
+
+		const output = logLines().join("\n");
+		expect(output).toContain(
+			"No matches for syntax rename: missingName -> newName",
+		);
+		expect(output).toContain("Searched: src");
+	});
+
+	it("prints no supported syntax files when language inference has no targets", async () => {
+		writeFileSync(path.join(workDir, "src", "notes.txt"), "OldModel\n");
+
+		await expect(
+			dispatch(buildParser(), [
+				"node",
+				"codemap",
+				"syntax",
+				"rename",
+				"--project-root",
+				workDir,
+				"OldModel",
+				"NewModel",
+				"src/notes.txt",
+			]),
+		).resolves.toBe(1);
+
+		const output = logLines().join("\n");
+		expect(output).toContain("No supported syntax files found.");
+		expect(output).toContain("Add --lang");
+	});
+
+	it("prints no matches for preview misses", async () => {
+		writeFileSync(
+			path.join(workDir, "src", "preview.ts"),
+			"const value = 1;\n",
+		);
+
+		await expect(
+			dispatch(buildParser(), [
+				"node",
+				"codemap",
+				"syntax",
+				"preview",
+				"--project-root",
+				workDir,
+				"--pattern",
+				"missingName",
+				"--rewrite",
+				"newName",
+				"--code-file",
+				"src/preview.ts",
+			]),
+		).resolves.toBe(1);
+
+		const output = logLines().join("\n");
+		expect(output).toContain("No matches for syntax preview: missingName");
+		expect(output).toContain("Searched: src/preview.ts");
 	});
 });
 

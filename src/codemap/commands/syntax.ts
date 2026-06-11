@@ -62,7 +62,7 @@ export function addSyntaxCallParsers(command: Command): void {
 	const syntaxReplaceCall = command
 		.command("replace-call")
 		.description("Preview or apply a call-site rewrite while preserving args.")
-		.requiredOption("--lang <lang>")
+		.option("--lang <lang>")
 		.argument("<old_name>", "Function or dotted method target to replace.")
 		.argument("<new_name>", "Replacement function or dotted method target.")
 		.argument("[paths...]", "Project-relative target paths.")
@@ -74,6 +74,7 @@ export function addSyntaxCallParsers(command: Command): void {
 		)
 		.option("--apply")
 		.option("--yes", "Required with --apply.")
+		.option("--allow-empty", "Exit 0 when no matches are found.")
 		.action(
 			(
 				oldName: string,
@@ -122,7 +123,7 @@ export function addSyntaxDebugParser(command: Command): void {
 	const syntaxPreview = command
 		.command("preview")
 		.description("Preview a rewrite against a snippet file or stdin.")
-		.requiredOption("--lang <lang>")
+		.option("--lang <lang>")
 		.requiredOption("--pattern <pattern>")
 		.requiredOption("--rewrite <rewrite>")
 		.option(
@@ -208,7 +209,7 @@ export function addSyntaxRewriteParsers(command: Command): void {
 	const syntaxReplace = command
 		.command("replace")
 		.description("Preview or apply a mechanical syntax rewrite.")
-		.requiredOption("--lang <lang>")
+		.option("--lang <lang>")
 		.requiredOption("--pattern <pattern>")
 		.requiredOption("--rewrite <rewrite>")
 		.argument("[paths...]", "Project-relative target paths.")
@@ -220,6 +221,7 @@ export function addSyntaxRewriteParsers(command: Command): void {
 		)
 		.option("--apply")
 		.option("--yes", "Required with --apply.")
+		.option("--allow-empty", "Exit 0 when no matches are found.")
 		.action((paths: string[], options: Omit<SyntaxRewriteOptions, "paths">) => {
 			const exitCode = commandSyntaxReplace({
 				...options,
@@ -235,7 +237,7 @@ export function addSyntaxRewriteParsers(command: Command): void {
 	const syntaxRename = command
 		.command("rename")
 		.description("Preview or apply a simple syntax-level identifier rename.")
-		.requiredOption("--lang <lang>")
+		.option("--lang <lang>")
 		.argument("<old_name>")
 		.argument("<new_name>")
 		.argument("[paths...]", "Project-relative target paths.")
@@ -247,6 +249,7 @@ export function addSyntaxRewriteParsers(command: Command): void {
 		)
 		.option("--apply")
 		.option("--yes", "Required with --apply.")
+		.option("--allow-empty", "Exit 0 when no matches are found.")
 		.action(
 			(
 				oldName: string,

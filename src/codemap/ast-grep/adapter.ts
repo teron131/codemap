@@ -74,6 +74,12 @@ export type SyntaxRewriteResult = {
 	text: string;
 };
 
+const RENAME_IDENTIFIER_KINDS = new Set(["identifier", "type_identifier"]);
+const RENAME_SHORTHAND_KINDS = new Set([
+	"shorthand_property_identifier",
+	"shorthand_property_identifier_pattern",
+]);
+
 type AstGrepCliMatch = {
 	text?: string;
 	file?: string;
@@ -128,6 +134,46 @@ export function syntaxRewrite(
 	return ruleRewrite(root, lang, { rule: { pattern } }, rewrite, paths, {
 		apply,
 	});
+}
+
+/** Renames identifier-like syntax nodes across resolved target files. */
+export function renameIdentifiers(
+	root: string,
+	lang: string,
+	oldName: string,
+	newName: string,
+	paths: string[],
+	{ apply = false }: { apply?: boolean },
+): SyntaxRewriteResult[] | null {
+	const language = normalizeLanguage(lang);
+	if (napiLanguageFor(language) === null) {
+		return null;
+	}
+	const results: SyntaxRewriteResult[] = [];
+	for (const filePath of targetFiles(root, paths, language)) {
+		const relPath = path.relative(root, filePath).split(path.sep).join("/");
+		try {
+			const source = readFileSync(filePath, "utf8");
+			const syntaxRoot = astGrepRoot(source, language);
+			if (syntaxRoot === null) {
+				continue;
+			}
+			const edits = identifierRenameEdits(syntaxRoot, oldName, newName);
+			if (edits.length === 0) {
+				continue;
+			}
+			const rewritten = syntaxRoot.commitEdits(edits);
+			if (apply) {
+				writeFileSync(filePath, rewritten, "utf8");
+			}
+			results.push({
+				filePath: relPath,
+				matchCount: edits.length,
+				text: rewritten,
+			});
+		} catch {}
+	}
+	return results;
 }
 
 /** Finds ast-grep rule matches across resolved target files. */
@@ -233,6 +279,30 @@ export function ruleRewrite(
 		} catch {}
 	}
 	return results;
+}
+
+/** Builds syntax edits for one identifier rename inside a parsed file. */
+function identifierRenameEdits(
+	rootNode: SgNode,
+	oldName: string,
+	newName: string,
+): ReturnType<SgNode["replace"]>[] {
+	const edits: ReturnType<SgNode["replace"]>[] = [];
+	function visit(node: SgNode): void {
+		if (node.text() === oldName) {
+			const kind = String(node.kind());
+			if (RENAME_IDENTIFIER_KINDS.has(kind)) {
+				edits.push(node.replace(newName));
+			} else if (RENAME_SHORTHAND_KINDS.has(kind)) {
+				edits.push(node.replace(`${oldName}: ${newName}`));
+			}
+		}
+		for (const child of node.children()) {
+			visit(child);
+		}
+	}
+	visit(rootNode);
+	return edits;
 }
 
 /** Expands ast-grep rewrite metavariables from captured nodes. */
