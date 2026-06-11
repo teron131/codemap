@@ -55,7 +55,7 @@ Text output is quick triage. `--json` is the durable surface for `jq`, scripts, 
 Use search wrappers for read-only structural discovery instead of hand-writing ast-grep patterns repeatedly:
 
 ```sh
-codemap search calls --project-root <path> --lang <lang> <function-or-method> [paths...]
+codemap search calls --project-root <path> <function-or-method> [paths...]
 codemap search match --project-root <path> --lang <lang> --pattern "<pattern>" [paths...]
 codemap search rule --project-root <path> --rule <rule.yml> [paths...]
 ```

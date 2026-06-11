@@ -4,6 +4,7 @@ import {
 	matchJson,
 	printSyntaxMatches,
 	resolveProjectFile,
+	targetLanguages,
 } from "../ast-grep/index.js";
 import { resolveProjectRoot } from "../common.js";
 import {
@@ -12,13 +13,11 @@ import {
 	searchRuleMatches,
 	structuralMatches,
 } from "../search/structural.js";
-import { addProjectRootArgument, parseIntegerOption } from "./options.js";
-
-export const DEFAULT_STRICTNESS = "smart";
+import { addProjectRootArgument } from "./options.js";
 
 export type SearchMatchOptions = {
 	projectRoot?: string | undefined;
-	lang: string;
+	lang?: string | undefined;
 	pattern: string;
 	paths?: string[] | undefined;
 	json?: boolean | undefined;
@@ -26,7 +25,7 @@ export type SearchMatchOptions = {
 
 export type SearchCallsOptions = {
 	projectRoot?: string | undefined;
-	lang: string;
+	lang?: string | undefined;
 	name: string;
 	paths?: string[] | undefined;
 	json?: boolean | undefined;
@@ -43,15 +42,9 @@ export type SearchRuleOptions = {
 export function addSearchMatchParser(command: Command): void {
 	addProjectRootArgument(command);
 	command
-		.requiredOption("--lang <lang>")
+		.option("--lang <lang>")
 		.requiredOption("--pattern <pattern>")
 		.argument("[paths...]", "Project-relative target paths.")
-		.option("--context <count>", "Context lines.", parseIntegerOption, 2)
-		.option(
-			"--strictness <strictness>",
-			"Match strictness.",
-			DEFAULT_STRICTNESS,
-		)
 		.option("--json")
 		.action((paths: string[], options: Omit<SearchMatchOptions, "paths">) => {
 			const exitCode = commandSearchMatch({
@@ -72,18 +65,12 @@ export function addSearchCallsParser(command: Command): void {
 	);
 	addProjectRootArgument(command);
 	command
-		.requiredOption("--lang <lang>")
+		.option("--lang <lang>")
 		.argument(
 			"<name>",
 			"Function or dotted method being called, such as print or console.log.",
 		)
 		.argument("[paths...]", "Project-relative target paths.")
-		.option("--context <count>", "Context lines.", parseIntegerOption, 2)
-		.option(
-			"--strictness <strictness>",
-			"Match strictness.",
-			DEFAULT_STRICTNESS,
-		)
 		.option("--json")
 		.action(
 			(
@@ -130,12 +117,31 @@ export function addSearchRuleParser(command: Command): void {
 export function commandSearchMatch(options: SearchMatchOptions): number {
 	const root = resolveProjectRoot(options.projectRoot);
 	const paths = resolveTargetPaths(root, options.paths ?? []);
-	const matches = structuralMatches(root, options.lang, options.pattern, paths);
-	if (matches === null) {
-		console.log("Unavailable: ast-grep-py not installed.");
-		return 127;
+	const languages = structuralLanguages(root, paths, options.lang);
+	if (languages.length === 0) {
+		printNoSyntaxTargets(paths);
+		return 1;
+	}
+	const matches = [];
+	for (const language of languages) {
+		const languageMatches = structuralMatches(
+			root,
+			language,
+			options.pattern,
+			paths,
+		);
+		if (languageMatches === null) {
+			console.log(
+				`Unavailable: ast-grep is not available for language: ${language}.`,
+			);
+			return 127;
+		}
+		matches.push(...languageMatches);
 	}
 	printSyntaxMatches(matches, { jsonOutput: Boolean(options.json) });
+	if (matches.length === 0 && !options.json) {
+		console.log("No matches");
+	}
 	return matches.length > 0 ? 0 : 1;
 }
 
@@ -143,13 +149,27 @@ export function commandSearchMatch(options: SearchMatchOptions): number {
 export function commandSearchCalls(options: SearchCallsOptions): number {
 	const root = resolveProjectRoot(options.projectRoot);
 	const paths = resolveTargetPaths(root, options.paths ?? []);
-	const matches = callMatches(root, options.lang, options.name, paths);
-	if (matches === null) {
-		console.log("Unavailable: ast-grep-py not installed.");
-		return 127;
+	const languages = structuralLanguages(root, paths, options.lang);
+	if (languages.length === 0) {
+		printNoSyntaxTargets(paths);
+		return 1;
+	}
+	const matches = [];
+	for (const language of languages) {
+		const languageMatches = callMatches(root, language, options.name, paths);
+		if (languageMatches === null) {
+			console.log(
+				`Unavailable: ast-grep is not available for language: ${language}.`,
+			);
+			return 127;
+		}
+		matches.push(...languageMatches);
 	}
 	printSyntaxMatches(matches, { jsonOutput: Boolean(options.json) });
-	return 0;
+	if (matches.length === 0 && !options.json) {
+		console.log("No matches");
+	}
+	return matches.length > 0 ? 0 : 1;
 }
 
 /** Runs read-only ast-grep YAML rule search and prints matches. */
@@ -187,4 +207,20 @@ function rootOption(
 		options.projectRoot ??
 		command.optsWithGlobals<{ projectRoot?: string }>().projectRoot
 	);
+}
+
+/** Returns explicit or target-inferred languages for structural search. */
+function structuralLanguages(
+	root: string,
+	paths: string[],
+	explicitLanguage: string | undefined,
+): string[] {
+	return explicitLanguage ? [explicitLanguage] : targetLanguages(root, paths);
+}
+
+/** Prints a focused message when language inference has no source files. */
+function printNoSyntaxTargets(paths: string[]): void {
+	console.log("No supported syntax files found.");
+	console.log(`Searched: ${paths.length === 0 ? "." : paths.join(", ")}`);
+	console.log("Add --lang when the target path is generated or unsuffixed.");
 }

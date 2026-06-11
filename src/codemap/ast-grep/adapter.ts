@@ -71,8 +71,17 @@ export type SyntaxMatch = {
 export type SyntaxRewriteResult = {
 	filePath: string;
 	matchCount: number;
+	previewText?: string | undefined;
 	text: string;
 };
+
+const INFERRED_SYNTAX_LANGUAGES = [
+	{ language: "typescript", suffixes: new Set([".ts"]) },
+	{ language: "tsx", suffixes: new Set([".tsx"]) },
+	{ language: "javascript", suffixes: new Set([".js", ".mjs"]) },
+	{ language: "jsx", suffixes: new Set([".jsx"]) },
+	{ language: "python", suffixes: new Set([".py"]) },
+];
 
 const RENAME_IDENTIFIER_KINDS = new Set(["identifier", "type_identifier"]);
 const RENAME_SHORTHAND_KINDS = new Set([
@@ -169,6 +178,7 @@ export function renameIdentifiers(
 			results.push({
 				filePath: relPath,
 				matchCount: edits.length,
+				previewText: changedLinePreview(source, rewritten),
 				text: rewritten,
 			});
 		} catch {}
@@ -274,6 +284,7 @@ export function ruleRewrite(
 			results.push({
 				filePath: relPath,
 				matchCount: edits.length,
+				previewText: changedLinePreview(source, rewritten),
 				text: rewritten,
 			});
 		} catch {}
@@ -472,6 +483,20 @@ export function targetFiles(
 	return files;
 }
 
+/** Infers syntax languages from target file suffixes. */
+export function targetLanguages(root: string, paths: string[]): string[] {
+	const languages: string[] = [];
+	for (const candidate of INFERRED_SYNTAX_LANGUAGES) {
+		const files = targetFiles(root, paths, candidate.language).filter(
+			(filePath) => candidate.suffixes.has(path.extname(filePath)),
+		);
+		if (files.length > 0) {
+			languages.push(candidate.language);
+		}
+	}
+	return languages;
+}
+
 /** Checks whether ast-grep should scan a filesystem path. */
 export function shouldScanAstGrepFile(filePath: string, root: string): boolean {
 	let relParts: string[];
@@ -656,12 +681,77 @@ function cliRewriteResults(
 		results.push({
 			filePath: path.relative(root, filePath).split(path.sep).join("/"),
 			matchCount: rows.length,
+			previewText: changedLinePreview(source, rewritten),
 			text: rewritten,
 		});
 	}
 	return results.sort((left, right) =>
 		compareText(left.filePath, right.filePath),
 	);
+}
+
+/** Formats changed-line hunks while both source versions are available. */
+function changedLinePreview(
+	originalSource: string,
+	rewrittenText: string,
+): string {
+	const originalLines = normalizedLines(originalSource);
+	const rewrittenLines = normalizedLines(rewrittenText);
+	const changedIndexes = rewrittenLines
+		.map((line, index) => (line === originalLines[index] ? -1 : index))
+		.filter((index) => index >= 0);
+	if (changedIndexes.length === 0) {
+		return "(rewritten text unchanged)";
+	}
+	const ranges = previewRanges(changedIndexes, rewrittenLines.length, 2);
+	const lines: string[] = [];
+	for (const range of ranges) {
+		lines.push(`@@ ${range.start + 1}-${range.end} @@`);
+		for (let index = range.start; index < range.end; index += 1) {
+			const original = originalLines[index];
+			const rewritten = rewrittenLines[index] ?? "";
+			if (original === rewritten) {
+				lines.push(`  ${rewritten}`);
+			} else {
+				if (original !== undefined) {
+					lines.push(`- ${original}`);
+				}
+				lines.push(`+ ${rewritten}`);
+			}
+		}
+	}
+	return lines.join("\n");
+}
+
+/** Builds merged changed-line preview ranges with local context. */
+function previewRanges(
+	changedIndexes: number[],
+	lineCount: number,
+	context: number,
+): { start: number; end: number }[] {
+	const ranges: { start: number; end: number }[] = [];
+	for (const index of changedIndexes) {
+		const nextRange = {
+			start: Math.max(0, index - context),
+			end: Math.min(lineCount, index + context + 1),
+		};
+		const previous = ranges.at(-1);
+		if (previous && nextRange.start <= previous.end) {
+			previous.end = Math.max(previous.end, nextRange.end);
+		} else {
+			ranges.push(nextRange);
+		}
+	}
+	return ranges;
+}
+
+/** Splits source while ignoring the artificial trailing empty line. */
+function normalizedLines(text: string): string[] {
+	const lines = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+	if (lines.at(-1) === "") {
+		lines.pop();
+	}
+	return lines;
 }
 
 /** Applies byte-offset replacements returned by ast-grep CLI rewrites. */

@@ -1,5 +1,5 @@
 /** Runs syntax command actions after parser options are resolved. */
-import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import {
@@ -13,8 +13,9 @@ import {
 	type SyntaxRewriteResult,
 	syntaxDebugPayload,
 	syntaxRewrite,
-	targetFiles,
+	targetLanguages,
 } from "../ast-grep/index.js";
+import { resolveProjectRoot } from "../common.js";
 import {
 	canApply,
 	printRecipeCatalog,
@@ -26,14 +27,6 @@ export const IDENTIFIER_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 export const CALL_TARGET_RE =
 	/^[A-Za-z_$][A-Za-z0-9_$]*(\.[A-Za-z_$][A-Za-z0-9_$]*)*$/;
 export const DEBUG_FORMAT_CHOICES = ["pattern", "ast", "cst", "sexp"] as const;
-export const DEFAULT_STRICTNESS = "smart";
-const INFERRED_SYNTAX_LANGUAGES = [
-	{ language: "typescript", suffixes: new Set([".ts"]) },
-	{ language: "tsx", suffixes: new Set([".tsx"]) },
-	{ language: "javascript", suffixes: new Set([".js", ".mjs"]) },
-	{ language: "jsx", suffixes: new Set([".jsx"]) },
-	{ language: "python", suffixes: new Set([".py"]) },
-];
 
 export type SyntaxRewriteOptions = {
 	projectRoot?: string | undefined;
@@ -46,6 +39,7 @@ export type SyntaxRewriteOptions = {
 	apply?: boolean | undefined;
 	yes?: boolean | undefined;
 	allowEmpty?: boolean | undefined;
+	full?: boolean | undefined;
 };
 
 export type SyntaxDebugOptions = {
@@ -61,6 +55,7 @@ export type SyntaxPreviewOptions = {
 	pattern: string;
 	rewrite: string;
 	codeFile?: string | undefined;
+	full?: boolean | undefined;
 };
 
 export type SyntaxRecipeOptions = {
@@ -99,7 +94,7 @@ export function resolveTargetPaths(root: string, paths: string[]): string[] {
 			}
 			resolved.push(relative.split(path.sep).join("/"));
 		} else {
-			resolved.push(candidate);
+			resolved.push(relativeTargetPath(rootResolved, candidate));
 		}
 	}
 	return resolved;
@@ -144,7 +139,7 @@ export function commandSyntaxReplace(options: SyntaxRewriteOptions): number {
 		);
 		return options.allowEmpty ? 0 : 1;
 	}
-	printRewriteResults(results);
+	printRewriteResults(results, { fullOutput: Boolean(options.full) });
 	return 0;
 }
 
@@ -197,7 +192,7 @@ export function commandSyntaxRename(options: SyntaxRewriteOptions): number {
 		printNoRewriteMatches("syntax rename", paths, `${oldName} -> ${newName}`);
 		return options.allowEmpty ? 0 : 1;
 	}
-	printRewriteResults(results);
+	printRewriteResults(results, { fullOutput: Boolean(options.full) });
 	return 0;
 }
 
@@ -271,7 +266,7 @@ export function commandSyntaxPreview(options: SyntaxPreviewOptions): number {
 			);
 			return 1;
 		}
-		printRewriteResults(results);
+		printRewriteResults(results, { fullOutput: Boolean(options.full) });
 		return 0;
 	} finally {
 		rmSync(snippetPath, { force: true });
@@ -376,7 +371,7 @@ export function commandSyntaxRule(options: SyntaxRuleOptions): number {
 
 /** Resolves the project root option for syntax command handlers. */
 function resolveCommandRoot(rawRoot: string | undefined): string {
-	return path.resolve(expandUser(rawRoot ?? "."));
+	return resolveProjectRoot(rawRoot);
 }
 
 /** Parses the recipe text match limit. */
@@ -398,16 +393,7 @@ function syntaxLanguages(
 	if (explicitLanguage) {
 		return [explicitLanguage];
 	}
-	const languages: string[] = [];
-	for (const candidate of INFERRED_SYNTAX_LANGUAGES) {
-		const files = targetFiles(root, paths, candidate.language).filter(
-			(filePath) => candidate.suffixes.has(path.extname(filePath)),
-		);
-		if (files.length > 0) {
-			languages.push(candidate.language);
-		}
-	}
-	return languages;
+	return targetLanguages(root, paths);
 }
 
 /** Infers preview language from a code file extension when --lang is omitted. */
@@ -416,12 +402,15 @@ function languageFromPreviewPath(codeFile: string | undefined): string {
 		return "typescript";
 	}
 	const suffix = path.extname(codeFile);
-	for (const candidate of INFERRED_SYNTAX_LANGUAGES) {
-		if (candidate.suffixes.has(suffix)) {
-			return candidate.language;
-		}
-	}
-	return "typescript";
+	const suffixLanguages: Record<string, string> = {
+		".js": "javascript",
+		".jsx": "jsx",
+		".mjs": "javascript",
+		".py": "python",
+		".ts": "typescript",
+		".tsx": "tsx",
+	};
+	return suffixLanguages[suffix] ?? "typescript";
 }
 
 /** Prints an explicit empty-result message for syntax rewrite commands. */
@@ -441,6 +430,20 @@ function printNoSyntaxTargets(paths: string[]): void {
 	console.log(
 		"Add --lang when the target path is generated, unsuffixed, or piped.",
 	);
+}
+
+/** Resolves relative target paths from project root or the current directory. */
+function relativeTargetPath(root: string, rawPath: string): string {
+	const rootPath = path.resolve(root, rawPath);
+	if (existsSync(rootPath)) {
+		return rawPath;
+	}
+	const cwdPath = path.resolve(process.cwd(), rawPath);
+	const relative = path.relative(root, cwdPath);
+	if (!relative.startsWith("..") && !path.isAbsolute(relative)) {
+		return relative.split(path.sep).join("/");
+	}
+	return rawPath;
 }
 
 /** Expands tilde-prefixed filesystem paths. */
