@@ -1,5 +1,5 @@
 /** Runs explicit ast-grep pattern, call, and rule searches. */
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 import {
@@ -82,7 +82,7 @@ export function resolveTargetPaths(root: string, paths: string[]): string[] {
 			}
 			resolved.push(relative.split(path.sep).join("/"));
 		} else {
-			resolved.push(candidate);
+			resolved.push(relativeTargetPath(rootResolved, candidate));
 		}
 	}
 	return resolved;
@@ -103,6 +103,20 @@ function expandUser(rawPath: string): string {
 	}
 	if (rawPath.startsWith("~/")) {
 		return path.join(process.env.HOME ?? "~", rawPath.slice(2));
+	}
+	return rawPath;
+}
+
+/** Resolves relative target paths from project root or the current directory. */
+function relativeTargetPath(root: string, rawPath: string): string {
+	const rootPath = path.resolve(root, rawPath);
+	if (existsSync(rootPath)) {
+		return rawPath;
+	}
+	const cwdPath = path.resolve(process.cwd(), rawPath);
+	const relative = path.relative(root, cwdPath);
+	if (!relative.startsWith("..") && !path.isAbsolute(relative)) {
+		return relative.split(path.sep).join("/");
 	}
 	return rawPath;
 }

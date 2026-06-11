@@ -20,7 +20,10 @@ export function printSyntaxMatches(
 /** Prints syntax rewrite results as text or JSON. */
 export function printRewriteResults(
 	results: SyntaxRewriteResult[],
-	{ jsonOutput = false }: { jsonOutput?: boolean } = {},
+	{
+		fullOutput = false,
+		jsonOutput = false,
+	}: { fullOutput?: boolean; jsonOutput?: boolean } = {},
 ): void {
 	if (jsonOutput) {
 		console.log(pythonJsonDumps(results.map((result) => rewriteJson(result))));
@@ -29,7 +32,7 @@ export function printRewriteResults(
 	for (const result of results) {
 		const suffix = result.matchCount !== 1 ? "es" : "";
 		console.log(`# ${result.filePath}: ${result.matchCount} match${suffix}`);
-		console.log(result.text.trimEnd());
+		console.log(rewritePreviewText(result, { fullOutput }));
 	}
 }
 
@@ -57,6 +60,17 @@ export function rewriteJson(
 		text: result.text,
 		language: "ast-grep",
 	};
+}
+
+/** Formats rewrite output as full text or compact changed-line hunks. */
+function rewritePreviewText(
+	result: SyntaxRewriteResult,
+	{ fullOutput }: { fullOutput: boolean },
+): string {
+	if (fullOutput || result.previewText === undefined) {
+		return result.text.trimEnd();
+	}
+	return result.previewText;
 }
 
 /** Formats JS values as Python literals for ast-grep snippets. */

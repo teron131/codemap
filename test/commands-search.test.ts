@@ -3,7 +3,11 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { commandSearch } from "../src/codemap/commands/index.js";
+import {
+	buildParser,
+	commandSearch,
+	dispatch,
+} from "../src/codemap/commands/index.js";
 import { semanticIndexPath } from "../src/codemap/common.js";
 
 const workspaceRoot = process.cwd();
@@ -32,6 +36,92 @@ afterEach(() => {
 });
 
 describe("search command handler", () => {
+	it("infers language for call search from target files", async () => {
+		writeFileSync(
+			path.join(workDir, "src", "calls.ts"),
+			[
+				"helper('one');",
+				"const value = helper('two');",
+				"const untouched = helper;",
+			].join("\n"),
+			"utf8",
+		);
+
+		await expect(
+			dispatch(buildParser(), [
+				"node",
+				"codemap",
+				"search",
+				"calls",
+				"--project-root",
+				workDir,
+				"helper",
+				"src/calls.ts",
+			]),
+		).resolves.toBe(0);
+
+		const output = logLines().join("\n");
+		expect(output).toContain("src/calls.ts:1:1: helper('one')");
+		expect(output).toContain("src/calls.ts:2:15: helper('two')");
+		expect(output).not.toContain("const untouched = helper;");
+	});
+
+	it("accepts cwd-relative call search target paths when project root is inferred", async () => {
+		const cwd = process.cwd();
+		const nestedDir = path.join(workDir, "src", "nested");
+		mkdirSync(nestedDir, { recursive: true });
+		writeFileSync(
+			path.join(nestedDir, "local.ts"),
+			[
+				"helper('one');",
+				"const value = helper('two');",
+				"const untouched = helper;",
+			].join("\n"),
+			"utf8",
+		);
+
+		try {
+			process.chdir(nestedDir);
+			await expect(
+				dispatch(buildParser(), [
+					"node",
+					"codemap",
+					"search",
+					"calls",
+					"helper",
+					"local.ts",
+				]),
+			).resolves.toBe(0);
+		} finally {
+			process.chdir(cwd);
+		}
+
+		const output = logLines().join("\n");
+		expect(output).toContain("local.ts");
+		expect(output).toContain("helper('one')");
+		expect(output).toContain("helper('two')");
+		expect(output).not.toContain("const untouched = helper;");
+	});
+
+	it("prints no matches for empty call search results", async () => {
+		writeFileSync(path.join(workDir, "src", "calls.ts"), "const value = 1;\n");
+
+		await expect(
+			dispatch(buildParser(), [
+				"node",
+				"codemap",
+				"search",
+				"calls",
+				"--project-root",
+				workDir,
+				"missingCall",
+				"src/calls.ts",
+			]),
+		).resolves.toBe(1);
+
+		expect(logLines()).toEqual(["No matches"]);
+	});
+
 	it("prints source matches and unavailable semantic search status", async () => {
 		writeFileSync(
 			path.join(workDir, "src", "app.ts"),

@@ -22,7 +22,6 @@ export {
 	commandSearchCalls,
 	commandSearchMatch,
 	commandSearchRule,
-	DEFAULT_STRICTNESS,
 } from "./search-structural.js";
 export {
 	addSemanticParsers,
