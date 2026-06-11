@@ -34,8 +34,8 @@ Use call wrappers for the repeated pattern `$TARGET($$$ARGS)`:
 ```sh
 codemap search calls --project-root <path> --lang python print <paths...>
 codemap search calls --project-root <path> --lang typescript console.log <paths...>
-codemap syntax replace-call --project-root <path> --lang typescript oldFn newFn <paths...>
-codemap syntax replace-call --project-root <path> --lang typescript oldFn newFn <paths...> --apply --yes
+codemap syntax replace-call --project-root <path> oldFn newFn <paths...>
+codemap syntax replace-call --project-root <path> oldFn newFn <paths...> --apply --yes
 ```
 
 `search calls` finds call sites: places where a function or method is invoked.
@@ -67,6 +67,17 @@ Use source-file rewrites only after preview:
 codemap syntax replace --project-root <path> --lang python --pattern "$A == None" --rewrite "$A is None" <paths...>
 codemap syntax replace --project-root <path> --lang python --pattern "$A == None" --rewrite "$A is None" <paths...> --apply --yes
 ```
+
+Omit `--lang` when target file suffixes are enough for Codemap to infer the language. Keep `--lang` for stdin previews, mixed file types, ambiguous suffixes, or language-specific ast-grep patterns.
+
+Use `rename` for simple identifier renames when syntax positions matter:
+
+```sh
+codemap syntax rename --project-root <path> OldName NewName <paths...>
+codemap syntax rename --project-root <path> OldName NewName <paths...> --apply --yes
+```
+
+For batch codemods, add `--allow-empty` when no matches should be reported but should not fail the whole run.
 
 ## YAML Rules
 

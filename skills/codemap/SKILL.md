@@ -65,8 +65,9 @@ codemap search rule --project-root <path> --rule <rule.yml> [paths...]
 Use syntax only when the task is an AST operation, rewrite preview, debug flow, or guarded source edit:
 
 ```sh
-codemap syntax replace-call --project-root <path> --lang <lang> <old-call> <new-call> [paths...]
+codemap syntax replace-call --project-root <path> <old-call> <new-call> [paths...]
 codemap syntax replace --project-root <path> --lang <lang> --pattern "<pattern>" --rewrite "<rewrite>" [paths...]
+codemap syntax rename --project-root <path> <old-name> <new-name> [paths...]
 codemap syntax debug --project-root <path> --lang <lang> --pattern "<pattern>"
 ```
 
