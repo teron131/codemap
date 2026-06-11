@@ -116,9 +116,8 @@ describe("syntax command handlers", () => {
 		).toBe(0);
 
 		const output = logLines().join("\n");
-		expect(output).toContain("type LlmStatsModel = { value: number };");
-		expect(output).toContain("function use(model: LlmStatsModel) {");
-		expect(output).not.toContain("ModelStatsSelectedModel");
+		expect(output).toContain("+ type LlmStatsModel = { value: number };");
+		expect(output).toContain("+ function use(model: LlmStatsModel) {");
 	});
 
 	it("infers language for rename from target files", async () => {
@@ -148,8 +147,45 @@ describe("syntax command handlers", () => {
 		).resolves.toBe(0);
 
 		const output = logLines().join("\n");
-		expect(output).toContain("type NewModel = { value: number };");
-		expect(output).toContain("function use(model: NewModel) {");
+		expect(output).toContain("+ type NewModel = { value: number };");
+		expect(output).toContain("+ function use(model: NewModel) {");
+	});
+
+	it("accepts cwd-relative syntax target paths when project root is inferred", async () => {
+		const cwd = process.cwd();
+		const nestedDir = path.join(workDir, "src", "nested");
+		mkdirSync(nestedDir, { recursive: true });
+		writeFileSync(
+			path.join(nestedDir, "local.ts"),
+			[
+				"type OldModel = { value: number };",
+				"function use(model: OldModel) {",
+				"  return model.value;",
+				"}",
+			].join("\n"),
+			"utf8",
+		);
+
+		try {
+			process.chdir(nestedDir);
+			await expect(
+				dispatch(buildParser(), [
+					"node",
+					"codemap",
+					"syntax",
+					"rename",
+					"OldModel",
+					"NewModel",
+					"local.ts",
+				]),
+			).resolves.toBe(0);
+		} finally {
+			process.chdir(cwd);
+		}
+
+		const output = logLines().join("\n");
+		expect(output).toContain("+ type NewModel = { value: number };");
+		expect(output).toContain("+ function use(model: NewModel) {");
 	});
 
 	it("infers language for call target replacement", async () => {
@@ -178,8 +214,8 @@ describe("syntax command handlers", () => {
 		).resolves.toBe(0);
 
 		const output = logLines().join("\n");
-		expect(output).toContain("newFn('one');");
-		expect(output).toContain("const value = newFn('two');");
+		expect(output).toContain("+ newFn('one');");
+		expect(output).toContain("+ const value = newFn('two');");
 		expect(output).toContain("const untouched = oldFn;");
 	});
 
@@ -206,10 +242,44 @@ describe("syntax command handlers", () => {
 		).toBe(0);
 
 		const output = logLines().join("\n");
-		expect(output).toContain("const newName = 1;");
-		expect(output).toContain("const output = { oldName: newName };");
-		expect(output).toContain("const { oldName: newName } = output;");
-		expect(output).toContain("console.log(newName);");
+		expect(output).toContain("+ const newName = 1;");
+		expect(output).toContain("+ const output = { oldName: newName };");
+		expect(output).toContain("+ const { oldName: newName } = output;");
+		expect(output).toContain("+ console.log(newName);");
+	});
+
+	it("can print full rewritten files for rename previews", async () => {
+		writeFileSync(
+			path.join(workDir, "src", "full.ts"),
+			[
+				"type OldModel = { value: number };",
+				"const untouched = true;",
+				"function use(model: OldModel) {",
+				"  return model.value;",
+				"}",
+			].join("\n"),
+			"utf8",
+		);
+
+		await expect(
+			dispatch(buildParser(), [
+				"node",
+				"codemap",
+				"syntax",
+				"rename",
+				"--project-root",
+				workDir,
+				"--full",
+				"OldModel",
+				"NewModel",
+				"src/full.ts",
+			]),
+		).resolves.toBe(0);
+
+		const output = logLines().join("\n");
+		expect(output).toContain("type NewModel = { value: number };");
+		expect(output).toContain("const untouched = true;");
+		expect(output).not.toContain("+ type NewModel");
 	});
 
 	it("prints no matches and can allow empty rename batches", async () => {

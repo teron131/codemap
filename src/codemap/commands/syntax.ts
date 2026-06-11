@@ -17,7 +17,6 @@ import {
 	commandSyntaxReplaceCall,
 	commandSyntaxRule,
 	DEBUG_FORMAT_CHOICES,
-	DEFAULT_STRICTNESS,
 	type SyntaxDebugOptions,
 	type SyntaxPreviewOptions,
 	type SyntaxRecipeOptions,
@@ -66,15 +65,10 @@ export function addSyntaxCallParsers(command: Command): void {
 		.argument("<old_name>", "Function or dotted method target to replace.")
 		.argument("<new_name>", "Replacement function or dotted method target.")
 		.argument("[paths...]", "Project-relative target paths.")
-		.option("--context <count>", "Context lines.", parseIntegerOption, 2)
-		.option(
-			"--strictness <strictness>",
-			"Match strictness.",
-			DEFAULT_STRICTNESS,
-		)
 		.option("--apply")
 		.option("--yes", "Required with --apply.")
 		.option("--allow-empty", "Exit 0 when no matches are found.")
+		.option("--full", "Print full rewritten files instead of changed hunks.")
 		.action(
 			(
 				oldName: string,
@@ -130,11 +124,7 @@ export function addSyntaxDebugParser(command: Command): void {
 			"--code-file <codeFile>",
 			"Snippet file to test. Reads stdin when omitted.",
 		)
-		.option(
-			"--strictness <strictness>",
-			"Match strictness.",
-			DEFAULT_STRICTNESS,
-		)
+		.option("--full", "Print full rewritten file instead of changed hunks.")
 		.action((options: SyntaxPreviewOptions) => {
 			const exitCode = commandSyntaxPreview({
 				...options,
@@ -175,12 +165,6 @@ export function addSyntaxRecipeParsers(command: Command): void {
 			"Maximum text matches per step.",
 			parseIntegerOption,
 		)
-		.option("--context <count>", "Context lines.", parseIntegerOption, 2)
-		.option(
-			"--strictness <strictness>",
-			"Match strictness.",
-			DEFAULT_STRICTNESS,
-		)
 		.option("--json")
 		.option("--apply")
 		.option("--yes", "Required with --apply.")
@@ -213,15 +197,10 @@ export function addSyntaxRewriteParsers(command: Command): void {
 		.requiredOption("--pattern <pattern>")
 		.requiredOption("--rewrite <rewrite>")
 		.argument("[paths...]", "Project-relative target paths.")
-		.option("--context <count>", "Context lines.", parseIntegerOption, 2)
-		.option(
-			"--strictness <strictness>",
-			"Match strictness.",
-			DEFAULT_STRICTNESS,
-		)
 		.option("--apply")
 		.option("--yes", "Required with --apply.")
 		.option("--allow-empty", "Exit 0 when no matches are found.")
+		.option("--full", "Print full rewritten files instead of changed hunks.")
 		.action((paths: string[], options: Omit<SyntaxRewriteOptions, "paths">) => {
 			const exitCode = commandSyntaxReplace({
 				...options,
@@ -241,15 +220,10 @@ export function addSyntaxRewriteParsers(command: Command): void {
 		.argument("<old_name>")
 		.argument("<new_name>")
 		.argument("[paths...]", "Project-relative target paths.")
-		.option("--context <count>", "Context lines.", parseIntegerOption, 2)
-		.option(
-			"--strictness <strictness>",
-			"Match strictness.",
-			DEFAULT_STRICTNESS,
-		)
 		.option("--apply")
 		.option("--yes", "Required with --apply.")
 		.option("--allow-empty", "Exit 0 when no matches are found.")
+		.option("--full", "Print full rewritten files instead of changed hunks.")
 		.action(
 			(
 				oldName: string,

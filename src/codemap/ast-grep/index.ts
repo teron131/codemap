@@ -22,6 +22,7 @@ export {
 	syntaxMatches,
 	syntaxRewrite,
 	targetFiles,
+	targetLanguages,
 } from "./adapter.js";
 export {
 	matchJson,

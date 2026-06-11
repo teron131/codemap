@@ -32,8 +32,8 @@ Use `--json` when another script or agent needs exact match objects.
 Use call wrappers for the repeated pattern `$TARGET($$$ARGS)`:
 
 ```sh
-codemap search calls --project-root <path> --lang python print <paths...>
-codemap search calls --project-root <path> --lang typescript console.log <paths...>
+codemap search calls --project-root <path> print <paths...>
+codemap search calls --project-root <path> console.log <paths...>
 codemap syntax replace-call --project-root <path> oldFn newFn <paths...>
 codemap syntax replace-call --project-root <path> oldFn newFn <paths...> --apply --yes
 ```
@@ -69,6 +69,8 @@ codemap syntax replace --project-root <path> --lang python --pattern "$A == None
 ```
 
 Omit `--lang` when target file suffixes are enough for Codemap to infer the language. Keep `--lang` for stdin previews, mixed file types, ambiguous suffixes, or language-specific ast-grep patterns.
+
+Rewrite previews print changed-line hunks by default. Add `--full` when the old full rewritten file output is easier to inspect.
 
 Use `rename` for simple identifier renames when syntax positions matter:
 

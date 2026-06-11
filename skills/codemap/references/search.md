@@ -49,11 +49,11 @@ codemap search match --project-root <path> --lang ts --pattern "function $NAME($
 Use call wrappers for the common ast-grep pattern `$TARGET($$$ARGS)`:
 
 ```sh
-codemap search calls --project-root <path> --lang python print <paths...>
-codemap search calls --project-root <path> --lang typescript console.log <paths...>
+codemap search calls --project-root <path> print <paths...>
+codemap search calls --project-root <path> console.log <paths...>
 ```
 
-`calls` means call sites: invocations like `print(...)`, `logger.info(...)`, or `console.log(...)`. It avoids making agents hand-write the same `$TARGET($$$ARGS)` pattern repeatedly. Use `syntax replace-call` only when rewriting the call target.
+`calls` means call sites: invocations like `print(...)`, `logger.info(...)`, or `console.log(...)`. It infers Python, TypeScript, JavaScript, TSX, and JSX from target file suffixes. Use `--lang` only when inference is not enough. Use `syntax replace-call` only when rewriting the call target.
 
 Use syntax recipes when a structural search or rewrite is common enough to standardize:
 
