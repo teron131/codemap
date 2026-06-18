@@ -18,7 +18,7 @@ Treat these as relationship leads. Verify behavior with focused file reads and t
 
 Start with `summary` to find repo inventory, intent clues, entrypoints, and hubs. Good starting targets are `__main__.py`, `cli.py`, `main.py`, `app.py`, dense files, and files with high import fan-in/fan-out.
 
-Use default `search` for concepts like `artifacts update`, `python imports`, `render inspection`, or specific function/class names.
+Use default `search` for concepts like `python imports`, `render inspection`, `entrypoint discovery`, or specific function/class names.
 
 Use `search match` when the query is a Python syntax pattern:
 
@@ -30,6 +30,6 @@ Use `search rule` for read-only saved ast-grep rules with kind, regex, relationa
 
 Use `search --graph` only when the search result itself needs derived relationship context.
 
-Use `inspect` on the path returned by search when you need the focused neighborhood. The target card shows incoming/outgoing imports, contained symbols, calls, long functions, and file profile hints.
+Use `inspect` on the path returned by search when you need the focused neighborhood. The target card shows incoming/outgoing imports, contained symbols, calls, long functions, source metrics, and file profile hints.
 
-Use `signals` when looking for compact refactor evidence or high-signal files, but do not treat it as a lint report. Use `signals top` for triage, `signals functions` for long functions and broad function names, `signals variables` for least-used definitions and broad name pools, and `signals files` when you need dense file profile rows directly.
+Use `signals` when looking for compact refactor evidence or high-signal files, but do not treat it as a lint report. Use `signals top` for triage, `signals functions` for long functions and broad function names, `signals variables` for least-used definitions and broad name pools, and `signals files` when you need dense file profile rows directly. Use `signals --json` when another script or agent needs stable rows.
