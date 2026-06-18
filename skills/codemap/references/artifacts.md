@@ -1,6 +1,6 @@
 # Artifacts Reference
 
-Use artifacts for explicit saved outputs. Do not treat them as the default operating mode for Codemap.
+Use artifacts for explicit saved outputs. Do not treat them as the default operating mode for Codemap, and do not interlace report/UI work with normal current-tree commands.
 
 ## Commands
 
@@ -12,11 +12,11 @@ codemap artifacts view --project-root <path> summary
 codemap artifacts view --project-root <path> html
 ```
 
-Artifacts write `.context-graph/canonical/` and `.context-graph/views/`. The rendered views include architecture, metrics, update, overview, summary, brief, hotspots, and HTML output.
+Artifacts write `.context-graph/canonical/` and `.context-graph/views/`. The rendered views include architecture, metrics, update, overview, summary, brief, hotspots, and static HTML output.
 
 ## Use Artifacts Create
 
-Use `artifacts create` when the user asks to save a report, capture a point-in-time repo map, generate handoff artifacts, produce HTML/JSON/Markdown views, or prepare CI-style evidence.
+Use `artifacts create` when the user asks to capture a point-in-time repo map, generate handoff artifacts, produce HTML/JSON/Markdown views, or prepare CI-style evidence. If the user asks for an interactive report or workbench, keep that as a consumer of Codemap artifacts rather than a core current-tree workflow.
 
 ## Use Artifacts Update
 
@@ -30,7 +30,7 @@ Use `artifacts view` to read saved artifacts:
 
 - `summary`, `brief`, `hotspots`: Markdown output.
 - `architecture`, `metrics`, `update`, `overview`: JSON output.
-- `html`: print the saved HTML report path.
+- `html`: print the saved static HTML artifact path.
 
 Use `--pretty` for JSON views when humans will read them.
 
