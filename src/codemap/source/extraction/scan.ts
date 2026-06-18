@@ -29,6 +29,7 @@ export type ScanPayload = {
 export const LANGUAGE_BY_SUFFIX: Record<string, string> = {
 	".c": "c",
 	".cc": "cpp",
+	".cjs": "javascript",
 	".conf": "config",
 	".cpp": "cpp",
 	".css": "css",

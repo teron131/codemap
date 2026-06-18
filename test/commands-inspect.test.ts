@@ -70,6 +70,11 @@ describe("inspect command handler", () => {
 		expect(commandInspect("src/app.ts", { projectRoot: workDir })).toBe(0);
 
 		const output = logLines().join("\n");
+		expect(output).toContain("## Navigation Context");
+		expect(output).toContain("- role: entry file");
+		expect(output).toContain(
+			"- why: conventional app, main, or index filename",
+		);
 		expect(output).toContain("## Contains");
 		expect(output).not.toContain("## Other Matches");
 	});
@@ -124,6 +129,9 @@ describe("inspect command handler", () => {
 		expect(output).toContain(
 			"Fallback: detailed graph skipped above 5000 files; incoming imports not computed.",
 		);
+		expect(output).toContain("## Navigation Context");
+		expect(output).toContain("- role: high-centrality source");
+		expect(output).toContain("- why: selected by import relationship evidence");
 		expect(output).toContain("## Imports From File");
 		expect(output).toContain("- ./helper");
 		expect(output).toContain("## Contains");

@@ -1,17 +1,17 @@
-/** Defines CLI behavior for refactor signal reports. */
+/** Defines CLI behavior for refactor signal output. */
 import type { Command } from "commander";
 
 import { DETAILED_ANALYSIS_FILE_LIMIT, resolveProjectRoot } from "../common.js";
-import { runScan, type ScanEntry } from "../source/extraction/index.js";
+import { runScan } from "../source/extraction/index.js";
 import {
 	buildSignalPayload,
 	renderSignalText,
 	runSignalsExport,
 	SIGNAL_OUTPUT_ROW_LIMIT,
 	SIGNAL_SECTION_CHOICES,
-	SIGNAL_TOP_ROW_LIMIT,
 	selectPayloadSection,
 } from "../source/signals/index.js";
+import { buildLightweightSignalPayload } from "../source/signals/lightweight.js";
 import { addProjectRootArgument } from "./options.js";
 
 type SignalOptions = {
@@ -20,11 +20,15 @@ type SignalOptions = {
 	json?: boolean;
 };
 
+type SignalPayloadOptions = {
+	includeTests?: boolean;
+};
+
 type RootOptions = {
 	projectRoot?: string;
 };
 
-/** Registers refactor signal report commands and output modes. */
+/** Registers refactor signal commands and output modes. */
 export function addSignalsParser(program: Command): void {
 	const signals = program
 		.command("signals")
@@ -68,29 +72,15 @@ export function commandSignals(
 	const root = resolveProjectRoot(
 		options.projectRoot ?? rootOptions.projectRoot,
 	);
-	const scan = runScan(root, { persist: false });
-	if (scan.files.length > DETAILED_ANALYSIS_FILE_LIMIT) {
-		const payload = lightweightSignalPayload(scan.files);
-		const selected = selectPayloadSection(payload, section);
-		if (options.json) {
-			console.log(JSON.stringify(selected, null, 2));
-		} else {
-			console.log(renderSignalText(selected, section).trim());
-		}
-		return 0;
-	}
-	const signalExport = runSignalsExport(root);
-	if (signalExport.status !== "ok") {
-		console.log(
-			`Signals unavailable: ${String(signalExport.message ?? "unknown error")}`,
-		);
+	let selected: Record<string, unknown>;
+	try {
+		selected = buildCurrentTreeSignalPayload(root, section, {
+			includeTests: Boolean(options.includeTests),
+		});
+	} catch (error) {
+		console.error(error instanceof Error ? error.message : String(error));
 		return 1;
 	}
-	const payload = buildSignalPayload(signalExport, {
-		limit: SIGNAL_OUTPUT_ROW_LIMIT,
-		includeTests: Boolean(options.includeTests),
-	});
-	const selected = selectPayloadSection(payload, section);
 	if (options.json) {
 		console.log(JSON.stringify(selected, null, 2));
 	} else {
@@ -99,111 +89,29 @@ export function commandSignals(
 	return 0;
 }
 
-/** Builds a compact signal summary when full analysis artifacts are absent. */
-function lightweightSignalPayload(files: ScanEntry[]): Record<string, unknown> {
-	const denseFiles = files
-		.filter((entry) => entry.fileCategory === "code")
-		.slice()
-		.sort(
-			(left, right) =>
-				-Number(left.sizeLines ?? 0) - -Number(right.sizeLines ?? 0) ||
-				compareText(left.path, right.path),
-		)
-		.slice(0, SIGNAL_OUTPUT_ROW_LIMIT)
-		.map((entry) => ({
-			file: entry.path,
-			total: entry.sizeLines,
-			defines: 0,
-			imports_local: 0,
-			exports: 0,
-			reexports_local: 0,
-			decorators: 0,
-			samples: [],
-		}));
-	const top = {
-		functions: {
-			longFunctions: [],
-			lowUseDefinitions: [],
-		},
-		variables: {
-			leastUsedDefinitions: [],
-			broadNamePools: [],
-		},
-		files: {
-			denseFiles: denseFiles.slice(0, SIGNAL_TOP_ROW_LIMIT),
-		},
-	};
-	return {
-		top,
-		relationships: {
-			counts: {
-				python_import_edges: 0,
-				typescript_import_edges: 0,
-				entrypoint_like_files: entrypointLikeFiles(files),
-				typescript_relative_imports: 0,
-				python_relative_imports: 0,
-				typescript_reexport_edges: 0,
-				python_inheritance_edges: 0,
-			},
-			top_local_import_hubs: [],
-			top_inheritance_hubs: [],
-		},
-		files: denseFiles,
-		lengths: {
-			python: emptyLengthSection(),
-			typescript: emptyLengthSection(),
-		},
-		usage: {
-			distribution: {},
-		},
-		functions: {
-			frequency: { python: [], typescript: [] },
-			definitions: { python: [], typescript: [] },
-			lowUseDefinitions: { python: [], typescript: [] },
-		},
-		variables: {
-			frequency: { python: [], typescript: [] },
-			definitions: { python: [], typescript: [] },
-			lowUseDefinitions: { python: [], typescript: [] },
-		},
-	};
-}
-
-/** Builds an empty long-function section for lightweight signals. */
-function emptyLengthSection(): Record<string, unknown> {
-	return { count: 0, median: 0, p90: 0, max: 0, items: [] };
-}
-
-/** Finds files that look like CLI or app entrypoints. */
-function entrypointLikeFiles(files: ScanEntry[]): number {
-	const entryNames = new Set([
-		"app.js",
-		"app.jsx",
-		"app.py",
-		"app.ts",
-		"app.tsx",
-		"index.js",
-		"index.jsx",
-		"index.ts",
-		"index.tsx",
-		"main.js",
-		"main.jsx",
-		"main.py",
-		"main.ts",
-		"main.tsx",
-	]);
-	return files.filter((entry) =>
-		entryNames.has(entry.path.split("/").at(-1) ?? ""),
-	).length;
-}
-
-/** Sorts text values with stable lexical ordering. */
-function compareText(left: string, right: string): number {
-	if (left < right) {
-		return -1;
+/** Builds the selected current-tree signal payload for CLI output. */
+export function buildCurrentTreeSignalPayload(
+	root: string,
+	section: string,
+	options: SignalPayloadOptions = {},
+): Record<string, unknown> {
+	const scan = runScan(root, { persist: false });
+	if (scan.files.length > DETAILED_ANALYSIS_FILE_LIMIT) {
+		const payload = buildLightweightSignalPayload(scan.files, {
+			includeTests: Boolean(options.includeTests),
+			root,
+		});
+		return selectPayloadSection(payload, section);
 	}
-	if (left > right) {
-		return 1;
+	const signalExport = runSignalsExport(root);
+	if (signalExport.status !== "ok") {
+		throw new Error(
+			`Signals unavailable: ${String(signalExport.message ?? "unknown error")}`,
+		);
 	}
-	return 0;
+	const payload = buildSignalPayload(signalExport, {
+		limit: SIGNAL_OUTPUT_ROW_LIMIT,
+		includeTests: Boolean(options.includeTests),
+	});
+	return selectPayloadSection(payload, section);
 }

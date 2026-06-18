@@ -28,7 +28,10 @@ export {
 	commandSemanticInit,
 	commandSemanticStatus,
 } from "./semantic.js";
-export { addSignalsParser, commandSignals } from "./signals.js";
+export {
+	addSignalsParser,
+	commandSignals,
+} from "./signals.js";
 export { addSummaryParser, commandSummary } from "./summary.js";
 export {
 	addSyntaxCallParsers,

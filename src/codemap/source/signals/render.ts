@@ -1,7 +1,8 @@
-/** Renders signal payload sections as readable text reports. */
+/** Renders signal payload sections as readable text output. */
 import { languageRows } from "./payload.js";
+import type { SignalRow } from "./schema.js";
 
-type Row = Record<string, unknown>;
+type Row = SignalRow;
 
 /** Renders selected signal payload sections as text. */
 export function renderSignalText(
@@ -239,7 +240,7 @@ export function appendFiles(lines: string[], rows: Row[]): void {
 	lines.push("## File Profiles");
 	for (const item of rows) {
 		lines.push(
-			`- ${item.file}: signals=${item.total}, defines=${item.defines}, local_imports=${item.imports_local}, exports=${item.exports}, reexports=${item.reexports_local}, decorators=${item.decorators}`,
+			`- ${item.file}: ${denseFileCounters(item, { includeProfileDetails: true })}`,
 		);
 	}
 	lines.push("");
@@ -299,11 +300,58 @@ export function appendDenseFileRows(
 		lines.push("- none");
 		return;
 	}
-	for (const item of rows) {
+	if (rows.some((item) => item.total_label === "lines")) {
 		lines.push(
-			`- ${item.file}: signals=${item.total}, defines=${item.defines}, local_imports=${item.imports_local}`,
+			"- note: line-ranked rows use lightweight fallback for ranking; top rows include bounded syntax details when available, and inspect gives the full local profile.",
 		);
 	}
+	for (const item of rows) {
+		lines.push(`- ${item.file}: ${denseFileCounters(item)}`);
+	}
+}
+
+/** Formats the dense-file counters shared by signals and inspect output. */
+export function denseFileCounters(
+	item: Row,
+	{ includeProfileDetails = false }: { includeProfileDetails?: boolean } = {},
+): string {
+	const counters = [
+		includeProfileDetails
+			? `${denseFileScoreText(item)}${sourceLineDetail(item)}`
+			: denseFileScoreText(item),
+	];
+	appendKnownCounter(counters, item, "defines", "defines");
+	appendKnownCounter(counters, item, "imports_local", "local_imports");
+	appendKnownCounter(counters, item, "exports", "exports");
+	appendKnownCounter(counters, item, "reexports_local", "reexports");
+	if (includeProfileDetails) {
+		appendKnownCounter(counters, item, "decorators", "decorators");
+	}
+	return counters.join(", ");
+}
+
+/** Appends a counter only when the payload includes that metric. */
+function appendKnownCounter(
+	counters: string[],
+	item: Row,
+	key: string,
+	label: string,
+): void {
+	if (key in item) {
+		counters.push(`${label}=${numberValue(item[key])}`);
+	}
+}
+
+/** Formats the main dense-file score label. */
+function denseFileScoreText(item: Row): string {
+	const label = item.total_label === "lines" ? "lines" : "signals";
+	return `${label}=${numberValue(item.total)}`;
+}
+
+/** Formats an optional source line-count detail for file profile rows. */
+function sourceLineDetail(item: Row): string {
+	const lines = Number(item.lines ?? 0);
+	return lines > 0 ? `, lines=${lines}` : "";
 }
 
 /** Appends name-frequency rows to text signal output. */
@@ -368,7 +416,12 @@ function valueOrDefault(value: unknown, fallback: unknown): unknown {
 	return value ?? fallback;
 }
 
-/** Formats labels for report headings. */
+/** Reads a numeric field from untrusted row data. */
+function numberValue(value: unknown): number {
+	return Number(value ?? 0);
+}
+
+/** Formats labels for output headings. */
 function titleCase(value: string): string {
 	return value.replace(
 		/\w\S*/g,

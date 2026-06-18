@@ -1,17 +1,29 @@
 /** Builds JSON signal payload sections for CLI output. */
 import { PY_SUFFIXES, TYPESCRIPT_SUFFIXES } from "../scanner/index.js";
-import { SIGNAL_TOP_ROW_LIMIT } from "./schema.js";
+import { isUsefulNamePoolTerm } from "./name-pools.js";
+import {
+	isGeneratedSignalPath,
+	isTestPath,
+	SIGNAL_TOP_ROW_LIMIT,
+} from "./policy.js";
+import type {
+	FunctionLengthSection,
+	LanguageRows,
+	SignalRow,
+} from "./schema.js";
 
 export const STRUCTURAL_SUFFIXES = new Set([
 	...PY_SUFFIXES,
 	...TYPESCRIPT_SUFFIXES,
 ]);
 
+export { isUsefulNamePoolTerm } from "./name-pools.js";
+
 type SignalExport = {
 	sections?: Record<string, unknown>;
 };
 
-type Row = Record<string, unknown>;
+type Row = SignalRow;
 type TopSignalPayload = {
 	functions: Record<string, Row[]>;
 	variables: Record<string, Row[]>;
@@ -68,7 +80,7 @@ export function functionPayload(
 	usageTables: Record<string, unknown>,
 	limit: number,
 	{ includeTests }: { includeTests: boolean },
-): Record<string, unknown> {
+): Record<string, LanguageRows> {
 	const pythonCandidates = fileScopedRows(
 		arrayValue(usageTables.python_function_candidates),
 		{ includeTests },
@@ -104,7 +116,7 @@ export function variablePayload(
 	usageTables: Record<string, unknown>,
 	limit: number,
 	{ includeTests }: { includeTests: boolean },
-): Record<string, unknown> {
+): Record<string, LanguageRows> {
 	const pythonCandidates = fileScopedRows(
 		arrayValue(usageTables.python_variable_candidates),
 		{ includeTests },
@@ -116,11 +128,19 @@ export function variablePayload(
 	return {
 		frequency: {
 			python: highFrequencyRows(
-				arrayValue(usageTables.python_variables),
+				arrayValue(
+					includeTests
+						? usageTables.python_variables
+						: usageTables.source_python_variables,
+				),
 				limit,
 			),
 			typescript: highFrequencyRows(
-				arrayValue(usageTables.typescript_variables),
+				arrayValue(
+					includeTests
+						? usageTables.typescript_variables
+						: usageTables.source_typescript_variables,
+				),
 				limit,
 			),
 		},
@@ -144,6 +164,9 @@ export function isStructuralFileRow(row: Row): boolean {
 	if (Number(row.total ?? 0) <= 0) {
 		return false;
 	}
+	if (isGeneratedSignalPath(filePath)) {
+		return false;
+	}
 	return [...STRUCTURAL_SUFFIXES].some((suffix) => filePath.endsWith(suffix));
 }
 
@@ -152,7 +175,7 @@ export function limitedLengthSection(
 	section: Record<string, unknown>,
 	limit: number,
 	{ includeTests }: { includeTests: boolean },
-): Record<string, unknown> {
+): FunctionLengthSection<Row> {
 	const rows = fileScopedRows(arrayValue(section.items), { includeTests });
 	const counts = rows
 		.map((row) => Number(row.count ?? 0))
@@ -192,19 +215,6 @@ export function rowFile(row: Row): string {
 	}
 	const identifier = String(row.identifier ?? "");
 	return identifier.split("::", 1)[0] ?? "";
-}
-
-/** Checks whether a path looks like test code. */
-export function isTestPath(filePath: string): boolean {
-	const parts = filePath.split("/");
-	const name = parts.at(-1) ?? filePath;
-	return (
-		parts.includes("tests") ||
-		parts.includes("__tests__") ||
-		name.startsWith("test_") ||
-		name.includes("_test.") ||
-		name.includes(".test.")
-	);
 }
 
 /** Builds the top-signal payload section for summary output. */
@@ -281,7 +291,7 @@ export function limitedRows(rows: Row[], limit: number): Row[] {
 export function highFrequencyRows(rows: Row[], limit: number): Row[] {
 	return limitedRows(
 		rows
-			.slice()
+			.filter((row) => isUsefulNamePoolTerm(String(row.name ?? "")))
 			.sort(
 				(left, right) =>
 					-Number(left.count ?? 0) - -Number(right.count ?? 0) ||

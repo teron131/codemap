@@ -27,8 +27,10 @@ export {
 export {
 	appendContainsSection,
 	appendEdgeSection,
+	appendLikelyEntryContext,
 	appendRelatedSections,
 	edgeEndpoint,
+	type LikelyEntryContext,
 	renderInspection,
 } from "./render.js";
 export {

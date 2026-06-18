@@ -70,7 +70,8 @@ export function isIgnorableFileComment(comment: string): boolean {
 	return (
 		lowered.startsWith("eslint-") ||
 		lowered.startsWith("@ts-") ||
-		lowered.startsWith("biome-ignore")
+		lowered.startsWith("biome-ignore") ||
+		lowered.startsWith("oxlint-")
 	);
 }
 

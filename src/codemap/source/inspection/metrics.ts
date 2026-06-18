@@ -33,6 +33,10 @@ export function metricsForFiles(
 		if (metrics === undefined) {
 			metrics = scanFile(path.join(root, relPath), { displayRoot: root });
 		}
+		const sizeLines = Number(item.sizeLines ?? 0);
+		if (sizeLines > 0 && metrics.lines === 0) {
+			metrics.lines = sizeLines;
+		}
 		scanned.push(metrics);
 	}
 	const pythonSpans = scanned

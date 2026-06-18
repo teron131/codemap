@@ -2,15 +2,23 @@
 import { readFileSync } from "node:fs";
 
 import type { FileMetrics, FunctionSpan } from "../scanner/index.js";
+import type {
+	DefinitionRow,
+	DenseFileRow,
+	FileCountRow,
+	FileProfileRow,
+	FunctionLengthSection,
+	NameFrequencyRow,
+	SignalFocusEntry,
+} from "./schema.js";
 
 export const IDENTIFIER_RE = /\b[A-Za-z_][A-Za-z0-9_]*\b/g;
 export const LOW_USAGE_MAX_REFERENCES = 5;
 
-type Row = Record<string, unknown>;
 type OccurrenceCounts = Map<string, number> | Record<string, unknown>;
 
 /** Builds a compact row of file-level refactor signals. */
-export function fileProfileRow(metrics: FileMetrics): Row {
+export function fileProfileRow(metrics: FileMetrics): FileProfileRow {
 	const total =
 		metrics.defines +
 		metrics.importsLocal +
@@ -22,6 +30,7 @@ export function fileProfileRow(metrics: FileMetrics): Row {
 	return {
 		file: metrics.relPath,
 		total,
+		lines: metrics.lines,
 		defines: metrics.defines,
 		imports_local: metrics.importsLocal,
 		exports: metrics.exports,
@@ -35,9 +44,9 @@ export function fileProfileRow(metrics: FileMetrics): Row {
 }
 
 /** Classifies a file role from path and metrics. */
-export function roleFor(
+function fileSignalRole(
 	filePath: string,
-	row: Row,
+	row: DenseFileRow,
 	{ entrypoints }: { entrypoints: Set<string> },
 ): string {
 	const defines = numberValue(row.defines);
@@ -73,9 +82,9 @@ export function roleFor(
 }
 
 /** Scores a file profile row for likely-entry ranking. */
-export function scoreFor(
+function fileSignalScore(
 	filePath: string,
-	row: Row,
+	row: DenseFileRow,
 	{ entrypoints }: { entrypoints: Set<string> },
 ): number {
 	const defines = numberValue(row.defines);
@@ -91,7 +100,7 @@ export function scoreFor(
 		inherits * 3 +
 		decorators * 2 +
 		exports;
-	const role = roleFor(filePath, row, { entrypoints });
+	const role = fileSignalRole(filePath, row, { entrypoints });
 	if (entrypoints.has(filePath)) {
 		score += 30;
 	}
@@ -108,27 +117,26 @@ export function scoreFor(
 }
 
 /** Ranks files that look like useful starting points. */
-export function buildLikelyMainEntries(
-	fileProfileRows: Row[],
+export function buildSignalFocusEntries(
+	fileProfileRows: DenseFileRow[],
 	{ entrypoints }: { entrypoints: Set<string> },
-): Row[] {
-	const entries: Row[] = [];
+): SignalFocusEntry[] {
+	const entries: SignalFocusEntry[] = [];
 	for (const row of fileProfileRows) {
 		const filePath = String(row.file);
-		const score = scoreFor(filePath, row, { entrypoints });
+		const score = fileSignalScore(filePath, row, { entrypoints });
 		if (score <= 0) {
 			continue;
 		}
 		entries.push({
 			score,
 			file: filePath,
-			role: roleFor(filePath, row, { entrypoints }),
+			role: fileSignalRole(filePath, row, { entrypoints }),
 			defines: numberValue(row.defines),
 			imports_local: numberValue(row.imports_local),
 			exports: numberValue(row.exports),
 			reexports_local: numberValue(row.reexports_local),
 			samples: row.samples,
-			doc_preview: null,
 		});
 	}
 	entries.sort(
@@ -140,7 +148,9 @@ export function buildLikelyMainEntries(
 }
 
 /** Counts usage rows by reference-count bucket. */
-export function usageDistribution(rows: Row[]): Record<string, number> {
+export function usageDistribution(
+	rows: DefinitionRow[],
+): Record<string, number> {
 	const buckets = new Map<string, number>();
 	for (const row of rows) {
 		const bucket = usageBucket(numberValue(row.count));
@@ -192,7 +202,7 @@ export function countIdentifierOccurrences(
 export function usageRows(
 	names: string[],
 	occurrences: OccurrenceCounts,
-): Row[] {
+): NameFrequencyRow[] {
 	const uniqueNames = [...new Set(names.filter(Boolean))].sort();
 	return uniqueNames.map((name) => ({
 		name,
@@ -228,14 +238,14 @@ export function functionUsageRows(
 	suffixes: Set<string>,
 	occurrences: OccurrenceCounts,
 	{ language }: { language: string },
-): Row[] {
-	const rows: Row[] = [];
+): DefinitionRow[] {
+	const rows: DefinitionRow[] = [];
 	for (const metrics of scannedFiles) {
 		if (!suffixes.has(metrics.suffix)) {
 			continue;
 		}
 		const exportedNames = new Set(metrics.exportedNames);
-		for (const span of metrics.functionSpans) {
+		for (const span of uniqueFunctionSpans(metrics.functionSpans)) {
 			const name = span.name;
 			const count = occurrenceCount(occurrences, name);
 			rows.push({
@@ -266,8 +276,8 @@ export function variableUsageRows(
 	suffixes: Set<string>,
 	occurrences: OccurrenceCounts,
 	{ language }: { language: string },
-): Row[] {
-	const rows: Row[] = [];
+): DefinitionRow[] {
+	const rows: DefinitionRow[] = [];
 	const seen = new Set<string>();
 	for (const metrics of scannedFiles) {
 		if (!suffixes.has(metrics.suffix)) {
@@ -353,8 +363,10 @@ export function isLowUsageVariableRefactorCandidate(
 }
 
 /** Builds long-function rows from function spans. */
-export function functionLengthSection(items: FunctionSpan[]): Row {
-	const rows = items.map((item) => ({
+export function functionLengthSection(
+	items: FunctionSpan[],
+): FunctionLengthSection {
+	const rows = uniqueFunctionSpans(items).map((item) => ({
 		identifier: item.identifier,
 		count: item.span,
 	}));
@@ -384,11 +396,27 @@ export function functionLengthSection(items: FunctionSpan[]): Row {
 	};
 }
 
+/** Collapses repeated parser hits for the same function to the strongest span. */
+function uniqueFunctionSpans(items: FunctionSpan[]): FunctionSpan[] {
+	const byIdentifier = new Map<string, FunctionSpan>();
+	for (const item of items) {
+		const current = byIdentifier.get(item.identifier);
+		if (
+			!current ||
+			item.span > current.span ||
+			(item.span === current.span && item.startLine < current.startLine)
+		) {
+			byIdentifier.set(item.identifier, item);
+		}
+	}
+	return [...byIdentifier.values()];
+}
+
 /** Selects file rows with the highest relationship count for a key. */
 export function topHubs(
-	fileProfileRows: Row[],
+	fileProfileRows: DenseFileRow[],
 	{ key, limit = 3 }: { key: string; limit?: number },
-): Row[] {
+): FileCountRow[] {
 	const rows = fileProfileRows.filter((row) => numberValue(row[key]) > 0);
 	rows.sort(
 		(left, right) =>
@@ -402,8 +430,11 @@ export function topHubs(
 }
 
 /** Selects file rows with the highest inheritance activity. */
-export function topInheritanceHubs(fileProfileRows: Row[], limit = 3): Row[] {
-	const rows: Row[] = [];
+export function topInheritanceHubs(
+	fileProfileRows: DenseFileRow[],
+	limit = 3,
+): FileCountRow[] {
+	const rows: FileCountRow[] = [];
 	for (const row of fileProfileRows) {
 		const count = numberValue(row.extends) + numberValue(row.inherits);
 		if (count > 0) {

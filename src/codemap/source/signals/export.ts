@@ -38,10 +38,10 @@ export function signalMetrics(signalsExport: Row): Row {
 	const usageTables = recordValue(usage.tables);
 	const functionLengths = recordValue(sections.function_lengths);
 	const pythonVariables = sortedUsageRows(
-		arrayValue(usageTables.python_variables),
+		arrayValue(usageTables.source_python_variables),
 	);
 	const typescriptVariables = sortedUsageRows(
-		arrayValue(usageTables.typescript_variables),
+		arrayValue(usageTables.source_typescript_variables),
 	);
 	const pythonCandidates = lowUsageCandidateRows(
 		arrayValue(usageTables.python_function_candidates),

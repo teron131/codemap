@@ -80,6 +80,9 @@ describe("summary CLI", () => {
 		expect(result.stdout).toContain("## Source Shape");
 		expect(result.stdout).toContain("## Inventory");
 		expect(result.stdout).toContain("## Likely Entries");
+		expect(result.stdout).toContain(
+			"(entry file; conventional app, main, or index filename)",
+		);
 		expect(result.stdout).toContain("## Intent Clues");
 		expect(result.stdout).toContain("- README: # Example Project");
 	});

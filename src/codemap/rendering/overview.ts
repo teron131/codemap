@@ -76,6 +76,14 @@ export function buildOverviewView(
 		},
 		inventory: architecture.inventory ?? {},
 		intent: architecture.intent ?? {},
+		likelyEntries: rowArray(architecture.likelyEntries)
+			.slice(0, 8)
+			.map((entry) => ({
+				title: entry.title,
+				role: entry.role,
+				reason: entry.reason,
+				description: entry.description,
+			})),
 		topLayers: layers.slice(0, 12).map((layer) => ({
 			name: layer.name,
 			files: arrayValue(layer.nodeIds).length,

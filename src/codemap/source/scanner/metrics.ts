@@ -22,6 +22,7 @@ export class FileMetrics {
 	importsLocal: number;
 	exports: number;
 	reexportsLocal: number;
+	lines: number;
 	extends: number;
 	inherits: number;
 	decorators: number;
@@ -59,6 +60,7 @@ export class FileMetrics {
 		this.importsLocal = 0;
 		this.exports = 0;
 		this.reexportsLocal = 0;
+		this.lines = 0;
 		this.extends = 0;
 		this.inherits = 0;
 		this.decorators = 0;
@@ -79,6 +81,14 @@ export class FileMetrics {
 		this.variableSignals = [];
 		this.functionSpans = [];
 	}
+}
+
+/** Counts newline-delimited lines in source text. */
+export function sourceLineCount(source: string): number {
+	if (!source) {
+		return 0;
+	}
+	return source.split("\n").length - 1 + (source.endsWith("\n") ? 0 : 1);
 }
 
 /** Adds a bounded identifier sample to a file metrics row. */
