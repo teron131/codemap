@@ -16,7 +16,14 @@ export const ENTRYPOINT_BASENAMES = new Set([
 	"index.ts",
 ]);
 
-export const TYPESCRIPT_SUFFIXES = new Set([".ts", ".tsx", ".js", ".jsx"]);
+export const TYPESCRIPT_SUFFIXES = new Set([
+	".ts",
+	".tsx",
+	".js",
+	".jsx",
+	".mjs",
+	".cjs",
+]);
 export const PY_SUFFIXES = new Set([".py"]);
 
 export const TEXT_SUFFIXES = new Set([
@@ -41,7 +48,6 @@ export const TEXT_SUFFIXES = new Set([
 	".jsonc",
 	".livemd",
 	".md",
-	".mjs",
 	".mmd",
 	".prisma",
 	".proto",
@@ -141,8 +147,10 @@ export const IGNORED_DIR_NAMES = new Set([
 export const KEPT_HIDDEN_DIR_NAMES = new Set([".github"]);
 
 export const TYPESCRIPT_LANG_BY_SUFFIX: Record<string, string> = {
+	".cjs": "javascript",
 	".js": "javascript",
 	".jsx": "jsx",
+	".mjs": "javascript",
 	".ts": "typescript",
 	".tsx": "tsx",
 };

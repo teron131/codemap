@@ -174,6 +174,30 @@ export function relationshipsAndUpdateHtml(
   </section>`;
 }
 
+/** Renders likely entrypoints and intent clues for navigation. */
+export function navigationEvidenceHtml(overview: Row): string {
+	const likelyEntries = rowArray(overview.likelyEntries);
+	const intent = recordValue(overview.intent);
+	const entryRows = likelyEntries.map((entry) => [
+		entry.title,
+		entry.role ?? "",
+		entry.reason ?? "",
+		entry.description,
+	]);
+	const intentItems = intentHtmlItems(intent);
+	return `
+  <section class="split">
+    <div class="panel">
+      <h2>Likely Entries</h2>
+      ${htmlTable(["Path", "Role", "Why", "Evidence"], entryRows)}
+    </div>
+    <div class="panel">
+      <h2>Intent Clues</h2>
+      ${htmlList(intentItems)}
+    </div>
+  </section>`;
+}
+
 /** Renders one titled HTML table section. */
 export function tableSectionHtml(
 	title: string,
@@ -255,6 +279,7 @@ ${REPORT_STYLE}
 
 ${metricGridHtml(counts)}
 ${relationshipsAndUpdateHtml(relationships, update)}
+${navigationEvidenceHtml(overview)}
 ${tableSectionHtml("Layers", ["Layer", "Files"], layerRows)}
 ${longAndLowUsageHtml}
 ${tableSectionHtml("Low-Use Internal Variables", ["Variable", "References"], lowUsageVariableRows)}
@@ -289,6 +314,29 @@ function recordValue(value: unknown): Row {
 /** Reads an array field from untrusted JSON-like data. */
 function arrayValue(value: unknown): unknown[] {
 	return Array.isArray(value) ? value : [];
+}
+
+/** Formats README and focused file previews for HTML intent clues. */
+function intentHtmlItems(intent: Row): string[] {
+	const items = [];
+	if (intent.readmePreview) {
+		items.push(`README: ${String(intent.readmePreview)}`);
+	}
+	for (const preview of rowArray(intent.filePreviews)) {
+		if (!isUsefulIntentPreview(preview.preview)) {
+			continue;
+		}
+		items.push(`${String(preview.file)}: ${String(preview.preview)}`);
+		if (items.length >= 6) {
+			break;
+		}
+	}
+	return items.length > 0 ? items : ["no intent clues found"];
+}
+
+/** Checks whether a preview carries real intent evidence. */
+function isUsefulIntentPreview(preview: unknown): boolean {
+	return Boolean(preview) && preview !== "none";
 }
 
 /** Reads table rows from unknown section data. */

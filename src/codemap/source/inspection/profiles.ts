@@ -4,6 +4,7 @@ import path from "node:path";
 
 import type { GraphPayload } from "../graph/index.js";
 import { languageMetricItems } from "../signals/index.js";
+import { denseFileCounters } from "../signals/render.js";
 import { importBoundaryRows } from "./graph.js";
 
 export type MetricRow = Record<string, unknown>;
@@ -61,7 +62,7 @@ export function appendFileProfile(
 ): void {
 	if (fileMetrics.longFunctions.length > 0) {
 		lines.push("");
-		lines.push("## Long Functions In File");
+		lines.push("## Functions In File");
 		for (const item of fileMetrics.longFunctions.slice(0, limit)) {
 			lines.push(`- ${String(item.identifier)}: ${String(item.count)} lines`);
 		}
@@ -116,7 +117,7 @@ export function appendFileProfileRow(lines: string[], rows: MetricRow[]): void {
 	lines.push("");
 	lines.push("## File Profile");
 	lines.push(
-		`- signals=${String(profile.total)}, defines=${String(profile.defines)}, local_imports=${String(profile.imports_local)}, exports=${String(profile.exports)}`,
+		`- ${denseFileCounters(profile, { includeProfileDetails: true })}`,
 	);
 	if (samples) {
 		lines.push(`- samples: ${samples}`);
@@ -209,7 +210,7 @@ export function renderDirectoryProfile(
 		lines.push("## Dense Files");
 		for (const item of denseRows.slice(0, limit)) {
 			lines.push(
-				`- ${String(item.file)}: signals=${String(item.total)}, defines=${String(item.defines)}, local_imports=${String(item.imports_local)}`,
+				`- ${String(item.file)}: ${denseFileCounters(item, { includeProfileDetails: true })}`,
 			);
 		}
 		appendLimitMarker(lines, denseRows.length, limit);
@@ -299,7 +300,7 @@ function numberValue(value: unknown): number {
 	return Number(value ?? 0);
 }
 
-/** Formats labels for report headings. */
+/** Formats labels for output headings. */
 function titleCase(value: string): string {
 	return value ? `${value[0]?.toUpperCase() ?? ""}${value.slice(1)}` : value;
 }

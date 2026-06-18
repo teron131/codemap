@@ -1,6 +1,5 @@
 /** Re-exports signal analysis builders, payloads, and renderers. */
 export {
-	buildLikelyMainEntries,
 	countIdentifierOccurrences,
 	fileProfileRow,
 	functionLengthSection,
@@ -12,8 +11,6 @@ export {
 	isLowUsageVariableRefactorCandidate,
 	isPascalCaseName,
 	LOW_USAGE_MAX_REFERENCES,
-	roleFor,
-	scoreFor,
 	topHubs,
 	topInheritanceHubs,
 	usageBucket,
@@ -32,7 +29,6 @@ export {
 	buildSignalExport,
 	docPreviewsByFile,
 	functionSpans,
-	likelyMainDocFilesFor,
 	SUMMARY_SECTIONS,
 	selectedSections,
 	signalExportMeta,
@@ -53,7 +49,6 @@ export {
 	functionPressureRows,
 	highFrequencyRows,
 	isStructuralFileRow,
-	isTestPath,
 	languageRows,
 	limitedLengthSection,
 	limitedRows,
@@ -66,6 +61,14 @@ export {
 	variablePayload,
 } from "./payload.js";
 export {
+	isGeneratedSignalPath,
+	isTestPath,
+	SIGNAL_OUTPUT_ROW_LIMIT,
+	SIGNAL_SECTION_CHOICES,
+	SIGNAL_TOP_ROW_LIMIT,
+	type SignalSection,
+} from "./policy.js";
+export {
 	appendDefinitionRows,
 	appendDenseFileRows,
 	appendFileCountRows,
@@ -77,14 +80,23 @@ export {
 	appendTop,
 	appendUsageDistribution,
 	appendVariableSignals,
+	denseFileCounters,
 	refsText,
 	renderSignalText,
 	signalTitle,
 } from "./render.js";
-export {
-	SIGNAL_OUTPUT_ROW_LIMIT,
-	SIGNAL_SECTION_CHOICES,
-	SIGNAL_TOP_ROW_LIMIT,
-	type SignalSection,
+export type {
+	DefinitionRow,
+	DenseFileRow,
+	FileCountRow,
+	FileProfileRow,
+	FileSignalCounters,
+	FunctionLengthItem,
+	FunctionLengthSection,
+	LanguageRows,
+	NameFrequencyRow,
+	SignalFocusEntry,
+	SignalLanguage,
+	SignalRow,
 } from "./schema.js";
 export { buildUsageSection, metricNames } from "./usage.js";

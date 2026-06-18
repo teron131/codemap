@@ -185,7 +185,11 @@ export function renderSummaryText(
 		"## Likely Entries",
 	);
 	for (const entry of rowArray(architecture.likelyEntries).slice(0, 5)) {
-		lines.push(`- ${String(entry.title)}: ${String(entry.description)}`);
+		const roleBits = [entry.role, entry.reason]
+			.filter(Boolean)
+			.map((value) => String(value));
+		const role = roleBits.length > 0 ? ` (${roleBits.join("; ")})` : "";
+		lines.push(`- ${String(entry.title)}${role}: ${String(entry.description)}`);
 	}
 	const intentLines = intentSummaryLines(intent);
 	if (intentLines.length > 0) {
@@ -258,10 +262,17 @@ export function intentSummaryLines(intent: Row): string[] {
 	const previews = rowArray(intent.filePreviews).sort((left, right) =>
 		compareText(String(left.file ?? ""), String(right.file ?? "")),
 	);
-	for (const item of previews.slice(0, 5)) {
+	for (const item of previews
+		.filter((preview) => isUsefulIntentPreview(preview.preview))
+		.slice(0, 5)) {
 		lines.push(`- ${String(item.file)}: ${String(item.preview)}`);
 	}
 	return lines;
+}
+
+/** Checks whether a preview carries real intent evidence. */
+function isUsefulIntentPreview(preview: unknown): boolean {
+	return Boolean(preview) && preview !== "none";
 }
 
 /** Reads a record field from untrusted JSON-like data. */

@@ -1,4 +1,4 @@
-/** Defines CLI behavior for current-tree summary reports. */
+/** Defines CLI behavior for current-tree summary output. */
 import type { Command } from "commander";
 
 import { DETAILED_ANALYSIS_FILE_LIMIT, resolveProjectRoot } from "../common.js";
@@ -33,7 +33,7 @@ export function addSummaryParser(program: Command): void {
 	addProjectRootArgument(summary);
 }
 
-/** Builds and prints the current-tree summary report. */
+/** Builds and prints the current-tree summary output. */
 export function commandSummary(
 	options: SummaryOptions,
 	rootOptions: RootOptions = {},
@@ -41,18 +41,32 @@ export function commandSummary(
 	const root = resolveProjectRoot(
 		options.projectRoot ?? rootOptions.projectRoot,
 	);
-	const scan = runScan(root, { persist: false });
-	const graph =
-		scan.files.length > DETAILED_ANALYSIS_FILE_LIMIT
-			? lightweightSummaryGraph(scan)
-			: currentTreeGraph(root, { includeSignals: false });
-	const renderedViews = buildViews(graph, { root });
+	const renderedViews = buildViews(buildSummaryGraph(root), {
+		includeHtml: false,
+		root,
+	});
 	console.log(String(renderedViews.summaryText ?? "").trim());
 	return 0;
 }
 
+/** Builds the current-tree graph payload used by summary-style output. */
+export function buildSummaryGraph(root: string): GraphPayload {
+	const scan = runScan(root, { persist: false });
+	return buildSummaryGraphFromScan(root, scan);
+}
+
+/** Builds a summary graph while reusing an existing inventory scan when possible. */
+export function buildSummaryGraphFromScan(
+	root: string,
+	scan: ReturnType<typeof runScan>,
+): GraphPayload {
+	return scan.files.length > DETAILED_ANALYSIS_FILE_LIMIT
+		? buildLightweightSummaryGraph(scan)
+		: currentTreeGraph(root, { includeSignals: false });
+}
+
 /** Builds a minimal graph when summary output has no saved graph yet. */
-function lightweightSummaryGraph(scan: {
+function buildLightweightSummaryGraph(scan: {
 	files: ScanEntry[];
 	stats: {
 		byLanguage?: Record<string, number>;

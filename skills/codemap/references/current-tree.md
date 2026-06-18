@@ -53,11 +53,11 @@ Use `signals` for structural refactor evidence. The default output is a compact 
 - `files`: dense file profiles.
 - `usage` and `lengths`: lower-level distributions.
 
-Signals should help choose what to read or change next; they should not automatically decide that code is wrong. Dense file text rows use `signals` for the summed structural count, while JSON keeps the field name `total` for existing scripts. Rows have an internal high cap to prevent runaway output. File-specific rows skip likely tests by default; add `--include-tests` for whole-tree rows. Use `--json` with `jq` for filtering, slicing, scripts, and agent pipelines.
+Signals should help choose what to read or change next; they should not automatically decide that code is wrong. Dense file text rows use `signals` for the summed structural count when full analysis is available. Large-repo fallback rows use `lines` because they are scanner-only file-size hints, while JSON keeps the field name `total` for existing scripts. Rows have an internal high cap to prevent runaway output. File-specific rows skip likely tests by default; add `--include-tests` for whole-tree rows. Use `--json` with `jq` for filtering, slicing, scripts, and agent pipelines.
 
 ## Artifact Boundary
 
-Do not run `artifacts create` or `artifacts update` for normal search, inspect, summary, or signals requests. Use artifacts only when the user asks for saved output, reports, handoff evidence, or point-in-time output.
+Do not run `artifacts create` or `artifacts update` for normal search, inspect, summary, or signals requests. Use artifacts only when the user asks for saved output, durable handoff evidence, or point-in-time output.
 
 ## Non-Goals
 

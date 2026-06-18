@@ -12,6 +12,7 @@ import {
 	addVariableSignal,
 	codeSignalIdentifier,
 	FileMetrics,
+	sourceLineCount,
 } from "./metrics.js";
 
 /** Walks ast-grep syntax nodes depth-first. */
@@ -289,6 +290,7 @@ export function scanTypescriptFile(
 		return metrics;
 	}
 
+	metrics.lines = sourceLineCount(source);
 	metrics.entrypointHint =
 		ENTRYPOINT_BASENAMES.has(path.basename(filePath)) ||
 		source.includes("require.main === module");

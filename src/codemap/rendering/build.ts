@@ -1,11 +1,7 @@
 /** Builds rendered text, HTML, and overview views from graph payloads. */
 import path from "node:path";
 
-import type {
-	GraphEdge,
-	GraphNode,
-	GraphPayload,
-} from "../source/graph/index.js";
+import type { GraphNode, GraphPayload } from "../source/graph/index.js";
 import { signalMetrics } from "../source/signals/index.js";
 import {
 	buildIntentView,
@@ -13,6 +9,10 @@ import {
 	relationshipCountsFromGraph,
 } from "./architecture.js";
 import { renderHtmlReport } from "./html-report.js";
+import {
+	buildLikelyEntries,
+	buildPathRankedLikelyEntries,
+} from "./likely-entries.js";
 import {
 	renderAgentBrief,
 	renderHotspotsText,
@@ -96,63 +96,18 @@ export function buildLayers(nodes: GraphNode[]): Row[] {
 		});
 }
 
-/** Builds likely entrypoint rows from graph node centrality. */
-export function buildLikelyEntries(
-	nodes: GraphNode[],
-	edges: GraphEdge[],
-): Row[] {
-	const fileNodes = nodes.filter(
-		(node) => node.filePath && !["function", "class"].includes(node.type),
-	);
-	const codeNodes = fileNodes.filter((node) =>
-		(node.tags ?? []).includes("code"),
-	);
-	const candidates = codeNodes.length > 0 ? codeNodes : fileNodes;
-	const fanIn = countBy(
-		edges.filter((edge) => edge.type === "imports"),
-		(edge) => edge.target,
-	);
-	const fanOut = countBy(
-		edges.filter((edge) => edge.type === "imports"),
-		(edge) => edge.source,
-	);
-	const scored = candidates.slice().sort((left, right) => {
-		const leftTags = new Set(left.tags ?? []);
-		const rightTags = new Set(right.tags ?? []);
-		const tuple = [
-			Number(!leftTags.has("entry-candidate")) -
-				Number(!rightTags.has("entry-candidate")),
-			Number(path.basename(left.filePath) === "__init__.py") -
-				Number(path.basename(right.filePath) === "__init__.py"),
-			-((fanIn.get(left.id) ?? 0) + (fanOut.get(left.id) ?? 0)) -
-				-((fanIn.get(right.id) ?? 0) + (fanOut.get(right.id) ?? 0)),
-		];
-		for (const diff of tuple) {
-			if (diff !== 0) {
-				return diff;
-			}
-		}
-		return compareText(left.filePath, right.filePath);
-	});
-	return scored.slice(0, 8).map((node, index) => {
-		const incoming = fanIn.get(node.id) ?? 0;
-		const outgoing = fanOut.get(node.id) ?? 0;
-		return {
-			order: index + 1,
-			title: String(node.filePath || node.name || node.id),
-			description: `High-signal file with ${incoming} incoming and ${outgoing} outgoing import edges.`,
-			nodeIds: [node.id],
-		};
-	});
-}
-
 /** Builds all rendered artifact views from a graph payload. */
 export function buildViews(
 	graph: GraphPayload,
 	{
+		includeHtml = true,
 		root = null,
 		refreshSummary = null,
-	}: { root?: string | null; refreshSummary?: Row | null } = {},
+	}: {
+		includeHtml?: boolean;
+		root?: string | null;
+		refreshSummary?: Row | null;
+	} = {},
 ): Row {
 	const nodes = graph.nodes;
 	const edges = graph.edges;
@@ -164,10 +119,7 @@ export function buildViews(
 	if (importMapEvidence.mode === "lightweight-summary") {
 		relationships.importCountsUnavailable = true;
 		relationships.importCountsNote = importMapEvidence.reason ?? "";
-		likelyEntries = likelyEntries.map((entry) => ({
-			...entry,
-			description: "Fallback entry candidate; detailed graph skipped.",
-		}));
+		likelyEntries = buildPathRankedLikelyEntries(nodes);
 	}
 	const inventory = buildInventoryView(graph.stats, nodes);
 	const intent = buildIntentView(root, likelyEntries);
@@ -197,7 +149,7 @@ export function buildViews(
 	const brief = renderAgentBrief(architecture, metrics, update);
 	const summaryText = renderSummaryText(overview, architecture, update);
 	const hotspotsText = renderHotspotsText(metrics);
-	const htmlReport = renderHtmlReport(overview, update);
+	const htmlReport = includeHtml ? renderHtmlReport(overview, update) : "";
 	return {
 		architecture,
 		metrics,
@@ -210,19 +162,6 @@ export function buildViews(
 	};
 }
 
-/** Counts rows by a derived key. */
-function countBy<T>(
-	items: T[],
-	keyFor: (item: T) => string,
-): Map<string, number> {
-	const counts = new Map<string, number>();
-	for (const item of items) {
-		const key = keyFor(item);
-		counts.set(key, (counts.get(key) ?? 0) + 1);
-	}
-	return counts;
-}
-
 /** Reads a record field from untrusted JSON-like data. */
 function recordValue(value: unknown): Row {
 	return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -230,7 +169,7 @@ function recordValue(value: unknown): Row {
 		: {};
 }
 
-/** Formats labels for report headings. */
+/** Formats labels for output headings. */
 function titleCase(value: string): string {
 	return value.replace(/\S+/g, (word) => {
 		const first = word[0] ?? "";

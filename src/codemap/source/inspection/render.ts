@@ -14,6 +14,12 @@ import {
 } from "./profiles.js";
 import { inspectCandidates, nodeLabel, normalizeTarget } from "./targets.js";
 
+export type LikelyEntryContext = {
+	role?: unknown;
+	reason?: unknown;
+	description?: unknown;
+};
+
 /** Renders the opposite endpoint and direction for a graph edge. */
 export function edgeEndpoint(
 	edge: GraphEdge,
@@ -115,7 +121,10 @@ export function renderInspection(
 	graph: GraphPayload,
 	metrics: Record<string, unknown>,
 	rawTarget: string,
-	{ limit }: { limit: number },
+	{
+		limit,
+		likelyEntries = {},
+	}: { limit: number; likelyEntries?: Record<string, LikelyEntryContext> },
 ): string | null {
 	const target = normalizeTarget(root, rawTarget);
 	const directoryProfile = renderDirectoryProfile(
@@ -147,6 +156,7 @@ export function renderInspection(
 	const relPath = String(node.filePath ?? "");
 	const lines = [`# ${nodeLabel(node)}`, "", String(node.summary ?? "").trim()];
 
+	appendLikelyEntryContext(lines, likelyEntries[relPath]);
 	appendSymbolProfile(lines, node);
 	appendRelatedSections(lines, graph, nodeId, nodesById, { limit });
 	if (relPath) {
@@ -168,6 +178,33 @@ export function renderInspection(
 		.filter((line) => line !== undefined && line !== null)
 		.join("\n")
 		.trim();
+}
+
+/** Appends likely-entry navigation context for inspected files. */
+export function appendLikelyEntryContext(
+	lines: string[],
+	context: LikelyEntryContext | undefined,
+): void {
+	if (context === undefined) {
+		return;
+	}
+	const role = String(context.role ?? "").trim();
+	const reason = String(context.reason ?? "").trim();
+	const description = String(context.description ?? "").trim();
+	if (!role && !reason && !description) {
+		return;
+	}
+	lines.push("");
+	lines.push("## Navigation Context");
+	if (role) {
+		lines.push(`- role: ${role}`);
+	}
+	if (reason) {
+		lines.push(`- why: ${reason}`);
+	}
+	if (description) {
+		lines.push(`- evidence: ${description}`);
+	}
 }
 
 /** Marks list sections that were shortened by the display limit. */
