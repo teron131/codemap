@@ -48,7 +48,7 @@ codemap signals --project-root <path> top
 codemap signals --json --project-root <path> top | jq '.top.functions.longFunctions[:10]'
 ```
 
-Text output is quick triage. `--json` is the durable surface for `jq`, scripts, and agent pipelines. Use signals to notice long functions with references, least-used definitions, broad name pools, dense files, relationship hubs, and files that deserve `inspect`.
+Text output is quick triage. `signals --json` is the deeper durable surface for `jq`, scripts, and agent pipelines. Use signals to notice long functions with references, least-used definitions, broad name pools, dense files, relationship hubs, and files that deserve `inspect`.
 
 ### You Need Structural Search Or Syntax Operations
 

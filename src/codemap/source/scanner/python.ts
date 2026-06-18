@@ -8,6 +8,7 @@ import {
 	addVariableSignal,
 	codeSignalIdentifier,
 	FileMetrics,
+	sourceLineCount,
 } from "./metrics.js";
 
 type PythonDefinition = {
@@ -235,6 +236,7 @@ export function scanPythonFile(
 		return metrics;
 	}
 
+	metrics.lines = sourceLineCount(source);
 	metrics.entrypointHint = isPythonEntrypoint(filePath, source);
 	collectPythonImportsAndVariables(metrics, source);
 	collectPythonModuleVariables(metrics, relPath, source);
@@ -355,18 +357,40 @@ function pythonHeaderEndIndex(lines: string[], startIndex: number): number {
 	let balance = 0;
 	for (let index = startIndex; index < lines.length; index += 1) {
 		const stripped = stripPythonLineComment(lines[index] ?? "").trim();
-		for (const char of stripped) {
-			if (char === "(" || char === "[" || char === "{") {
-				balance += 1;
-			} else if (char === ")" || char === "]" || char === "}") {
-				balance -= 1;
-			}
-		}
-		if (balance <= 0 && stripped.endsWith(":")) {
+		const state = pythonHeaderLineState(stripped, balance);
+		balance = state.balance;
+		if (balance <= 0 && state.terminated) {
 			return index;
 		}
 	}
 	return startIndex;
+}
+
+/** Tracks bracket balance and top-level colon state for one header line. */
+function pythonHeaderLineState(
+	line: string,
+	initialBalance: number,
+): { balance: number; terminated: boolean } {
+	let balance = initialBalance;
+	let quote: string | null = null;
+	for (let index = 0; index < line.length; index += 1) {
+		const char = line[index];
+		if ((char === "'" || char === '"') && line[index - 1] !== "\\") {
+			quote = quote === char ? null : (quote ?? char);
+			continue;
+		}
+		if (quote !== null) {
+			continue;
+		}
+		if (char === "(" || char === "[" || char === "{") {
+			balance += 1;
+		} else if (char === ")" || char === "]" || char === "}") {
+			balance -= 1;
+		} else if (char === ":" && balance === 0) {
+			return { balance, terminated: true };
+		}
+	}
+	return { balance, terminated: false };
 }
 
 /** Removes Python line comments outside strings. */

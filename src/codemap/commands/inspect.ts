@@ -4,10 +4,17 @@ import path from "node:path";
 import type { Command } from "commander";
 
 import { DETAILED_ANALYSIS_FILE_LIMIT, resolveProjectRoot } from "../common.js";
+import {
+	buildLikelyEntries,
+	buildPathRankedLikelyEntries,
+} from "../rendering/index.js";
 import { runScan, type ScanEntry } from "../source/extraction/index.js";
 import { structureForFile } from "../source/extraction/structure.js";
+import type { GraphPayload } from "../source/graph/index.js";
 import {
+	appendLikelyEntryContext,
 	currentTreeInspectGraph,
+	type LikelyEntryContext,
 	renderInspection,
 } from "../source/inspection/index.js";
 import { metricsForFiles } from "../source/inspection/metrics.js";
@@ -17,6 +24,7 @@ import {
 } from "../source/inspection/profiles.js";
 import { type FileMetrics, scanFile } from "../source/scanner/index.js";
 import { addProjectRootArgument, parseIntegerOption } from "./options.js";
+import { buildSummaryGraphFromScan } from "./summary.js";
 
 type InspectOptions = {
 	projectRoot?: string;
@@ -67,22 +75,38 @@ export function commandInspect(
 	);
 	const limit = inspectLimit(options.limit);
 	const pathTargetKind = inspectPathTargetKind(root, target);
+	let pathTargetScan: ReturnType<typeof runScan> | null = null;
 	if (pathTargetKind !== null) {
 		const scan = runScan(root, { persist: false });
+		pathTargetScan = scan;
 		if (scan.files.length > DETAILED_ANALYSIS_FILE_LIMIT) {
+			const likelyEntries = likelyEntryContextByFile(
+				buildSummaryGraphFromScan(root, scan),
+			);
 			const inspection =
 				pathTargetKind === "directory"
-					? lightweightDirectoryInspection(root, target, scan.files, { limit })
-					: lightweightFileInspection(root, target, scan.files, { limit });
+					? renderLightweightDirectoryInspection(root, target, scan.files, {
+							limit,
+						})
+					: renderLightweightFileInspection(root, target, scan.files, {
+							limit,
+							likelyEntries,
+						});
 			if (inspection !== null) {
 				console.log(inspection);
 				return 0;
 			}
 		}
 	}
-	const [graph, metrics] = currentTreeInspectGraph(root, target);
+	const [graph, metrics] = currentTreeInspectGraph(
+		root,
+		target,
+		pathTargetScan,
+	);
+	const likelyEntries = likelyEntryContextByFile(graph);
 	const inspection = renderInspection(root, graph, metrics, target, {
 		limit,
+		likelyEntries,
 	});
 	if (inspection === null) {
 		console.log(`No match: ${target}`);
@@ -113,11 +137,14 @@ function inspectPathTargetKind(
 }
 
 /** Renders file inspection from one target file when whole-repo graphing is too large. */
-function lightweightFileInspection(
+function renderLightweightFileInspection(
 	root: string,
 	target: string,
 	files: ScanEntry[],
-	{ limit }: { limit: number },
+	{
+		limit,
+		likelyEntries,
+	}: { limit: number; likelyEntries: Record<string, LikelyEntryContext> },
 ): string | null {
 	const relTarget = directoryRelTarget(root, target);
 	const scanEntry = files.find((entry) => entry.path === relTarget);
@@ -138,6 +165,7 @@ function lightweightFileInspection(
 		`${relTarget}: ${scanEntry.fileCategory} file in ${scanEntry.language}; ${scanEntry.sizeLines} lines; ${functionCount} functions, ${classCount} classes.`,
 		`Fallback: detailed graph skipped above ${DETAILED_ANALYSIS_FILE_LIMIT} files; incoming imports not computed.`,
 	];
+	appendLikelyEntryContext(lines, likelyEntries[relTarget]);
 	appendFileImportSpecs(lines, metrics, { limit });
 	appendFileContains(lines, relTarget, structure, { limit });
 	const fileMetrics = metricsForFiles(root, [scanEntry], {
@@ -149,8 +177,43 @@ function lightweightFileInspection(
 	return lines.join("\n").trim();
 }
 
+/** Builds likely-entry context keyed by source file path from graph evidence. */
+function likelyEntryContextByFile(
+	graph: GraphPayload,
+): Record<string, LikelyEntryContext> {
+	const importMapEvidence = recordValue(graph.evidence.importMap);
+	const entries =
+		importMapEvidence.mode === "lightweight-summary"
+			? buildPathRankedLikelyEntries(graph.nodes)
+			: buildLikelyEntries(graph.nodes, graph.edges);
+	const byFile: Record<string, LikelyEntryContext> = {};
+	for (const entry of entries) {
+		if (entry === null || typeof entry !== "object") {
+			continue;
+		}
+		const row = entry as Record<string, unknown>;
+		const filePath = String(row.title ?? "");
+		if (!filePath) {
+			continue;
+		}
+		byFile[filePath] = {
+			role: row.role,
+			reason: row.reason,
+			description: row.description,
+		};
+	}
+	return byFile;
+}
+
+/** Reads a record field from untrusted JSON-like data. */
+function recordValue(value: unknown): Record<string, unknown> {
+	return value !== null && typeof value === "object" && !Array.isArray(value)
+		? (value as Record<string, unknown>)
+		: {};
+}
+
 /** Renders directory inspection from scan data when graph artifacts are absent. */
-function lightweightDirectoryInspection(
+function renderLightweightDirectoryInspection(
 	root: string,
 	target: string,
 	files: ScanEntry[],

@@ -12,7 +12,7 @@ import {
 	TYPESCRIPT_SUFFIXES,
 } from "../scanner/index.js";
 import {
-	buildLikelyMainEntries,
+	buildSignalFocusEntries,
 	fileProfileRow,
 	functionLengthSection,
 	topHubs,
@@ -24,6 +24,7 @@ import {
 	buildFilePreviews,
 	DOCSTRING_SUFFIXES,
 } from "./docstrings/index.js";
+import type { DenseFileRow, SignalFocusEntry, SignalRow } from "./schema.js";
 import { buildUsageSection } from "./usage.js";
 
 export const SUMMARY_SECTIONS = [
@@ -46,7 +47,7 @@ export const ALL_SECTIONS = [
 	"docstrings",
 ] as const;
 
-type Row = Record<string, unknown>;
+type Row = SignalRow;
 
 /** Expands signal section modes into concrete section names. */
 export function selectedSections(sectionMode: string | string[]): string[] {
@@ -104,7 +105,7 @@ export function buildFilesystemSection(displayFiles: string[]): Row {
 export function buildRelationshipsSection(
 	displayFiles: string[],
 	scannedFiles: FileMetrics[],
-	fileProfileRows: Row[],
+	fileProfileRows: DenseFileRow[],
 	entrypoints: Set<string>,
 ): Row {
 	return {
@@ -179,17 +180,17 @@ export function buildFunctionLengthsSection(scannedFiles: FileMetrics[]): Row {
 	};
 }
 
-/** Finds README-like files that likely explain the project entrypoints. */
-export function likelyMainDocFilesFor(
+/** Finds README-like files that explain signal focus entries. */
+function signalFocusDocFilesFor(
 	targetPath: string,
 	displayRoot: string,
-	likelyMainEntries: Row[],
+	signalFocusEntries: SignalFocusEntry[],
 ): string[] {
 	if (isFile(targetPath) && DOCSTRING_SUFFIXES.has(path.extname(targetPath))) {
 		return [relativePath(targetPath, { displayRoot })];
 	}
 	const docFiles: string[] = [];
-	for (const entry of likelyMainEntries) {
+	for (const entry of signalFocusEntries) {
 		const filePath = String(entry.file);
 		if (DOCSTRING_SUFFIXES.has(path.extname(filePath))) {
 			docFiles.push(filePath);
@@ -198,12 +199,12 @@ export function likelyMainDocFilesFor(
 	return docFiles;
 }
 
-/** Builds the compact docstring signal section for likely main files. */
+/** Builds the compact docstring signal section for signal focus files. */
 export function buildDocstringSignalSection(
 	targetPath: string,
-	likelyMainDocFiles: string[],
+	signalFocusDocFiles: string[],
 ): Row {
-	const signalFocus = likelyMainDocFiles.slice(0, 3);
+	const signalFocus = signalFocusDocFiles.slice(0, 3);
 	if (signalFocus.length === 0) {
 		return buildEmptyDocstringSignals();
 	}
@@ -214,17 +215,17 @@ export function buildDocstringSignalSection(
 	});
 }
 
-/** Builds docstring preview text keyed by likely main files. */
+/** Builds docstring preview text keyed by signal focus files. */
 export function docPreviewsByFile(
 	targetPath: string,
-	likelyMainDocFiles: string[],
+	signalFocusDocFiles: string[],
 ): Row {
-	if (likelyMainDocFiles.length === 0) {
+	if (signalFocusDocFiles.length === 0) {
 		return {};
 	}
 	return Object.fromEntries(
 		buildFilePreviews(targetPath, {
-			focusFiles: likelyMainDocFiles,
+			focusFiles: signalFocusDocFiles,
 			maxFiles: 0,
 		}).map((item) => [item.file, item.preview]),
 	);
@@ -232,11 +233,14 @@ export function docPreviewsByFile(
 
 /** Attaches short documentation previews to the signal payload. */
 export function attachDocPreviews(
-	likelyMainEntries: Row[],
+	signalFocusEntries: SignalFocusEntry[],
 	previewsByFile: Row,
 ): void {
-	for (const entry of likelyMainEntries) {
-		entry.doc_preview = previewsByFile[String(entry.file)] ?? null;
+	for (const entry of signalFocusEntries) {
+		const preview = previewsByFile[String(entry.file)];
+		if (preview !== undefined) {
+			entry.doc_preview = preview;
+		}
 	}
 }
 
@@ -289,21 +293,21 @@ export function buildSignalExport(
 			.filter((metrics) => metrics.entrypointHint)
 			.map((metrics) => metrics.relPath),
 	);
-	const likelyMainEntries = buildLikelyMainEntries(fileProfileRows, {
+	const signalFocusEntries = buildSignalFocusEntries(fileProfileRows, {
 		entrypoints,
 	});
-	const likelyMainDocFiles = likelyMainDocFilesFor(
+	const signalFocusDocFiles = signalFocusDocFilesFor(
 		targetPath,
 		displayRoot,
-		likelyMainEntries,
+		signalFocusEntries,
 	);
 	const selected = selectedSections(sectionMode);
 	const docstringSignals = selected.includes("docstring-signals")
-		? buildDocstringSignalSection(targetPath, likelyMainDocFiles)
+		? buildDocstringSignalSection(targetPath, signalFocusDocFiles)
 		: null;
 	attachDocPreviews(
-		likelyMainEntries,
-		docPreviewsByFile(targetPath, likelyMainDocFiles),
+		signalFocusEntries,
+		docPreviewsByFile(targetPath, signalFocusDocFiles),
 	);
 
 	const sections: Row = {};
@@ -322,7 +326,7 @@ export function buildSignalExport(
 		sections.docstring_signals = docstringSignals;
 	}
 	if (selected.includes("likely-main")) {
-		sections.likely_main_entries = likelyMainEntries;
+		sections.likely_main_entries = signalFocusEntries;
 	}
 	if (selected.includes("file-profiles")) {
 		sections.file_profiles = fileProfileRows;

@@ -61,8 +61,15 @@ export function buildIntentView(
 			: [];
 	return {
 		readmePreview: readmeFirstLine(root),
-		filePreviews: previews.filter((item) => item.preview),
+		filePreviews: previews.filter((item) =>
+			isUsefulIntentPreview(item.preview),
+		),
 	};
+}
+
+/** Checks whether a file preview carries real intent evidence. */
+function isUsefulIntentPreview(preview: string): boolean {
+	return Boolean(preview) && preview !== "none";
 }
 
 /** Reads the first useful README line for intent clues. */
@@ -76,14 +83,29 @@ export function readmeFirstLine(root: string | null): string {
 			continue;
 		}
 		const text = readFileSync(readmePath, "utf8");
-		return (
-			text
-				.split(/\r?\n/)
-				.map((line) => line.split(/\s+/).filter(Boolean).join(" "))
-				.find(Boolean) ?? ""
-		);
+		return text.split(/\r?\n/).map(readmeIntentLine).find(Boolean) ?? "";
 	}
 	return "";
+}
+
+/** Extracts useful README intent text while ignoring decorative markup. */
+export function readmeIntentLine(line: string): string {
+	const stripped = line.trim();
+	if (!stripped) {
+		return "";
+	}
+	if (/^!\[[^\]]*\]\(/.test(stripped)) {
+		return "";
+	}
+	if (/^<\/?(a|div|p|picture|source|img)\b/i.test(stripped)) {
+		return "";
+	}
+	const withoutTags = stripped.replace(/<[^>]+>/g, " ");
+	const normalized = withoutTags.split(/\s+/).filter(Boolean).join(" ");
+	if (!normalized || normalized.startsWith("[!")) {
+		return "";
+	}
+	return normalized;
 }
 
 /** Counts imports, contains edges, and inheritance relationships. */

@@ -3,12 +3,12 @@ export {
 	buildIntentView,
 	buildInventoryView,
 	readmeFirstLine,
+	readmeIntentLine,
 	relationshipCountsFromGraph,
 	topCountItems,
 } from "./architecture.js";
 export {
 	buildLayers,
-	buildLikelyEntries,
 	buildViews,
 	FILE_NODE_TYPES,
 	STRUCTURE_HASH_DESCRIPTION,
@@ -25,6 +25,10 @@ export {
 	splitTableSectionHtml,
 	tableSectionHtml,
 } from "./html-report.js";
+export {
+	buildLikelyEntries,
+	buildPathRankedLikelyEntries,
+} from "./likely-entries.js";
 export {
 	formatCountItems,
 	intentSummaryLines,

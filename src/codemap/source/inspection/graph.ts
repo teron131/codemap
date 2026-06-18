@@ -12,8 +12,9 @@ import { inspectEmitPaths } from "./targets.js";
 export function currentTreeInspectGraph(
 	root: string,
 	rawTarget: string,
+	existingScan: ReturnType<typeof runScan> | null = null,
 ): [GraphPayload, Record<string, unknown>] {
-	const scan = runScan(root, { persist: false });
+	const scan = existingScan ?? runScan(root, { persist: false });
 	const importResult = runImportMap(root, scan.files, { persist: false });
 	const importMap = importResult.importMap;
 	const pythonTreesByPath = importResult._pythonTrees;
