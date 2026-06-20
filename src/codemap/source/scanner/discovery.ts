@@ -11,31 +11,12 @@ import {
 	SCAN_SUFFIXES,
 } from "./constants.js";
 
-/** Stores one parsed gitignore-style rule for path filtering. */
-export class IgnoreRule {
+export type IgnoreRule = {
 	include: boolean;
 	directoryOnly: boolean;
 	pathPatterns: RegExp[];
 	basenamePattern: RegExp | null;
-
-	/** Stores include/exclude patterns and directory-only matching state. */
-	constructor({
-		include,
-		directoryOnly,
-		pathPatterns = [],
-		basenamePattern = null,
-	}: {
-		include: boolean;
-		directoryOnly: boolean;
-		pathPatterns?: RegExp[];
-		basenamePattern?: RegExp | null;
-	}) {
-		this.include = include;
-		this.directoryOnly = directoryOnly;
-		this.pathPatterns = pathPatterns;
-		this.basenamePattern = basenamePattern;
-	}
-}
+};
 
 /** Discovers scan-eligible files under a target path. */
 export function discoverFiles(targetPath: string): string[] {
@@ -210,24 +191,27 @@ export function compileGitignoreRule(
 		return null;
 	}
 	if (cleanPattern.startsWith("/")) {
-		return new IgnoreRule({
+		return {
 			include,
 			directoryOnly,
 			pathPatterns: [compileGlob(cleanPattern.slice(1))],
-		});
+			basenamePattern: null,
+		};
 	}
 	if (!cleanPattern.includes("/")) {
-		return new IgnoreRule({
+		return {
 			include,
 			directoryOnly,
+			pathPatterns: [],
 			basenamePattern: compileGlob(cleanPattern),
-		});
+		};
 	}
-	return new IgnoreRule({
+	return {
 		include,
 		directoryOnly,
 		pathPatterns: [compileGlob(cleanPattern), compileGlob(`${cleanPattern}/*`)],
-	});
+		basenamePattern: null,
+	};
 }
 
 /** Compiles a glob pattern into a regular expression. */

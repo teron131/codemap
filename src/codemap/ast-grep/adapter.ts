@@ -11,6 +11,8 @@ import path from "node:path";
 import { Lang, type NapiConfig, parse, type SgNode } from "@ast-grep/napi";
 import { parse as parseYaml } from "yaml";
 
+import { expandUser } from "../common.js";
+
 export const META_VAR_RE =
 	/(\$\$\$[A-Za-z_][A-Za-z0-9_]*|\$[A-Za-z_][A-Za-z0-9_]*)/g;
 
@@ -101,11 +103,6 @@ type AstGrepCliMatch = {
 	replacement?: string;
 	replacementOffsets?: { start?: number; end?: number };
 };
-
-/** Reports whether the bundled ast-grep adapter can run. */
-export function astGrepAvailable(): boolean {
-	return true;
-}
 
 /** Parses source text into an ast-grep root node for a language. */
 export function astGrepRoot(source: string, language: string): SgNode | null {
@@ -864,17 +861,6 @@ function splitLines(text: string): string[] {
 		lines.pop();
 	}
 	return lines;
-}
-
-/** Expands tilde-prefixed filesystem paths. */
-function expandUser(rawPath: string): string {
-	if (rawPath === "~") {
-		return process.env.HOME ?? rawPath;
-	}
-	if (rawPath.startsWith("~/")) {
-		return path.join(process.env.HOME ?? "~", rawPath.slice(2));
-	}
-	return rawPath;
 }
 
 /** Sorts text values with stable lexical ordering. */

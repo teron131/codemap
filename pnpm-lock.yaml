@@ -17,9 +17,6 @@ importers:
       yaml:
         specifier: ^2.9.0
         version: 2.9.0
-      zod:
-        specifier: ^4.1.13
-        version: 4.4.3
     devDependencies:
       '@biomejs/biome':
         specifier: ^2.3.8
@@ -753,9 +750,6 @@ packages:
     engines: {node: '>= 14.6'}
     hasBin: true
 
-  zod@4.4.3:
-    resolution: {integrity: sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ==}
-
 snapshots:
 
   '@ast-grep/napi-darwin-arm64@0.39.9':
@@ -1272,5 +1266,3 @@ snapshots:
       stackback: 0.0.2
 
   yaml@2.9.0: {}
-
-  zod@4.4.3: {}

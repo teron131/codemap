@@ -7,7 +7,11 @@ import {
 	intermediateDir,
 	writeJson,
 } from "../../common.js";
-import { discoverFiles, relativePath } from "../scanner/index.js";
+import {
+	discoverFiles,
+	relativePath,
+	sourceLineCount,
+} from "../scanner/index.js";
 
 export type ScanEntry = {
 	path: string;
@@ -117,10 +121,7 @@ export function countLines(filePath: string): number {
 	} catch {
 		return 0;
 	}
-	if (!text) {
-		return 0;
-	}
-	return text.split("\n").length - 1 + (text.endsWith("\n") ? 0 : 1);
+	return sourceLineCount(text);
 }
 
 /** Classifies a project path as code, docs, config, or data. */

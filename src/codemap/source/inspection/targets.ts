@@ -2,6 +2,7 @@
 import { existsSync, statSync } from "node:fs";
 import path from "node:path";
 
+import { expandUser } from "../../common.js";
 import type { GraphNode } from "../graph/index.js";
 import { type FileMetrics, scanFile } from "../scanner/index.js";
 
@@ -169,15 +170,4 @@ function isDirectory(filePath: string): boolean {
 	} catch {
 		return false;
 	}
-}
-
-/** Expands tilde-prefixed filesystem paths. */
-function expandUser(rawPath: string): string {
-	if (rawPath === "~") {
-		return process.env.HOME ?? rawPath;
-	}
-	if (rawPath.startsWith("~/")) {
-		return path.join(process.env.HOME ?? "~", rawPath.slice(2));
-	}
-	return rawPath;
 }

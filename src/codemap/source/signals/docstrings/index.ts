@@ -1,9 +1,7 @@
 /** Re-exports docstring signal models and language extractors. */
+export type { ClassReport, FileReport, FunctionReport } from "./models.js";
 export {
-	ClassReport,
 	DOCSTRING_SUFFIXES,
-	FileReport,
-	FunctionReport,
 	LIKELY_MAIN_FUNCTION_NAMES,
 	LIKELY_MAIN_FUNCTION_PREFIXES,
 	PYTHON_SUFFIXES,
