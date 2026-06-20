@@ -15,7 +15,7 @@ import {
 	syntaxRewrite,
 	targetLanguages,
 } from "../ast-grep/index.js";
-import { resolveProjectRoot } from "../common.js";
+import { expandUser, resolveProjectRoot } from "../common.js";
 import {
 	canApply,
 	printRecipeCatalog,
@@ -442,17 +442,6 @@ function relativeTargetPath(root: string, rawPath: string): string {
 	const relative = path.relative(root, cwdPath);
 	if (!relative.startsWith("..") && !path.isAbsolute(relative)) {
 		return relative.split(path.sep).join("/");
-	}
-	return rawPath;
-}
-
-/** Expands tilde-prefixed filesystem paths. */
-function expandUser(rawPath: string): string {
-	if (rawPath === "~") {
-		return process.env.HOME ?? rawPath;
-	}
-	if (rawPath.startsWith("~/")) {
-		return path.join(process.env.HOME ?? "~", rawPath.slice(2));
 	}
 	return rawPath;
 }

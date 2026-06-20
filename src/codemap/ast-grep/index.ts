@@ -2,7 +2,6 @@
 export type { SyntaxMatch, SyntaxRewriteResult } from "./adapter.js";
 export {
 	AST_GREP_IGNORED_DIR_NAMES,
-	astGrepAvailable,
 	astGrepRoot,
 	contextLines,
 	expandRewrite,

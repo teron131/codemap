@@ -1,5 +1,6 @@
 /** Loads embedding configuration and calls the embedding provider. */
 import { existsSync, readFileSync } from "node:fs";
+import { parseEnv } from "node:util";
 
 export const EMBEDDING_BASE_URL =
 	"https://generativelanguage.googleapis.com/v1beta";
@@ -69,36 +70,15 @@ export function dotenvValues(filePath: string): Record<string, string> {
 	if (!existsSync(filePath)) {
 		return {};
 	}
-	let lines: string[];
 	try {
-		lines = readFileSync(filePath, "utf8").split(/\r?\n/);
+		return Object.fromEntries(
+			Object.entries(parseEnv(readFileSync(filePath, "utf8"))).filter(
+				(entry): entry is [string, string] => entry[1] !== undefined,
+			),
+		);
 	} catch {
 		return {};
 	}
-	const values: Record<string, string> = {};
-	for (const rawLine of lines) {
-		const line = rawLine.trim();
-		if (!line || line.startsWith("#") || !line.includes("=")) {
-			continue;
-		}
-		const [key, ...rest] = line.split("=");
-		values[String(key).trim()] = cleanDotenvValue(rest.join("="));
-	}
-	return values;
-}
-
-/** Removes surrounding quotes from dotenv values. */
-export function cleanDotenvValue(value: string): string {
-	const cleaned = value.trim();
-	const first = cleaned[0];
-	if (
-		cleaned.length >= 2 &&
-		first === cleaned.at(-1) &&
-		(first === "'" || first === '"')
-	) {
-		return cleaned.slice(1, -1);
-	}
-	return cleaned;
 }
 
 /** Embeds texts in provider-sized request batches. */

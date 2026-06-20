@@ -10,7 +10,6 @@ export {
 } from "./cards.js";
 export {
 	batchEmbedTexts,
-	cleanDotenvValue,
 	compactError,
 	DEFAULT_BATCH_SIZE,
 	DEFAULT_EMBED_MODEL,

@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { PY_SUFFIXES, TYPESCRIPT_SUFFIXES } from "./constants.js";
 import { relativePath } from "./discovery.js";
-import { FileMetrics } from "./metrics.js";
+import { createFileMetrics, type FileMetrics } from "./metrics.js";
 import { scanPythonFile } from "./python.js";
 import { scanTypescriptFile } from "./typescript.js";
 
@@ -19,6 +19,7 @@ export {
 	TYPESCRIPT_LANG_BY_SUFFIX,
 	TYPESCRIPT_SUFFIXES,
 } from "./constants.js";
+export type { IgnoreRule } from "./discovery.js";
 export {
 	compileGitignoreRule,
 	compileGlob,
@@ -26,19 +27,19 @@ export {
 	discoverRipgrepFiles,
 	gitignoreMatches,
 	gitignoreRuleMatches,
-	IgnoreRule,
 	loadGitignoreRules,
 	relativePath,
 	shouldScanDir,
 	shouldScanFile,
 	walkFiles,
 } from "./discovery.js";
-export type { FunctionSpan, VariableSignal } from "./metrics.js";
+export type { FileMetrics, FunctionSpan, VariableSignal } from "./metrics.js";
 export {
 	addSample,
 	addVariableSignal,
 	codeSignalIdentifier,
-	FileMetrics,
+	createFileMetrics,
+	sourceLineCount,
 } from "./metrics.js";
 export {
 	collectPythonImportsAndVariables,
@@ -80,7 +81,7 @@ export function scanFile(
 	if (TYPESCRIPT_SUFFIXES.has(suffix)) {
 		return scanTypescriptFile(filePath, { relPath });
 	}
-	return new FileMetrics({
+	return createFileMetrics({
 		path: filePath,
 		relPath,
 		suffix,

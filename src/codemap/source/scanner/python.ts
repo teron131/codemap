@@ -7,7 +7,8 @@ import {
 	addSample,
 	addVariableSignal,
 	codeSignalIdentifier,
-	FileMetrics,
+	createFileMetrics,
+	type FileMetrics,
 	sourceLineCount,
 } from "./metrics.js";
 
@@ -224,7 +225,7 @@ export function scanPythonFile(
 	filePath: string,
 	{ relPath }: { relPath: string },
 ): FileMetrics {
-	const metrics = new FileMetrics({
+	const metrics = createFileMetrics({
 		path: filePath,
 		relPath,
 		suffix: path.extname(filePath),

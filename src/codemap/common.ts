@@ -18,9 +18,9 @@ import { fileURLToPath } from "node:url";
 type JsonObject = { [key: string]: JsonValue };
 type JsonValue = JsonObject | JsonValue[] | string | number | boolean | null;
 
-const moduleDir = path.dirname(fileURLToPath(import.meta.url));
-
-export const REPO_ROOT = path.dirname(moduleDir);
+export const REPO_ROOT = path.dirname(
+	path.dirname(fileURLToPath(import.meta.url)),
+);
 export const GRAPH_DIR_NAME = ".context-graph";
 export const GRAPH_VERSION = "0.2.0";
 export const GENERATED_PREFIXES = ".context-graph/";
@@ -148,7 +148,7 @@ export function gitCommit(root: string): string {
 }
 
 /** Expands tilde-prefixed filesystem paths. */
-function expandUser(raw: string): string {
+export function expandUser(raw: string): string {
 	if (raw === "~") {
 		return homedir();
 	}

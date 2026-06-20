@@ -13,8 +13,7 @@ export type VariableSignal = {
 	moduleLevel: boolean;
 };
 
-/** Accumulates scanner metrics for one source file. */
-export class FileMetrics {
+export type FileMetrics = {
 	path: string;
 	relPath: string;
 	suffix: string;
@@ -42,45 +41,47 @@ export class FileMetrics {
 	variableNames: string[];
 	variableSignals: VariableSignal[];
 	functionSpans: FunctionSpan[];
+};
 
-	/** Starts one file metrics record with zeroed counters and empty samples. */
-	constructor({
+/** Starts one file metrics record with zeroed counters and empty samples. */
+export function createFileMetrics({
+	path,
+	relPath,
+	suffix,
+}: {
+	path: string;
+	relPath: string;
+	suffix: string;
+}): FileMetrics {
+	return {
 		path,
 		relPath,
 		suffix,
-	}: {
-		path: string;
-		relPath: string;
-		suffix: string;
-	}) {
-		this.path = path;
-		this.relPath = relPath;
-		this.suffix = suffix;
-		this.defines = 0;
-		this.importsLocal = 0;
-		this.exports = 0;
-		this.reexportsLocal = 0;
-		this.lines = 0;
-		this.extends = 0;
-		this.inherits = 0;
-		this.decorators = 0;
-		this.jsxComponents = 0;
-		this.samples = [];
-		this.exportedNames = [];
-		this.entrypointHint = false;
-		this.typescriptImportTargets = [];
-		this.typescriptLocalImportTargets = [];
-		this.typescriptReexportTargets = [];
-		this.typescriptLocalReexportTargets = [];
-		this.typescriptExtendsBases = [];
-		this.pyImportTargets = [];
-		this.pyLocalImportTargets = [];
-		this.pyBases = [];
-		this.functionNames = [];
-		this.variableNames = [];
-		this.variableSignals = [];
-		this.functionSpans = [];
-	}
+		defines: 0,
+		importsLocal: 0,
+		exports: 0,
+		reexportsLocal: 0,
+		lines: 0,
+		extends: 0,
+		inherits: 0,
+		decorators: 0,
+		jsxComponents: 0,
+		samples: [],
+		exportedNames: [],
+		entrypointHint: false,
+		typescriptImportTargets: [],
+		typescriptLocalImportTargets: [],
+		typescriptReexportTargets: [],
+		typescriptLocalReexportTargets: [],
+		typescriptExtendsBases: [],
+		pyImportTargets: [],
+		pyLocalImportTargets: [],
+		pyBases: [],
+		functionNames: [],
+		variableNames: [],
+		variableSignals: [],
+		functionSpans: [],
+	};
 }
 
 /** Counts newline-delimited lines in source text. */
