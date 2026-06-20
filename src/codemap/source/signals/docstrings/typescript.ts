@@ -1,7 +1,7 @@
 /** Extracts TypeScript comments, signatures, classes, functions, and values. */
 import { readFileSync } from "node:fs";
 
-import { ClassReport, FileReport, FunctionReport } from "./models.js";
+import type { FileReport } from "./models.js";
 
 export const TYPESCRIPT_FUNCTION_DECL_RE =
 	/^\s*(?:export\s+default\s+)?(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(([^)]*)\)/gm;
@@ -209,15 +209,14 @@ export function appendFunctionDeclarations(
 		const lineIndex = lineIndexForOffset(starts, match.index ?? 0);
 		const name = match[1] ?? "";
 		seenFunctionKeys.add(functionKey(lineIndex, name));
-		report.functions.push(
-			new FunctionReport({
-				name,
-				lineno: lineIndex + 1,
-				inputs: formatTypescriptParams(match[2] ?? ""),
-				outputs: "unannotated",
-				docstring: declarationComment(lines, lineIndex),
-			}),
-		);
+		report.functions.push({
+			name,
+			lineno: lineIndex + 1,
+			inputs: formatTypescriptParams(match[2] ?? ""),
+			outputs: "unannotated",
+			docstring: declarationComment(lines, lineIndex),
+			nestedFunctions: [],
+		});
 	}
 }
 
@@ -234,15 +233,14 @@ export function appendArrowDeclarations(
 		const name = match[1] ?? "";
 		seenFunctionKeys.add(functionKey(lineIndex, name));
 		const params = match[2] ?? match[3] ?? "";
-		report.functions.push(
-			new FunctionReport({
-				name,
-				lineno: lineIndex + 1,
-				inputs: formatTypescriptParams(params),
-				outputs: "unannotated",
-				docstring: declarationComment(lines, lineIndex),
-			}),
-		);
+		report.functions.push({
+			name,
+			lineno: lineIndex + 1,
+			inputs: formatTypescriptParams(params),
+			outputs: "unannotated",
+			docstring: declarationComment(lines, lineIndex),
+			nestedFunctions: [],
+		});
 	}
 }
 
@@ -267,15 +265,14 @@ export function appendDocumentedValues(
 		if (!comment) {
 			continue;
 		}
-		report.functions.push(
-			new FunctionReport({
-				name,
-				lineno: lineIndex + 1,
-				inputs: "none",
-				outputs: "unannotated",
-				docstring: comment,
-			}),
-		);
+		report.functions.push({
+			name,
+			lineno: lineIndex + 1,
+			inputs: "none",
+			outputs: "unannotated",
+			docstring: comment,
+			nestedFunctions: [],
+		});
 	}
 }
 
@@ -288,13 +285,13 @@ export function appendClassDeclarations(
 ): void {
 	for (const match of source.matchAll(TYPESCRIPT_CLASS_DECL_RE)) {
 		const lineIndex = lineIndexForOffset(starts, match.index ?? 0);
-		report.classes.push(
-			new ClassReport({
-				name: match[1] ?? "",
-				lineno: lineIndex + 1,
-				docstring: declarationComment(lines, lineIndex),
-			}),
-		);
+		report.classes.push({
+			name: match[1] ?? "",
+			lineno: lineIndex + 1,
+			docstring: declarationComment(lines, lineIndex),
+			methods: [],
+			nestedClasses: [],
+		});
 	}
 }
 
@@ -303,11 +300,14 @@ export function buildTypescriptFileReport(
 	filePath: string,
 	{ displayPath }: { displayPath: string },
 ): FileReport {
-	const report = new FileReport({
+	const report: FileReport = {
 		path: filePath,
 		displayPath,
 		fileDocstring: null,
-	});
+		functions: [],
+		classes: [],
+		parseError: null,
+	};
 	let source: string;
 	try {
 		source = readFileSync(filePath, "utf8");

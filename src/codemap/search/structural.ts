@@ -14,6 +14,7 @@ import {
 	syntaxMatches,
 	targetFiles,
 } from "../ast-grep/index.js";
+import { expandUser } from "../common.js";
 
 export const CALL_TARGET_RE =
 	/^[A-Za-z_$][A-Za-z0-9_$]*(\.[A-Za-z_$][A-Za-z0-9_$]*)*$/;
@@ -94,17 +95,6 @@ export function callTarget(name: string): string {
 		throw new Error(`Invalid call target: ${name}`);
 	}
 	return name;
-}
-
-/** Expands tilde-prefixed filesystem paths. */
-function expandUser(rawPath: string): string {
-	if (rawPath === "~") {
-		return process.env.HOME ?? rawPath;
-	}
-	if (rawPath.startsWith("~/")) {
-		return path.join(process.env.HOME ?? "~", rawPath.slice(2));
-	}
-	return rawPath;
 }
 
 /** Resolves relative target paths from project root or the current directory. */

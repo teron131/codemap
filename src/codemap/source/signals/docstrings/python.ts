@@ -1,7 +1,7 @@
 /** Extracts Python docstring coverage and signature details. */
 import { readFileSync } from "node:fs";
 
-import { ClassReport, FileReport, FunctionReport } from "./models.js";
+import type { ClassReport, FileReport, FunctionReport } from "./models.js";
 
 type DefinitionKind = "function" | "class";
 
@@ -72,14 +72,14 @@ export function buildFunctionReport(
 	const nestedFunctions = childDefinitions(definition, definitions)
 		.filter((child) => child.kind === "function")
 		.map((child) => buildFunctionReport(child, definitions, lines));
-	return new FunctionReport({
+	return {
 		name: definition.name,
 		lineno: definition.lineno,
 		inputs,
 		outputs,
 		docstring: definitionDocstring(definition, lines),
 		nestedFunctions,
-	});
+	};
 }
 
 /** Builds a docstring report for one Python class definition. */
@@ -95,13 +95,13 @@ export function buildClassReport(
 	const nestedClasses = children
 		.filter((child) => child.kind === "class")
 		.map((child) => buildClassReport(child, definitions, lines));
-	return new ClassReport({
+	return {
 		name: definition.name,
 		lineno: definition.lineno,
 		docstring: definitionDocstring(definition, lines),
 		methods,
 		nestedClasses,
-	});
+	};
 }
 
 /** Builds a docstring report for one Python source file. */
@@ -109,11 +109,14 @@ export function buildPythonFileReport(
 	filePath: string,
 	{ displayPath }: { displayPath: string },
 ): FileReport {
-	const report = new FileReport({
+	const report: FileReport = {
 		path: filePath,
 		displayPath,
 		fileDocstring: null,
-	});
+		functions: [],
+		classes: [],
+		parseError: null,
+	};
 	let source: string;
 	try {
 		source = readFileSync(filePath, "utf8");
