@@ -1,7 +1,7 @@
 /** Defines CLI behavior for current-tree summary output. */
 import type { Command } from "commander";
 
-import { tryPrintCodebaseMemoryArchitectureSummary } from "../codebase-memory/index.js";
+import { printCodebaseMemoryArchitectureSummary } from "../codebase-memory/index.js";
 import { DETAILED_ANALYSIS_FILE_LIMIT, resolveProjectRoot } from "../common.js";
 import { buildViews } from "../rendering/index.js";
 import { runScan, type ScanEntry } from "../source/extraction/index.js";
@@ -42,7 +42,7 @@ export function commandSummary(
 	const root = resolveProjectRoot(
 		options.projectRoot ?? rootOptions.projectRoot,
 	);
-	if (tryPrintCodebaseMemoryArchitectureSummary(root)) {
+	if (printCodebaseMemoryArchitectureSummary(root)) {
 		return 0;
 	}
 	const renderedViews = buildViews(buildSummaryGraph(root), {

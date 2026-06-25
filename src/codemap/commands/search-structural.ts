@@ -6,7 +6,7 @@ import {
 	resolveProjectFile,
 	targetLanguages,
 } from "../ast-grep/index.js";
-import { tryPrintCodebaseMemoryCallTrace } from "../codebase-memory/index.js";
+import { printCodebaseMemoryCallTrace } from "../codebase-memory/index.js";
 import { resolveProjectRoot } from "../common.js";
 import {
 	callMatches,
@@ -152,7 +152,7 @@ export function commandSearchCalls(options: SearchCallsOptions): number {
 	if (
 		(options.paths ?? []).length === 0 &&
 		options.lang === undefined &&
-		tryPrintCodebaseMemoryCallTrace(root, options.name, {
+		printCodebaseMemoryCallTrace(root, options.name, {
 			jsonOutput: Boolean(options.json),
 		})
 	) {
