@@ -9,6 +9,16 @@ import { addSignalsParser } from "./signals.js";
 import { addSummaryParser } from "./summary.js";
 import { addSyntaxParsers } from "./syntax.js";
 
+const COMMAND_NAMES = new Set([
+	"artifacts",
+	"inspect",
+	"search",
+	"semantic",
+	"signals",
+	"summary",
+	"syntax",
+]);
+
 /** Creates the top-level commander parser and attaches all subcommands. */
 export function buildParser(): Command {
 	const program = new Command();
@@ -52,7 +62,7 @@ export async function dispatch(
 
 /** Runs Codemap CLI parsing with the process argument vector. */
 export async function main(argv: string[] = process.argv): Promise<number> {
-	return dispatch(buildParser(), argv);
+	return dispatch(buildParser(), normalizedArgv(argv));
 }
 
 /** Runs the CLI entrypoint and records a nonzero exit code. */
@@ -62,4 +72,16 @@ export function run(): void {
 			process.exitCode = exitCode;
 		}
 	});
+}
+
+/** Restores a script placeholder when a launcher omits argv[1]. */
+function normalizedArgv(argv: string[]): string[] {
+	const firstArgument = argv[1];
+	if (
+		firstArgument !== undefined &&
+		(COMMAND_NAMES.has(firstArgument) || firstArgument.startsWith("-"))
+	) {
+		return [argv[0] ?? "node", "codemap", ...argv.slice(1)];
+	}
+	return argv;
 }

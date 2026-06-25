@@ -3,6 +3,7 @@ import { statSync } from "node:fs";
 import path from "node:path";
 import type { Command } from "commander";
 
+import { tryPrintCodebaseMemoryInspect } from "../codebaseMemory/index.js";
 import { DETAILED_ANALYSIS_FILE_LIMIT, resolveProjectRoot } from "../common.js";
 import {
 	buildLikelyEntries,
@@ -74,6 +75,9 @@ export function commandInspect(
 		options.projectRoot ?? rootOptions.projectRoot,
 	);
 	const limit = inspectLimit(options.limit);
+	if (tryPrintCodebaseMemoryInspect(root, target, limit)) {
+		return 0;
+	}
 	const pathTargetKind = inspectPathTargetKind(root, target);
 	let pathTargetScan: ReturnType<typeof runScan> | null = null;
 	if (pathTargetKind !== null) {

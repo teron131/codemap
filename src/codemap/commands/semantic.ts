@@ -1,6 +1,7 @@
 /** Defines CLI behavior for semantic index creation and status. */
 import type { Command } from "commander";
 
+import { tryPrintCodebaseMemoryStatus } from "../codebaseMemory/index.js";
 import { resolveProjectRoot, semanticIndexPath } from "../common.js";
 import {
 	buildSemanticIndex,
@@ -106,6 +107,9 @@ export function commandSemanticStatus(
 	const root = resolveProjectRoot(
 		options.projectRoot ?? rootOptions.projectRoot,
 	);
+	if (tryPrintCodebaseMemoryStatus(root)) {
+		return 0;
+	}
 	if (!semanticIndexExists(root)) {
 		console.log(`No semantic index: ${semanticIndexPath(root)}`);
 		return 1;
