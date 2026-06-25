@@ -1,7 +1,7 @@
 /** Defines CLI behavior for current-tree summary output. */
 import type { Command } from "commander";
 
-import { tryPrintCodebaseMemoryArchitectureSummary } from "../codebaseMemory/index.js";
+import { tryPrintCodebaseMemoryArchitectureSummary } from "../codebase-memory/index.js";
 import { DETAILED_ANALYSIS_FILE_LIMIT, resolveProjectRoot } from "../common.js";
 import { buildViews } from "../rendering/index.js";
 import { runScan, type ScanEntry } from "../source/extraction/index.js";

@@ -3,7 +3,7 @@ import { statSync } from "node:fs";
 import path from "node:path";
 import type { Command } from "commander";
 
-import { tryPrintCodebaseMemoryInspect } from "../codebaseMemory/index.js";
+import { tryPrintCodebaseMemoryInspect } from "../codebase-memory/index.js";
 import { DETAILED_ANALYSIS_FILE_LIMIT, resolveProjectRoot } from "../common.js";
 import {
 	buildLikelyEntries,
@@ -30,6 +30,8 @@ import { buildSummaryGraphFromScan } from "./summary.js";
 type InspectOptions = {
 	projectRoot?: string;
 	limit?: string | number;
+	backend?: boolean;
+	local?: boolean;
 };
 
 type RootOptions = {
@@ -52,6 +54,8 @@ export function addInspectParser(program: Command): void {
 			parseIntegerOption,
 			8,
 		)
+		.option("--backend", "Use Codebase Memory backend inspection only.")
+		.option("--local", "Use current-tree local inspection only.")
 		.action((target: string, options: InspectOptions) => {
 			const exitCode = commandInspect(
 				target,
@@ -75,8 +79,17 @@ export function commandInspect(
 		options.projectRoot ?? rootOptions.projectRoot,
 	);
 	const limit = inspectLimit(options.limit);
-	if (tryPrintCodebaseMemoryInspect(root, target, limit)) {
+	if (options.backend && options.local) {
+		console.log("Choose only one inspect lane: --backend or --local.");
+		return 2;
+	}
+	if (!options.local && tryPrintCodebaseMemoryInspect(root, target, limit)) {
 		return 0;
+	}
+	if (options.backend) {
+		console.log(`No backend match: ${target}`);
+		console.log("Backend: Codebase Memory");
+		return 1;
 	}
 	const pathTargetKind = inspectPathTargetKind(root, target);
 	let pathTargetScan: ReturnType<typeof runScan> | null = null;
