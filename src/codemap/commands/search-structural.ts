@@ -6,6 +6,7 @@ import {
 	resolveProjectFile,
 	targetLanguages,
 } from "../ast-grep/index.js";
+import { tryPrintCodebaseMemoryCallTrace } from "../codebaseMemory/index.js";
 import { resolveProjectRoot } from "../common.js";
 import {
 	callMatches,
@@ -148,6 +149,15 @@ export function commandSearchMatch(options: SearchMatchOptions): number {
 /** Runs structural call-site search and prints matches. */
 export function commandSearchCalls(options: SearchCallsOptions): number {
 	const root = resolveProjectRoot(options.projectRoot);
+	if (
+		(options.paths ?? []).length === 0 &&
+		options.lang === undefined &&
+		tryPrintCodebaseMemoryCallTrace(root, options.name, {
+			jsonOutput: Boolean(options.json),
+		})
+	) {
+		return 0;
+	}
 	const paths = resolveTargetPaths(root, options.paths ?? []);
 	const languages = structuralLanguages(root, paths, options.lang);
 	if (languages.length === 0) {

@@ -2,6 +2,11 @@
 import type { Command } from "commander";
 
 import {
+	tryPrintCodebaseMemoryGraphSearch,
+	tryPrintCodebaseMemorySearch,
+	tryPrintCodebaseMemorySemanticSearch,
+} from "../codebaseMemory/index.js";
+import {
 	DETAILED_ANALYSIS_FILE_LIMIT,
 	resolveProjectRoot,
 	semanticIndexPath,
@@ -90,6 +95,21 @@ export async function commandSearch(
 		options.projectRoot ?? rootOptions.projectRoot,
 	);
 	console.log(`Search: ${searchText}`);
+	if (
+		options.semantic &&
+		tryPrintCodebaseMemorySemanticSearch(root, searchText, limit)
+	) {
+		return 0;
+	}
+	if (
+		options.graph &&
+		tryPrintCodebaseMemoryGraphSearch(root, searchText, limit)
+	) {
+		return 0;
+	}
+	if (!options.graph && tryPrintCodebaseMemorySearch(root, searchText, limit)) {
+		return 0;
+	}
 	if (options.graph) {
 		const graph = currentTreeGraph(root, { includeSignals: false });
 		console.log(renderGraphMatchLines(graph, searchText, limit).join("\n"));

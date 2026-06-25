@@ -4,7 +4,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { commandSummary } from "../src/codemap/commands/index.js";
+import { commandSummary, main } from "../src/codemap/commands/index.js";
 import { renderSummaryText } from "../src/codemap/rendering/index.js";
 
 const workspaceRoot = process.cwd();
@@ -116,6 +116,26 @@ describe("summary CLI", () => {
 			const scopedOutput = logLines(logSpy).join("\n");
 			expect(scopedOutput).toContain("1 file analyzed from the current tree.");
 			expect(scopedOutput).not.toContain("- README: # Root Project");
+		} finally {
+			logSpy.mockRestore();
+		}
+	});
+
+	it("parses argv when a launcher omits the script placeholder", async () => {
+		writeFileSync(
+			path.join(workDir, "src", "app.ts"),
+			"export function app() {\n  return 'ok';\n}\n",
+			"utf8",
+		);
+
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+		try {
+			await expect(
+				main(["node", "summary", "--project-root", workDir]),
+			).resolves.toBe(0);
+			expect(logLines(logSpy).join("\n")).toContain(
+				"1 file analyzed from the current tree.",
+			);
 		} finally {
 			logSpy.mockRestore();
 		}
