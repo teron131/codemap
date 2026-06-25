@@ -1,5 +1,5 @@
-/** Formats ast-grep matches and rewrites for text and JSON output. */
-import type { SyntaxMatch, SyntaxRewriteResult } from "./adapter.js";
+/** Formats ast-grep matches for text and JSON output. */
+import type { SyntaxMatch } from "./adapter.js";
 
 /** Prints syntax matches as text or JSON. */
 export function printSyntaxMatches(
@@ -17,25 +17,6 @@ export function printSyntaxMatches(
 	}
 }
 
-/** Prints syntax rewrite results as text or JSON. */
-export function printRewriteResults(
-	results: SyntaxRewriteResult[],
-	{
-		fullOutput = false,
-		jsonOutput = false,
-	}: { fullOutput?: boolean; jsonOutput?: boolean } = {},
-): void {
-	if (jsonOutput) {
-		console.log(pythonJsonDumps(results.map((result) => rewriteJson(result))));
-		return;
-	}
-	for (const result of results) {
-		const suffix = result.matchCount !== 1 ? "es" : "";
-		console.log(`# ${result.filePath}: ${result.matchCount} match${suffix}`);
-		console.log(rewritePreviewText(result, { fullOutput }));
-	}
-}
-
 /** Serializes one syntax match for JSON output. */
 export function matchJson(match: SyntaxMatch): Record<string, unknown> {
 	return {
@@ -48,29 +29,6 @@ export function matchJson(match: SyntaxMatch): Record<string, unknown> {
 		lines: match.lines,
 		language: "ast-grep",
 	};
-}
-
-/** Serializes one syntax rewrite result for JSON output. */
-export function rewriteJson(
-	result: SyntaxRewriteResult,
-): Record<string, unknown> {
-	return {
-		file: result.filePath,
-		matchCount: result.matchCount,
-		text: result.text,
-		language: "ast-grep",
-	};
-}
-
-/** Formats rewrite output as full text or compact changed-line hunks. */
-function rewritePreviewText(
-	result: SyntaxRewriteResult,
-	{ fullOutput }: { fullOutput: boolean },
-): string {
-	if (fullOutput || result.previewText === undefined) {
-		return result.text.trimEnd();
-	}
-	return result.previewText;
 }
 
 /** Formats JS values as Python literals for ast-grep snippets. */

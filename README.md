@@ -32,7 +32,6 @@ For agent use, enable the Codemap skill in the matching agent guidance so agents
 | Backend wrappers | `summary`, `search <text>`, `search --graph <text>`, `search --semantic <text>`, `inspect <symbol>`, `search calls <name>`, `semantic status` | Codebase Memory MCP after synchronous indexing, with local fallback where useful | Backend index only | Discovery, focused source neighborhoods, traces, architecture, snippets, and status. |
 | Current tree | `signals [section]`, path/file `inspect <target>` | Current tree | None | Refactor evidence and direct file or directory inspection. |
 | Structural search | `search match`, `search rule`, scoped `search calls` | Current tree plus pattern, rule, language, or path input | None | Explicit read-only ast-grep matches under the search surface. |
-| Syntax operations | `syntax replace-call`, `replace`, `rename`, `debug`, `preview`, `rule`, `recipe` | Current tree plus recipe or rule input | Source files only with `--apply --yes` | Mechanical ast-grep rewrites, renames, previews, and pattern debugging. |
 
 ## Runtime Model
 
@@ -42,7 +41,6 @@ sequenceDiagram
     participant Backend as Codebase Memory MCP
     participant Search as ast-grep + rg
     participant Source as source evidence
-    participant Syntax as ast-grep rewrites
 
     CLI->>Backend: index_repository when missing, stale, or not ready
     Backend-->>CLI: ready project
@@ -55,8 +53,6 @@ sequenceDiagram
         CLI->>Source: scan, graph, signals, inspect
         Source-->>CLI: evidence, likely entries, profiles
     end
-    CLI->>Syntax: explicit syntax command
-    Syntax-->>CLI: preview or applied edits
 ```
 
 ## Module Ownership
@@ -65,7 +61,6 @@ sequenceDiagram
 flowchart TD
     CLI["commands.cli"] --> Current["current-tree commands"]
     CLI --> Backend["codebase-memory backend"]
-    CLI --> Syntax[syntax]
 
     subgraph CurrentLane["Current tree"]
         SearchInspect["summary / search / inspect / signals"]
@@ -88,7 +83,6 @@ flowchart TD
     end
 
     Backend --> CBM
-    Syntax --> AstGrep
 ```
 
 ## Architecture Notes
@@ -98,4 +92,3 @@ flowchart TD
 - ast-grep usage is centralized in `src/codemap/ast-grep`; `rg` stays a subprocess boundary.
 - Search lanes are direct code boundaries: `src/codemap/search/source`, `src/codemap/search/structural`, and `src/codemap/search/graph`.
 - `src/codemap/codebase-memory` owns the persistent backend adapter, freshness checks, indexing trigger, and renderer shortcuts.
-- `src/codemap/syntax` packages ast-grep operations: previews, recipes, rewrites, renames, pattern debugging, and apply-capable YAML rules.
