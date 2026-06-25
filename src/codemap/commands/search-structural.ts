@@ -6,7 +6,10 @@ import {
 	resolveProjectFile,
 	targetLanguages,
 } from "../ast-grep/index.js";
-import { printCodebaseMemoryCallTrace } from "../codebase-memory/index.js";
+import {
+	type CodebaseMemoryTraceOptions,
+	printCodebaseMemoryCallTrace,
+} from "../codebase-memory/index.js";
 import { resolveProjectRoot } from "../common.js";
 import {
 	callMatches,
@@ -14,7 +17,7 @@ import {
 	searchRuleMatches,
 	structuralMatches,
 } from "../search/structural.js";
-import { addProjectRootArgument } from "./options.js";
+import { addProjectRootArgument, parseIntegerOption } from "./options.js";
 
 export type SearchMatchOptions = {
 	projectRoot?: string | undefined;
@@ -30,6 +33,11 @@ export type SearchCallsOptions = {
 	name: string;
 	paths?: string[] | undefined;
 	json?: boolean | undefined;
+	mode?: string | undefined;
+	direction?: string | undefined;
+	depth?: number | undefined;
+	parameter?: string | undefined;
+	includeTests?: boolean | undefined;
 };
 
 export type SearchRuleOptions = {
@@ -38,6 +46,9 @@ export type SearchRuleOptions = {
 	paths?: string[] | undefined;
 	json?: boolean | undefined;
 };
+
+const TRACE_MODES = ["calls", "data_flow", "cross_service"] as const;
+const TRACE_DIRECTIONS = ["inbound", "outbound", "both"] as const;
 
 /** Registers explicit ast-grep pattern search under the search command. */
 export function addSearchMatchParser(command: Command): void {
@@ -72,6 +83,17 @@ export function addSearchCallsParser(command: Command): void {
 			"Function or dotted method being called, such as print or console.log.",
 		)
 		.argument("[paths...]", "Project-relative target paths.")
+		.option(
+			"--mode <mode>",
+			"Backend trace mode: calls, data_flow, or cross_service.",
+		)
+		.option(
+			"--direction <direction>",
+			"Backend trace direction: inbound, outbound, or both.",
+		)
+		.option("--depth <count>", "Backend trace depth.", parseIntegerOption)
+		.option("--parameter <name>", "Parameter to trace in data_flow mode.")
+		.option("--include-tests", "Include test nodes in backend trace output.")
 		.option("--json")
 		.action(
 			(
@@ -148,12 +170,19 @@ export function commandSearchMatch(options: SearchMatchOptions): number {
 
 /** Runs structural call-site search and prints matches. */
 export function commandSearchCalls(options: SearchCallsOptions): number {
+	const optionError = traceOptionError(options);
+	if (optionError !== null) {
+		console.log(optionError);
+		return 2;
+	}
 	const root = resolveProjectRoot(options.projectRoot);
 	if (
 		(options.paths ?? []).length === 0 &&
 		options.lang === undefined &&
 		printCodebaseMemoryCallTrace(root, options.name, {
 			jsonOutput: Boolean(options.json),
+			...backendTraceOptions(options),
+			riskLabels: true,
 		})
 	) {
 		return 0;
@@ -225,6 +254,53 @@ function structuralLanguages(
 	explicitLanguage: string | undefined,
 ): string[] {
 	return explicitLanguage ? [explicitLanguage] : targetLanguages(root, paths);
+}
+
+/** Builds Codebase Memory trace options without explicit undefined fields. */
+function backendTraceOptions(
+	options: SearchCallsOptions,
+): CodebaseMemoryTraceOptions {
+	const mode = traceMode(options.mode);
+	const direction = traceDirection(options.direction);
+	return {
+		...(mode !== undefined ? { mode } : {}),
+		...(direction !== undefined ? { direction } : {}),
+		...(options.depth !== undefined ? { depth: options.depth } : {}),
+		...(options.parameter !== undefined
+			? { parameterName: options.parameter }
+			: {}),
+		...(options.includeTests !== undefined
+			? { includeTests: options.includeTests }
+			: {}),
+	};
+}
+
+/** Validates backend trace enum flags before invoking Codebase Memory. */
+function traceOptionError(options: SearchCallsOptions): string | null {
+	if (options.mode !== undefined && traceMode(options.mode) === undefined) {
+		return `Invalid trace mode: ${options.mode}. Choose one of: ${TRACE_MODES.join(", ")}.`;
+	}
+	if (
+		options.direction !== undefined &&
+		traceDirection(options.direction) === undefined
+	) {
+		return `Invalid trace direction: ${options.direction}. Choose one of: ${TRACE_DIRECTIONS.join(", ")}.`;
+	}
+	return null;
+}
+
+/** Reads a valid Codebase Memory trace mode from CLI text. */
+function traceMode(
+	value: string | undefined,
+): CodebaseMemoryTraceOptions["mode"] | undefined {
+	return TRACE_MODES.find((item) => item === value);
+}
+
+/** Reads a valid Codebase Memory trace direction from CLI text. */
+function traceDirection(
+	value: string | undefined,
+): CodebaseMemoryTraceOptions["direction"] | undefined {
+	return TRACE_DIRECTIONS.find((item) => item === value);
 }
 
 /** Prints a focused message when language inference has no source files. */

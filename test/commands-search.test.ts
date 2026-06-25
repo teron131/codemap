@@ -121,6 +121,26 @@ describe("search command handler", () => {
 		expect(logLines()).toEqual(["No matches"]);
 	});
 
+	it("rejects invalid backend trace flags for call search", async () => {
+		await expect(
+			dispatch(buildParser(), [
+				"node",
+				"codemap",
+				"search",
+				"calls",
+				"--project-root",
+				workDir,
+				"--mode",
+				"sideways",
+				"helper",
+			]),
+		).resolves.toBe(2);
+
+		expect(logLines()).toEqual([
+			"Invalid trace mode: sideways. Choose one of: calls, data_flow, cross_service.",
+		]);
+	});
+
 	it("prints source matches and backend semantic fallback status", async () => {
 		writeFileSync(
 			path.join(workDir, "src", "app.ts"),
