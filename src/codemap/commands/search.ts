@@ -5,7 +5,7 @@ import {
 	tryPrintCodebaseMemoryGraphSearch,
 	tryPrintCodebaseMemorySearch,
 	tryPrintCodebaseMemorySemanticSearch,
-} from "../codebaseMemory/index.js";
+} from "../codebase-memory/index.js";
 import { DETAILED_ANALYSIS_FILE_LIMIT, resolveProjectRoot } from "../common.js";
 import {
 	renderGraphMatchLines,

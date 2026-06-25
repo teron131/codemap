@@ -13,13 +13,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	callCodebaseMemoryTool,
 	codebaseMemoryReadyProject,
-} from "../src/codemap/codebaseMemory/index.js";
+} from "../src/codemap/codebase-memory/index.js";
 import {
 	tryPrintCodebaseMemoryCallTrace,
 	tryPrintCodebaseMemoryGraphSearch,
 	tryPrintCodebaseMemorySearch,
 	tryPrintCodebaseMemorySemanticSearch,
-} from "../src/codemap/codebaseMemory/renderers.js";
+} from "../src/codemap/codebase-memory/renderers.js";
 
 const workspaceRoot = process.cwd();
 let workDir: string;

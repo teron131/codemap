@@ -6,7 +6,7 @@ import {
 	resolveProjectFile,
 	targetLanguages,
 } from "../ast-grep/index.js";
-import { tryPrintCodebaseMemoryCallTrace } from "../codebaseMemory/index.js";
+import { tryPrintCodebaseMemoryCallTrace } from "../codebase-memory/index.js";
 import { resolveProjectRoot } from "../common.js";
 import {
 	callMatches,

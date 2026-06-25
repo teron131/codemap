@@ -1,7 +1,7 @@
 /** Defines CLI behavior for Codebase Memory backend status. */
 import type { Command } from "commander";
 
-import { tryPrintCodebaseMemoryStatus } from "../codebaseMemory/index.js";
+import { tryPrintCodebaseMemoryStatus } from "../codebase-memory/index.js";
 import { resolveProjectRoot } from "../common.js";
 import { addProjectRootArgument } from "./options.js";
 

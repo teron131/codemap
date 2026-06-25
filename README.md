@@ -64,7 +64,7 @@ sequenceDiagram
 ```mermaid
 flowchart TD
     CLI["commands.cli"] --> Current["current-tree commands"]
-    CLI --> Backend["codebaseMemory backend"]
+    CLI --> Backend["codebase-memory backend"]
     CLI --> Syntax[syntax]
 
     subgraph CurrentLane["Current tree"]
@@ -97,5 +97,5 @@ flowchart TD
 - Source evidence lives in `src/codemap/source`: scanner, extraction, graph, signals, inspection.
 - ast-grep usage is centralized in `src/codemap/ast-grep`; `rg` stays a subprocess boundary.
 - Search lanes are direct code boundaries: `src/codemap/search/source`, `src/codemap/search/structural`, and `src/codemap/search/graph`.
-- `src/codemap/codebaseMemory` owns the persistent backend adapter, freshness checks, indexing trigger, and renderer shortcuts.
+- `src/codemap/codebase-memory` owns the persistent backend adapter, freshness checks, indexing trigger, and renderer shortcuts.
 - `src/codemap/syntax` packages ast-grep operations: previews, recipes, rewrites, renames, pattern debugging, and apply-capable YAML rules.
