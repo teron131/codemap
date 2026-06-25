@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
 	callCodebaseMemoryTool,
+	codebaseMemoryInspect,
 	codebaseMemoryReadyProject,
 } from "../src/codemap/codebase-memory/index.js";
 import {
@@ -103,7 +104,7 @@ describe("CodebaseMemory client", () => {
 		});
 	});
 
-	it("lets renderers fall back when a CodebaseMemory tool returns an error payload", () => {
+	it("lets backend rendering fall back when a CodebaseMemory tool returns an error payload", () => {
 		vi.stubEnv("CODEBASE_MEMORY_MOCK_ERROR_TOOL", "search_code");
 		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 		try {
@@ -114,7 +115,7 @@ describe("CodebaseMemory client", () => {
 		}
 	});
 
-	it("lets renderers fall back when CodebaseMemory search returns no matches", () => {
+	it("lets backend rendering fall back when CodebaseMemory search returns no matches", () => {
 		vi.stubEnv("CODEBASE_MEMORY_MOCK_EMPTY_SEARCH", "1");
 		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 		try {
@@ -125,7 +126,7 @@ describe("CodebaseMemory client", () => {
 		}
 	});
 
-	it("lets graph renderers fall back when CodebaseMemory graph search returns no matches", () => {
+	it("lets graph rendering fall back when CodebaseMemory graph search returns no matches", () => {
 		vi.stubEnv("CODEBASE_MEMORY_MOCK_EMPTY_GRAPH", "1");
 		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 		try {
@@ -139,7 +140,7 @@ describe("CodebaseMemory client", () => {
 		}
 	});
 
-	it("lets call trace renderers fall back when CodebaseMemory trace search returns no paths", () => {
+	it("lets call trace rendering fall back when CodebaseMemory trace search returns no paths", () => {
 		vi.stubEnv("CODEBASE_MEMORY_MOCK_EMPTY_TRACE", "1");
 		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 		try {
@@ -148,6 +149,22 @@ describe("CodebaseMemory client", () => {
 		} finally {
 			logSpy.mockRestore();
 		}
+	});
+
+	it("normalizes CodebaseMemory inspect payloads behind the query adapter", () => {
+		expect(codebaseMemoryInspect(workDir, "needle", 2)).toMatchObject({
+			name: "needle",
+			qualifiedName: "mock-project.src.needle",
+			filePath: "src/needle.ts",
+			startLine: 4,
+			endLine: 8,
+			signalFacts: ["complexity=2", "cognitive=3", "lines=5"],
+			signature: "function needle(): string",
+			source: "export function needle() {\n  return 'needle';\n}",
+			callers: ["callerOne (hop 1, high)"],
+			callees: ["calleeOne (hop 1, medium)"],
+			related: ["callerOne", "calleeOne"],
+		});
 	});
 
 	it("indexes projects when index_status is not ready", () => {
@@ -255,12 +272,31 @@ const payloads = {
       : {
           results: [
             {
+              name: "needle",
               qualified_name: "mock-project.src.needle",
+              file_path: ${JSON.stringify(path.join(workDir, "src", "needle.ts"))},
+              start_line: 4,
+              end_line: 8,
             },
           ],
           semantic_results: [],
           total_results: 1,
         },
+  get_code_snippet: {
+    name: "needle",
+    qualified_name: "mock-project.src.needle",
+    file_path: ${JSON.stringify(path.join(workDir, "src", "needle.ts"))},
+    start_line: 4,
+    end_line: 8,
+    complexity: 2,
+    cognitive: 3,
+    lines: 5,
+    signature: "function needle()",
+    return_type: ": string",
+    source: "export function needle() {\\n  return 'needle';\\n}",
+    caller_names: ["callerOne"],
+    callee_names: ["calleeOne"],
+  },
   trace_path:
     process.env.CODEBASE_MEMORY_MOCK_EMPTY_TRACE === "1"
       ? {
@@ -268,6 +304,20 @@ const payloads = {
           total_paths: 0,
         }
       : {
+          callers: [
+            {
+              name: "callerOne",
+              hop: 1,
+              risk: "HIGH",
+            },
+          ],
+          callees: [
+            {
+              name: "calleeOne",
+              hop: 1,
+              risk: "MEDIUM",
+            },
+          ],
           paths: [
             {
               from: "mock-project.src.caller",
