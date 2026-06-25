@@ -6,7 +6,6 @@ import { addSearchParser } from "./search.js";
 import { addSemanticParsers } from "./semantic.js";
 import { addSignalsParser } from "./signals.js";
 import { addSummaryParser } from "./summary.js";
-import { addSyntaxParsers } from "./syntax.js";
 
 const COMMAND_NAMES = new Set([
 	"inspect",
@@ -14,7 +13,6 @@ const COMMAND_NAMES = new Set([
 	"semantic",
 	"signals",
 	"summary",
-	"syntax",
 ]);
 
 /** Creates the top-level commander parser and attaches all subcommands. */
@@ -32,7 +30,6 @@ export function buildParser(): Command {
 	addSignalsParser(program);
 	addSearchParser(program);
 	addInspectParser(program);
-	addSyntaxParsers(program);
 	addSemanticParsers(program);
 	return program;
 }

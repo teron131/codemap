@@ -21,22 +21,3 @@ export {
 	commandSignals,
 } from "./signals.js";
 export { addSummaryParser, commandSummary } from "./summary.js";
-export {
-	addSyntaxCallParsers,
-	addSyntaxDebugParser,
-	addSyntaxParsers,
-	addSyntaxRecipeParsers,
-	addSyntaxRewriteParsers,
-	addSyntaxRuleParser,
-	addSyntaxSearchParser,
-} from "./syntax.js";
-export {
-	commandSyntaxDebug,
-	commandSyntaxPreview,
-	commandSyntaxRecipe,
-	commandSyntaxRecipes,
-	commandSyntaxRename,
-	commandSyntaxReplace,
-	commandSyntaxReplaceCall,
-	commandSyntaxRule,
-} from "./syntax-handlers.js";

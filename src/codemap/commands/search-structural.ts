@@ -194,7 +194,6 @@ export function commandSearchRule(options: SearchRuleOptions): number {
 				{
 					rule: rulePath,
 					matches: (matches ?? []).map((match) => matchJson(match)),
-					rewrites: [],
 				},
 				null,
 				2,
