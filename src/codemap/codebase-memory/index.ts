@@ -25,4 +25,5 @@ export {
 	printCodebaseMemorySearch,
 	printCodebaseMemorySemanticSearch,
 	printCodebaseMemoryStatus,
+	renderCodebaseMemoryInspect,
 } from "./render.js";
