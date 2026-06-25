@@ -15,6 +15,16 @@ Codemap is an agent-facing source navigation and refactor-scoping tool. It shoul
 - Semantic graph search hides below-floor score rows and falls back to current-tree search instead of printing low-signal matches.
 - `signals` are backend-informed local refactor evidence, not lint findings.
 
+## Output Policy
+
+Codemap output is optimized for agent reading, not raw backend completeness.
+
+- Prefer compact, ranked rows over full JSON dumps; expose raw JSON only on explicit JSON-oriented command paths.
+- Hide generic helpers, low-score semantic rows, duplicate query rows, and likely test matches unless they are useful for the requested mode.
+- Print visible result counts and short hidden-row notes so output stays honest without spending tokens on discarded noise.
+- Apply graph filters consistently across Codebase Memory output and current-tree fallback: label, name, qualified name, file glob, relationship, degree, entrypoint, and test inclusion.
+- Label degraded current-tree paths explicitly. Large-repo fallbacks may skip expensive graph construction, so their navigation context is source/path evidence rather than import-centrality evidence.
+
 ## Install
 
 Use `pnpm` for repo dependencies and builds, then use `npm` for the global CLI install:
