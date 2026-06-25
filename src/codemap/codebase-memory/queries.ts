@@ -114,7 +114,6 @@ export function codebaseMemorySemanticSearch(
 	}
 	const result = callCodebaseMemoryTool("search_graph", {
 		project: project.name,
-		query: searchText,
 		semantic_query: semanticTerms(searchText),
 		limit,
 		include_connected: true,
@@ -122,16 +121,11 @@ export function codebaseMemorySemanticSearch(
 	if (!result.ok) {
 		return null;
 	}
-	if (
-		!hasSearchAnswer(
-			result.value,
-			["results", "semantic_results", "raw_matches"],
-			["total_results", "total"],
-		)
-	) {
+	const payload = semanticSearchPayload(result.value);
+	if (!hasSearchAnswer(payload, ["semantic_results"], ["semantic_total"])) {
 		return null;
 	}
-	return result.value;
+	return payload;
 }
 
 /** Reads and normalizes a CodebaseMemory symbol inspection result when available. */
@@ -360,6 +354,24 @@ function hasSearchAnswer(
 		return false;
 	}
 	return true;
+}
+
+/** Keeps only backend semantic search rows from a combined graph payload. */
+function semanticSearchPayload(value: unknown): Record<string, unknown> {
+	const record = recordValue(value);
+	const semanticResults = arrayValue(record.semantic_results);
+	return {
+		search_mode: "semantic",
+		semantic_total:
+			typeof record.semantic_total === "number"
+				? record.semantic_total
+				: semanticResults.length,
+		semantic_results: semanticResults,
+		has_more:
+			typeof record.semantic_has_more === "boolean"
+				? record.semantic_has_more
+				: false,
+	};
 }
 
 /** Extracts the first graph search result record. */

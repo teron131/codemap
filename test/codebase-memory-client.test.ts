@@ -167,6 +167,38 @@ describe("CodebaseMemory client", () => {
 		}
 	});
 
+	it("prints compact semantic graph search rows from semantic_results", () => {
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+		try {
+			expect(printCodebaseMemorySemanticSearch(workDir, "needle", 2)).toBe(
+				true,
+			);
+			const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+
+			expect(output).toContain("CodebaseMemory semantic matches:");
+			expect(output).toContain("mode: semantic");
+			expect(output).toContain("semantic results: 1");
+			expect(output).toContain("- semanticNeedle");
+			expect(output).toContain("score=0.987");
+			expect(output).not.toContain('"results"');
+		} finally {
+			logSpy.mockRestore();
+		}
+	});
+
+	it("treats plain-text CodebaseMemory validation failures as failed tool calls", () => {
+		expect(
+			callCodebaseMemoryTool("search_graph", {
+				project: "mock-project",
+				semantic_query: "needle",
+			}),
+		).toEqual({
+			ok: false,
+			reason:
+				'semantic_query must be an array of keyword strings, e.g. ["send","pubsub","publish"]',
+		});
+	});
+
 	it("lets call trace rendering fall back when CodebaseMemory trace search returns no paths", () => {
 		vi.stubEnv("CODEBASE_MEMORY_MOCK_EMPTY_TRACE", "1");
 		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
@@ -344,6 +376,7 @@ const lines = input
 const calls = lines.map((line) => JSON.parse(line));
 const toolCall = calls.find((call) => call.method === "tools/call");
 const toolName = toolCall?.params?.name;
+const toolArgs = toolCall?.params?.arguments ?? {};
 const root = process.env.CODEBASE_MEMORY_MOCK_ROOT ?? ${JSON.stringify(workDir)};
 const indexLogPath = ${JSON.stringify(path.join(workDir, "index-calls.jsonl"))};
 const indexed = fs.existsSync(indexLogPath);
@@ -393,11 +426,29 @@ const payloads = {
           raw_match_count: 0,
         },
   search_graph:
-    process.env.CODEBASE_MEMORY_MOCK_EMPTY_GRAPH === "1"
+    typeof toolArgs.semantic_query === "string"
+      ? 'semantic_query must be an array of keyword strings, e.g. ["send","pubsub","publish"]'
+      : process.env.CODEBASE_MEMORY_MOCK_EMPTY_GRAPH === "1"
       ? {
           results: [],
           semantic_results: [],
           total_results: 0,
+        }
+      : Array.isArray(toolArgs.semantic_query)
+      ? {
+          search_mode: "semantic",
+          total: 1,
+          results: [],
+          semantic_results: [
+            {
+              name: "semanticNeedle",
+              qualified_name: "mock-project.src.semanticNeedle",
+              label: "Function",
+              file_path: ${JSON.stringify(path.join(workDir, "src", "semantic-needle.ts"))},
+              score: 0.987,
+            },
+          ],
+          has_more: false,
         }
       : {
           results: [
