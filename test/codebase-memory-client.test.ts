@@ -22,7 +22,12 @@ import {
 	printCodebaseMemorySemanticSearch,
 	renderCodebaseMemoryInspect,
 } from "../src/codemap/codebase-memory/render.js";
-import { commandInspect } from "../src/codemap/commands/index.js";
+import {
+	commandIndex,
+	commandInspect,
+	commandMemoryStatus,
+	commandSignals,
+} from "../src/codemap/commands/index.js";
 
 const workspaceRoot = process.cwd();
 let workDir: string;
@@ -67,18 +72,38 @@ describe("CodebaseMemory client", () => {
 		});
 	});
 
-	it("indexes ready projects before use when detect_changes reports dirty-tree changes", () => {
-		vi.stubEnv("CODEBASE_MEMORY_MOCK_CHANGED_COUNT", "7");
-
+	it("indexes ready projects before use", () => {
 		const project = codebaseMemoryReadyProject(workDir);
 
 		expect(project).toMatchObject({
 			name: "mock-project",
 			rootPath: workDir,
 			status: "ready",
-			changedCount: 0,
 		});
 		expect(readIndexCalls()).toEqual([
+			{
+				mode: "full",
+				repo_path: workDir,
+			},
+		]);
+	});
+
+	it("indexes before every backend readiness check", () => {
+		expect(codebaseMemoryReadyProject(workDir)).toMatchObject({
+			name: "mock-project",
+			rootPath: workDir,
+			status: "ready",
+		});
+		expect(codebaseMemoryReadyProject(workDir)).toMatchObject({
+			name: "mock-project",
+			rootPath: workDir,
+			status: "ready",
+		});
+		expect(readIndexCalls()).toEqual([
+			{
+				mode: "full",
+				repo_path: workDir,
+			},
 			{
 				mode: "full",
 				repo_path: workDir,
@@ -231,16 +256,66 @@ describe("CodebaseMemory client", () => {
 		}
 	});
 
-	it("indexes projects when index_status is not ready", () => {
+	it("returns ready project metadata after the required index pass", () => {
 		vi.stubEnv("CODEBASE_MEMORY_MOCK_STATUS", "indexing");
 
 		expect(codebaseMemoryReadyProject(workDir)).toMatchObject({
 			name: "mock-project",
 			rootPath: workDir,
 			status: "ready",
-			changedCount: 0,
 		});
 		expect(readIndexCalls()).toHaveLength(1);
+	});
+
+	it("prints memory status through the backend command surface", () => {
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+		try {
+			expect(commandMemoryStatus({ projectRoot: workDir })).toBe(0);
+			const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+
+			expect(output).toContain("CodebaseMemory index: mock-project");
+			expect(output).toContain("status: ready");
+			expect(readIndexCalls()).toHaveLength(1);
+		} finally {
+			logSpy.mockRestore();
+		}
+	});
+
+	it("prints explicit top-level index refresh timing", () => {
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+		try {
+			expect(commandIndex({ projectRoot: workDir })).toBe(0);
+			const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+
+			expect(output).toContain("CodebaseMemory refresh complete");
+			expect(output).toContain("elapsed:");
+			expect(output).toContain("CodebaseMemory index: mock-project");
+			expect(readIndexCalls()).toHaveLength(1);
+		} finally {
+			logSpy.mockRestore();
+		}
+	});
+
+	it("adds backend graph context to signal output when available", () => {
+		mkdirSync(path.join(workDir, "src"), { recursive: true });
+		writeFileSync(
+			path.join(workDir, "src", "app.ts"),
+			"export function app() {\n  return 'ok';\n}\n",
+			"utf8",
+		);
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+		try {
+			expect(commandSignals("top", { projectRoot: workDir })).toBe(0);
+			const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+
+			expect(output).toContain("## Backend Graph");
+			expect(output).toContain("- backend: Codebase Memory");
+			expect(output).toContain("- project: mock-project");
+			expect(output).toContain("# Refactor Signals");
+			expect(readIndexCalls()).toHaveLength(1);
+		} finally {
+			logSpy.mockRestore();
+		}
 	});
 });
 
@@ -276,9 +351,6 @@ const status =
   indexed && process.env.CODEBASE_MEMORY_MOCK_INDEX_FAIL !== "1"
     ? "ready"
     : process.env.CODEBASE_MEMORY_MOCK_STATUS ?? "ready";
-const changedCount = indexed
-  ? 0
-  : Number.parseInt(process.env.CODEBASE_MEMORY_MOCK_CHANGED_COUNT ?? "0", 10);
 
 const payloads = {
   index_repository: {
@@ -300,12 +372,6 @@ const payloads = {
     nodes: 12,
     edges: 34,
     status,
-  },
-  detect_changes: {
-    changed_files: changedCount > 0 ? ["src/dirty.ts"] : [],
-    changed_count: changedCount,
-    impacted_symbols: [],
-    depth: 1,
   },
   search_code:
     process.env.CODEBASE_MEMORY_MOCK_EMPTY_SEARCH === "1"

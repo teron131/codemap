@@ -1,6 +1,11 @@
 /** Re-exports command parsers, dispatchers, and handlers. */
 export { buildParser, dispatch, main, run } from "./cli.js";
+export { addIndexParser, commandIndex } from "./index-memory.js";
 export { addInspectParser, commandInspect } from "./inspect.js";
+export {
+	addMemoryParsers,
+	commandMemoryStatus,
+} from "./memory.js";
 export { addProjectRootArgument, PROJECT_ROOT_HELP } from "./options.js";
 export {
 	addSearchParser,
@@ -15,7 +20,6 @@ export {
 	commandSearchMatch,
 	commandSearchRule,
 } from "./search-structural.js";
-export { addSemanticParsers, commandSemanticStatus } from "./semantic.js";
 export {
 	addSignalsParser,
 	commandSignals,

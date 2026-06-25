@@ -1,5 +1,6 @@
 /** Provides normalized CodebaseMemory backend query results for CLI rendering. */
 import path from "node:path";
+import { performance } from "node:perf_hooks";
 
 import {
 	arrayValue,
@@ -31,9 +32,12 @@ export type CodebaseMemoryStatusResult = {
 	status: string;
 	nodes: number | null;
 	edges: number | null;
-	changedCount: number;
 	schemaNodeLabels: number | null;
 	schemaEdgeTypes: number | null;
+};
+
+export type CodebaseMemoryIndexResult = CodebaseMemoryStatusResult & {
+	elapsedMs: number;
 };
 
 /** Reads graph-augmented CodebaseMemory source search results when available. */
@@ -249,13 +253,27 @@ export function codebaseMemoryStatus(
 		status: project.status,
 		nodes: project.nodes,
 		edges: project.edges,
-		changedCount: project.changedCount,
 		schemaNodeLabels: schemaResult.ok
 			? arrayValue(schema.node_labels).length
 			: null,
 		schemaEdgeTypes: schemaResult.ok
 			? arrayValue(schema.edge_types).length
 			: null,
+	};
+}
+
+/** Explicitly refreshes CodebaseMemory and returns timing plus status metadata. */
+export function codebaseMemoryIndex(
+	root: string,
+): CodebaseMemoryIndexResult | null {
+	const start = performance.now();
+	const status = codebaseMemoryStatus(root);
+	if (status === null) {
+		return null;
+	}
+	return {
+		...status,
+		elapsedMs: performance.now() - start,
 	};
 }
 

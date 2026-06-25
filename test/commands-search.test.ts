@@ -1,4 +1,4 @@
-/** Checks search command handler output and backend semantic fallback status. */
+/** Checks search command handler output and backend search fallback status. */
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -142,7 +142,7 @@ describe("search command handler", () => {
 		expect(output).toContain("[symbol]");
 		expect(output).toContain("\nSemantic graph matches:");
 		expect(output).toContain(
-			"  unavailable: no ready Codebase Memory index; used current-tree search fallback.",
+			"  unavailable: Codebase Memory semantic search returned no answer; used current-tree search fallback.",
 		);
 	});
 

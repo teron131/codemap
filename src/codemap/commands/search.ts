@@ -35,7 +35,7 @@ type RootOptions = {
 	projectRoot?: string;
 };
 
-/** Registers source, graph, semantic, and structural search commands. */
+/** Registers backend-ranked source, graph, semantic, and structural search commands. */
 export function addSearchParser(program: Command): void {
 	const search = program
 		.command("search")
@@ -46,10 +46,7 @@ export function addSearchParser(program: Command): void {
 			"--graph",
 			"Search with derived relationship context instead of the fast source path.",
 		)
-		.option(
-			"--semantic",
-			"Prefer Codebase Memory semantic graph search when a ready backend index exists.",
-		)
+		.option("--semantic", "Use Codebase Memory semantic graph search.")
 		.action(async (searchText: string[], options: SearchOptions) => {
 			const exitCode = await commandSearch(
 				searchText,
@@ -66,7 +63,7 @@ export function addSearchParser(program: Command): void {
 	addSearchRuleParser(search.command("rule"));
 }
 
-/** Runs source or graph search and optional semantic ranking. */
+/** Runs backend-ranked source or graph search with local fallback. */
 export async function commandSearch(
 	searchArgs: string[],
 	options: SearchOptions,
@@ -137,7 +134,7 @@ export async function commandSearch(
 	if (options.semantic) {
 		console.log("\nSemantic graph matches:");
 		console.log(
-			"  unavailable: no ready Codebase Memory index; used current-tree search fallback.",
+			"  unavailable: Codebase Memory semantic search returned no answer; used current-tree search fallback.",
 		);
 	}
 	return 0;

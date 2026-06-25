@@ -1,9 +1,12 @@
 /** Renders normalized CodebaseMemory backend results for Codemap commands. */
 import {
+	type CodebaseMemoryIndexResult,
 	type CodebaseMemoryInspectResult,
+	type CodebaseMemoryStatusResult,
 	codebaseMemoryArchitectureSummary,
 	codebaseMemoryCallTrace,
 	codebaseMemoryGraphSearch,
+	codebaseMemoryIndex,
 	codebaseMemoryInspect,
 	codebaseMemorySearch,
 	codebaseMemorySemanticSearch,
@@ -106,17 +109,47 @@ export function printCodebaseMemoryStatus(root: string): boolean {
 	if (result === null) {
 		return false;
 	}
-	console.log(`CodebaseMemory index: ${result.projectName}`);
-	console.log(`status: ${result.status}`);
-	console.log(`nodes: ${result.nodes ?? "unknown"}`);
-	console.log(`edges: ${result.edges ?? "unknown"}`);
-	console.log(`changed files: ${result.changedCount}`);
+	console.log(renderCodebaseMemoryStatus(result));
+	return true;
+}
+
+/** Prints an explicit CodebaseMemory refresh result with elapsed time. */
+export function printCodebaseMemoryIndex(root: string): boolean {
+	const result = codebaseMemoryIndex(root);
+	if (result === null) {
+		return false;
+	}
+	console.log(renderCodebaseMemoryIndex(result));
+	return true;
+}
+
+/** Renders CodebaseMemory status lines. */
+export function renderCodebaseMemoryStatus(
+	result: CodebaseMemoryStatusResult,
+): string {
+	const lines = [
+		`CodebaseMemory index: ${result.projectName}`,
+		`status: ${result.status}`,
+		`nodes: ${result.nodes ?? "unknown"}`,
+		`edges: ${result.edges ?? "unknown"}`,
+	];
 	if (result.schemaNodeLabels !== null && result.schemaEdgeTypes !== null) {
-		console.log(
+		lines.push(
 			`schema: ${result.schemaNodeLabels} node labels, ${result.schemaEdgeTypes} edge types`,
 		);
 	}
-	return true;
+	return lines.join("\n");
+}
+
+/** Renders an explicit CodebaseMemory refresh result with elapsed time. */
+export function renderCodebaseMemoryIndex(
+	result: CodebaseMemoryIndexResult,
+): string {
+	return [
+		"CodebaseMemory refresh complete",
+		`elapsed: ${formatElapsedMs(result.elapsedMs)}`,
+		renderCodebaseMemoryStatus(result),
+	].join("\n");
 }
 
 /** Renders a compact backend-first inspect report. */
@@ -285,4 +318,12 @@ function codeFenceLanguage(filePath: string | null): string {
 /** Formats backend confidence scores without noisy floating-point tails. */
 function formatScore(value: number): string {
 	return value.toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+/** Formats elapsed milliseconds for human CLI output. */
+function formatElapsedMs(value: number): string {
+	if (value < 1000) {
+		return `${value.toFixed(1)} ms`;
+	}
+	return `${(value / 1000).toFixed(2)} s`;
 }

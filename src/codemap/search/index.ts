@@ -1,4 +1,4 @@
-/** Re-exports source, structural, graph, semantic, and target-card search APIs. */
+/** Re-exports source, structural, graph, and target-card search APIs. */
 export { graphMatches, renderGraphMatchLines } from "./graph.js";
 export {
 	appendMatch,
