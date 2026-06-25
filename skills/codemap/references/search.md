@@ -6,14 +6,15 @@ Use default search as the fast source interface:
 codemap search --project-root <path> "<words>"
 ```
 
-Default `search` is for plain words, phrases, filenames, symbols, functions, classes, and identifiers. For identifier-like queries, Codemap first asks its shared ast-grep layer for structural symbol matches. It then fills remaining results with fixed-string, case-insensitive `rg` matches. This keeps search fast on large repos and avoids graph construction.
+Default `search` is for plain words, phrases, filenames, symbols, functions, classes, and identifiers. When Codebase Memory MCP is available, Codemap indexes the project first and asks `search_code` for graph-augmented matches. If the backend is unavailable or returns no useful answer, Codemap asks its shared ast-grep layer for structural symbol matches and fills remaining results with fixed-string, case-insensitive `rg` matches.
 
 Search has four lanes:
 
-- Default `search`: `codemap.search.source`, shared ast-grep plus `rg`, fast and current-tree only.
-- `search match`, `search calls`, and `search rule`: `codemap.search.structural`, explicit read-only ast-grep matching.
-- `search --graph`: `codemap.search.graph`, relationship evidence when imports, contains edges, or nearby summaries matter.
-- `search --semantic`: Codebase Memory MCP semantic graph search when a ready backend index exists, otherwise current-tree fallback.
+- Default `search`: Codebase Memory MCP `search_code` after indexing, then local shared ast-grep plus `rg` fallback.
+- `search match` and `search rule`: `codemap.search.structural`, explicit read-only ast-grep matching.
+- `search calls`: Codebase Memory MCP `trace_path` when unscoped, then local ast-grep call-site matching when a language or paths are provided.
+- `search --graph`: Codebase Memory MCP `search_graph` after indexing, then derived current-tree graph fallback.
+- `search --semantic`: Codebase Memory MCP semantic `search_graph` after indexing, then current-tree fallback.
 
 Default `search` does not evaluate regular expressions. For raw regex text search, use `rg` directly:
 
@@ -30,14 +31,14 @@ codemap search --graph --project-root <path> "<words>"
 
 Relationship-context search builds the heavier derived evidence path and can show nearby imports, contains edges, summaries, and supporting evidence. It is slower on large repos, so default shared ast-grep plus rg search should stay first.
 
-Use semantic search when Codebase Memory MCP has an index for the project:
+Use semantic search when Codebase Memory MCP should answer from the persistent graph:
 
 ```sh
 codemap semantic status --project-root <path>
 codemap search --semantic --project-root <path> "<words>"
 ```
 
-Semantic search is a backend-backed graph branch. It is for fuzzy concept matching over Codebase Memory's persistent graph, not a Codemap-owned saved index. It is not the default search path.
+Semantic search is a backend-backed graph branch. It is for fuzzy concept matching over Codebase Memory's persistent graph, not a Codemap-owned saved index. Codemap triggers indexing before querying so it does not knowingly read stale graph data.
 
 Use structural search when the query is an ast-grep pattern, call target, or read-only YAML rule. Start with simple pattern arguments or call wrappers; for rewrite previews and syntax codemods, read `references/syntax.md`.
 

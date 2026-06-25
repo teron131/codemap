@@ -5,7 +5,7 @@ description: Use when Codex needs current-tree source navigation in a local code
 
 # Codemap
 
-Codemap is the current-tree source navigation and refactor-scoping tool. Use it to decide what to read next, locate code, inspect one target's neighborhood, gather refactor evidence, and run guarded ast-grep operations. Codebase Memory MCP is the optional persistent graph backend when an index is ready.
+Codemap is the source navigation and refactor-scoping tool. Use it to decide what to read next, locate code, inspect one target's neighborhood, gather refactor evidence, and run guarded ast-grep operations. Codebase Memory MCP is the persistent graph backend where it has useful primitives; Codemap synchronously indexes before backend-backed queries and uses current-tree fallbacks for local gaps.
 
 ## Use Cases
 
@@ -77,14 +77,14 @@ Use `search rule --rule <rule.yml>` for read-only rule matches. Use `syntax rule
 
 ### Use Codebase Memory Backend Search
 
-Use backend semantic or graph search when a ready Codebase Memory MCP index exists:
+Use backend semantic or graph search when persistent graph evidence is useful:
 
 ```sh
 codemap search --semantic --project-root <path> "<words>"
 codemap semantic status --project-root <path>
 ```
 
-Backend search is for persistent graph facts, snippets, traces, architecture summaries, and semantic graph matches. If the backend is missing or stale, Codemap falls back to current-tree evidence instead of writing its own index.
+Backend search is for persistent graph facts, snippets, traces, architecture summaries, and semantic graph matches. Codemap asks Codebase Memory MCP to index the project before backend-backed commands so stale graph data is not served knowingly. If the backend is unavailable or returns no useful answer, Codemap falls back to current-tree evidence where a local answer still makes sense.
 
 ## Reference Routing
 

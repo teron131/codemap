@@ -1,11 +1,17 @@
 /** Checks CodebaseMemory readiness and status behavior with mocked MCP output. */
-import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
 	callCodebaseMemoryTool,
-	codebaseMemoryProjectStatus,
 	codebaseMemoryReadyProject,
 } from "../src/codemap/codebaseMemory/index.js";
 import {
@@ -58,26 +64,23 @@ describe("CodebaseMemory client", () => {
 		});
 	});
 
-	it("keeps ready projects usable when detect_changes reports dirty-tree changes", () => {
+	it("indexes ready projects before use when detect_changes reports dirty-tree changes", () => {
+		vi.stubEnv("CODEBASE_MEMORY_MOCK_CHANGED_COUNT", "7");
+
 		const project = codebaseMemoryReadyProject(workDir);
 
 		expect(project).toMatchObject({
 			name: "mock-project",
 			rootPath: workDir,
 			status: "ready",
+			changedCount: 0,
 		});
-		expect(project?.changedCount).toBeUndefined();
-	});
-
-	it("keeps changed-count information on status without using it as readiness", () => {
-		const project = codebaseMemoryProjectStatus(workDir);
-
-		expect(project).toMatchObject({
-			name: "mock-project",
-			rootPath: workDir,
-			status: "ready",
-			changedCount: 7,
-		});
+		expect(readIndexCalls()).toEqual([
+			{
+				mode: "full",
+				repo_path: workDir,
+			},
+		]);
 	});
 
 	it("does not match list_projects entries with empty roots", () => {
@@ -149,12 +152,30 @@ describe("CodebaseMemory client", () => {
 		}
 	});
 
-	it("falls back when index_status is not ready", () => {
+	it("indexes projects when index_status is not ready", () => {
 		vi.stubEnv("CODEBASE_MEMORY_MOCK_STATUS", "indexing");
 
-		expect(codebaseMemoryReadyProject(workDir)).toBeNull();
+		expect(codebaseMemoryReadyProject(workDir)).toMatchObject({
+			name: "mock-project",
+			rootPath: workDir,
+			status: "ready",
+			changedCount: 0,
+		});
+		expect(readIndexCalls()).toHaveLength(1);
 	});
 });
+
+/** Reads mock index_repository call records written by the MCP test server. */
+function readIndexCalls(): unknown[] {
+	const logPath = path.join(workDir, "index-calls.jsonl");
+	if (!existsSync(logPath)) {
+		return [];
+	}
+	return readFileSync(logPath, "utf8")
+		.split(/\r?\n/)
+		.filter(Boolean)
+		.map((line) => JSON.parse(line));
+}
 
 /** Builds a tiny newline JSON-RPC server for CodebaseMemory tool calls. */
 function mockServerSource(): string {
@@ -170,8 +191,21 @@ const calls = lines.map((line) => JSON.parse(line));
 const toolCall = calls.find((call) => call.method === "tools/call");
 const toolName = toolCall?.params?.name;
 const root = process.env.CODEBASE_MEMORY_MOCK_ROOT ?? ${JSON.stringify(workDir)};
+const indexLogPath = ${JSON.stringify(path.join(workDir, "index-calls.jsonl"))};
+const indexed = fs.existsSync(indexLogPath);
+const status =
+  indexed && process.env.CODEBASE_MEMORY_MOCK_INDEX_FAIL !== "1"
+    ? "ready"
+    : process.env.CODEBASE_MEMORY_MOCK_STATUS ?? "ready";
+const changedCount = indexed
+  ? 0
+  : Number.parseInt(process.env.CODEBASE_MEMORY_MOCK_CHANGED_COUNT ?? "0", 10);
 
 const payloads = {
+  index_repository: {
+    project: "mock-project",
+    status: process.env.CODEBASE_MEMORY_MOCK_INDEX_FAIL === "1" ? "failed" : "ready",
+  },
   list_projects: {
     projects: [
       {
@@ -186,11 +220,11 @@ const payloads = {
     project: "mock-project",
     nodes: 12,
     edges: 34,
-    status: process.env.CODEBASE_MEMORY_MOCK_STATUS ?? "ready",
+    status,
   },
   detect_changes: {
-    changed_files: ["src/dirty.ts"],
-    changed_count: 7,
+    changed_files: changedCount > 0 ? ["src/dirty.ts"] : [],
+    changed_count: changedCount,
     impacted_symbols: [],
     depth: 1,
   },
@@ -245,6 +279,9 @@ const payloads = {
           total_paths: 1,
         },
 };
+if (toolName === "index_repository") {
+  fs.appendFileSync(indexLogPath, JSON.stringify(toolCall?.params?.arguments ?? {}) + "\\n");
+}
 const payload =
   process.env.CODEBASE_MEMORY_MOCK_ERROR_TOOL === toolName
     ? { error: "project not found or not indexed" }
