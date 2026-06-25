@@ -3,7 +3,7 @@ import { languageMetricItems } from "../source/signals/index.js";
 
 type Row = Record<string, unknown>;
 
-/** Renders the agent-facing markdown brief for saved artifacts. */
+/** Renders the agent-facing markdown brief for current graph evidence. */
 export function renderAgentBrief(
 	architecture: Row,
 	metrics: Row,

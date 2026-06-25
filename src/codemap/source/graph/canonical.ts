@@ -68,16 +68,14 @@ export function currentTreeGraph(
 		emitPaths = null,
 	}: { includeSignals?: boolean; emitPaths?: Set<string> | null } = {},
 ): GraphPayload {
-	const scan = runScan(root, { persist: false });
-	const importResult = runImportMap(root, scan.files, { persist: false });
+	const scan = runScan(root);
+	const importResult = runImportMap(root, scan.files);
 	const importMap = importResult.importMap;
 	let structureFiles = scan.files;
 	if (emitPaths !== null) {
 		structureFiles = structureFiles.filter((item) => emitPaths.has(item.path));
 	}
 	const structure = runStructure(root, structureFiles, importMap, {
-		label: "current",
-		persist: false,
 		fileMetricsByPath: importResult._typescriptMetrics,
 		pythonTreesByPath: importResult._pythonTrees,
 	});

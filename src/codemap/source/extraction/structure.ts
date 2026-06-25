@@ -2,7 +2,6 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
-import { intermediateDir, writeJson } from "../../common.js";
 import {
 	PY_SUFFIXES,
 	scanFile,
@@ -57,33 +56,23 @@ export function runStructure(
 	files: ScanEntry[],
 	_importMap: Record<string, string[]>,
 	{
-		label,
-		persist = false,
 		fileMetricsByPath = null,
 		pythonTreesByPath = null,
 	}: {
-		label: string;
-		persist?: boolean;
 		fileMetricsByPath?: Record<string, FileMetrics> | null;
 		pythonTreesByPath?: Record<string, string | null> | null;
 	},
 ): StructurePayload {
-	const results = files
-		.map((scanEntry) =>
-			structureForFile(root, scanEntry, {
-				metricsByPath: fileMetricsByPath,
-				pythonTreesByPath,
-			}),
-		)
-		.filter((entry): entry is StructureEntry => entry !== null);
-	const payload = { results };
-	if (persist) {
-		writeJson(
-			path.join(intermediateDir(root), `structure-${label}.json`),
-			payload,
-		);
-	}
-	return payload;
+	return {
+		results: files
+			.map((scanEntry) =>
+				structureForFile(root, scanEntry, {
+					metricsByPath: fileMetricsByPath,
+					pythonTreesByPath,
+				}),
+			)
+			.filter((entry): entry is StructureEntry => entry !== null),
+	};
 }
 
 /** Builds structural entries for one scanned source file. */

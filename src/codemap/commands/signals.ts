@@ -95,7 +95,7 @@ export function buildCurrentTreeSignalPayload(
 	section: string,
 	options: SignalPayloadOptions = {},
 ): Record<string, unknown> {
-	const scan = runScan(root, { persist: false });
+	const scan = runScan(root);
 	if (scan.files.length > DETAILED_ANALYSIS_FILE_LIMIT) {
 		const payload = buildLightweightSignalPayload(scan.files, {
 			includeTests: Boolean(options.includeTests),

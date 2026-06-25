@@ -1,4 +1,4 @@
-/** Builds lightweight signal payloads from scan rows when full artifacts are unavailable. */
+/** Builds lightweight signal payloads from scan rows when full analysis is unavailable. */
 import path from "node:path";
 
 import { scanFile } from "../scanner/index.js";
@@ -52,7 +52,7 @@ const ENTRYPOINT_LIKE_BASENAMES = new Set([
 	"main.tsx",
 ]);
 
-/** Builds a compact signal payload when full analysis artifacts are absent. */
+/** Builds a compact signal payload when full analysis is absent. */
 export function buildLightweightSignalPayload(
 	files: LightweightSignalFile[],
 	{ includeTests = false, root }: LightweightSignalPayloadOptions = {},

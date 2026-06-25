@@ -23,7 +23,7 @@ export function searchTargetCard(
 	if (target === null) {
 		return null;
 	}
-	const scan = runScan(root, { persist: false });
+	const scan = runScan(root);
 	const fileCount = scan.files.length;
 	if (fileCount > AUTO_TARGET_CARD_FILE_LIMIT) {
 		const command = `codemap inspect --project-root ${shQuote(root)} ${shQuote(target)}`;

@@ -1,13 +1,14 @@
-/** Builds compact overview metadata for saved artifact views. */
-import { REFRESH_SAMPLE_LIMIT } from "../common.js";
+/** Builds compact overview metadata for current graph views. */
 import { languageMetricItems } from "../source/signals/index.js";
 
 type Row = Record<string, unknown>;
 
+const SAMPLE_LIMIT = 8;
+
 /** Selects a bounded sample of paths for overview output. */
 export function samplePaths(
 	paths: string[],
-	{ limit = REFRESH_SAMPLE_LIMIT }: { limit?: number } = {},
+	{ limit = SAMPLE_LIMIT }: { limit?: number } = {},
 ): Row {
 	return {
 		count: paths.length,
@@ -45,7 +46,7 @@ export function compactRefreshPlan(plan: Row): Row {
 	};
 }
 
-/** Builds saved-artifact overview metadata and refresh summaries. */
+/** Builds current graph overview metadata and refresh summaries. */
 export function buildOverviewView(
 	architecture: Row,
 	metrics: Row,

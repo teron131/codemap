@@ -55,7 +55,7 @@ export function commandSummary(
 
 /** Builds the current-tree graph payload used by summary-style output. */
 export function buildSummaryGraph(root: string): GraphPayload {
-	const scan = runScan(root, { persist: false });
+	const scan = runScan(root);
 	return buildSummaryGraphFromScan(root, scan);
 }
 
