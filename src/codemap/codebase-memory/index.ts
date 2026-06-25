@@ -7,6 +7,17 @@ export {
 	codebaseMemoryReadyProject,
 } from "./client.js";
 export {
+	type CodebaseMemoryInspectResult,
+	type CodebaseMemoryStatusResult,
+	codebaseMemoryArchitectureSummary,
+	codebaseMemoryCallTrace,
+	codebaseMemoryGraphSearch,
+	codebaseMemoryInspect,
+	codebaseMemorySearch,
+	codebaseMemorySemanticSearch,
+	codebaseMemoryStatus,
+} from "./queries.js";
+export {
 	printCodebaseMemoryArchitectureSummary,
 	printCodebaseMemoryCallTrace,
 	printCodebaseMemoryGraphSearch,
