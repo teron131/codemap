@@ -23,7 +23,6 @@ export type CodebaseMemoryReadyProject = {
 	nodes: number | null;
 	edges: number | null;
 	status: string;
-	changedCount: number;
 };
 
 export type CodebaseMemoryToolResult =
@@ -49,44 +48,20 @@ export function codebaseMemoryEnabled(): boolean {
 	return value !== "0" && value !== "false" && value !== "off";
 }
 
-/** Finds a ready CodebaseMemory project matching the project root. */
+/** Indexes and returns a ready CodebaseMemory project matching the project root. */
 export function codebaseMemoryReadyProject(
 	root: string,
 ): CodebaseMemoryReadyProject | null {
 	if (!codebaseMemoryEnabled()) {
 		return null;
 	}
-	return codebaseMemoryFreshProject(root);
-}
-
-/** Ensures the project is indexed and unchanged before returning backend metadata. */
-function codebaseMemoryFreshProject(
-	root: string,
-): CodebaseMemoryReadyProject | null {
-	const project = codebaseMemoryProjectForRoot(root);
-	if (project === null) {
-		return codebaseMemoryIndexAndReadProject(root);
-	}
-	const status = codebaseMemoryProjectIndexStatus(project.name);
-	if (status !== "ready") {
-		return codebaseMemoryIndexAndReadProject(root);
-	}
-	const changedCount = codebaseMemoryChangedCount(project.name);
-	if (changedCount === null || changedCount > 0) {
-		return codebaseMemoryIndexAndReadProject(root);
-	}
-	return codebaseMemoryReadyProjectFromIndexedProject(
-		project,
-		status,
-		changedCount,
-	);
+	return codebaseMemoryIndexAndReadProject(root);
 }
 
 /** Converts an already indexed project into ready metadata when status permits it. */
 function codebaseMemoryReadyProjectFromIndexedProject(
 	project: CodebaseMemoryProject,
 	status: string,
-	changedCount: number,
 ): CodebaseMemoryReadyProject {
 	return {
 		name: project.name,
@@ -94,7 +69,6 @@ function codebaseMemoryReadyProjectFromIndexedProject(
 		nodes: numberOrNull(project.nodes),
 		edges: numberOrNull(project.edges),
 		status,
-		changedCount,
 	};
 }
 
@@ -124,12 +98,7 @@ function codebaseMemoryIndexAndReadProject(
 	if (status !== "ready") {
 		return null;
 	}
-	const changedCount = codebaseMemoryChangedCount(project.name);
-	return codebaseMemoryReadyProjectFromIndexedProject(
-		project,
-		status,
-		changedCount ?? 0,
-	);
+	return codebaseMemoryReadyProjectFromIndexedProject(project, status);
 }
 
 /** Reads CodebaseMemory's raw index status for a project. */
@@ -278,19 +247,6 @@ function toolPayload(result: unknown): unknown {
 function toolPayloadError(value: unknown): string | null {
 	const error = recordValue(value).error;
 	return typeof error === "string" && error.length > 0 ? error : null;
-}
-
-/** Reads CodebaseMemory's changed-file count for status output. */
-function codebaseMemoryChangedCount(project: string): number | null {
-	const result = callCodebaseMemoryTool("detect_changes", {
-		project,
-		depth: 1,
-	});
-	if (!result.ok) {
-		return null;
-	}
-	const changedCount = recordValue(result.value).changed_count;
-	return typeof changedCount === "number" ? changedCount : null;
 }
 
 /** Coerces a raw CodebaseMemory project record into the local project shape. */
