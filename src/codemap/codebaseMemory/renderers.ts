@@ -2,7 +2,6 @@
 import {
 	arrayValue,
 	callCodebaseMemoryTool,
-	codebaseMemoryProjectStatus,
 	codebaseMemoryReadyProject,
 	recordValue,
 } from "./client.js";
@@ -185,7 +184,7 @@ export function tryPrintCodebaseMemoryArchitectureSummary(
 
 /** Tries to print CodebaseMemory index status and graph schema. */
 export function tryPrintCodebaseMemoryStatus(root: string): boolean {
-	const project = codebaseMemoryProjectStatus(root);
+	const project = codebaseMemoryReadyProject(root);
 	if (project === null) {
 		return false;
 	}
@@ -196,10 +195,7 @@ export function tryPrintCodebaseMemoryStatus(root: string): boolean {
 	console.log(`status: ${project.status}`);
 	console.log(`nodes: ${project.nodes ?? "unknown"}`);
 	console.log(`edges: ${project.edges ?? "unknown"}`);
-	const changedCount = project.changedCount;
-	console.log(
-		`changed files: ${changedCount !== undefined && changedCount >= 0 ? changedCount : "unknown"}`,
-	);
+	console.log(`changed files: ${project.changedCount}`);
 	if (schemaResult.ok) {
 		const schema = recordValue(schemaResult.value);
 		const nodeLabels = arrayValue(schema.node_labels).length;

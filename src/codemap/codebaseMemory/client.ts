@@ -23,16 +23,22 @@ export type CodebaseMemoryReadyProject = {
 	nodes: number | null;
 	edges: number | null;
 	status: string;
-	changedCount?: number;
+	changedCount: number;
 };
 
 export type CodebaseMemoryToolResult =
 	| { ok: true; value: unknown }
 	| { ok: false; reason: string };
 
+type CodebaseMemoryToolOptions = {
+	timeoutMs?: number;
+};
+
 const PROTOCOL_VERSION = "2024-11-05";
 const DEFAULT_COMMAND = "codebase-memory-mcp";
+const DEFAULT_INDEX_MODE = "full";
 const REQUEST_TIMEOUT_MS = 8_000;
+const INDEX_REQUEST_TIMEOUT_MS = 120_000;
 
 /** Returns whether the optional CodebaseMemory integration is enabled. */
 export function codebaseMemoryEnabled(): boolean {
@@ -50,55 +56,93 @@ export function codebaseMemoryReadyProject(
 	if (!codebaseMemoryEnabled()) {
 		return null;
 	}
+	return codebaseMemoryFreshProject(root);
+}
+
+/** Ensures the project is indexed and unchanged before returning backend metadata. */
+function codebaseMemoryFreshProject(
+	root: string,
+): CodebaseMemoryReadyProject | null {
 	const project = codebaseMemoryProjectForRoot(root);
 	if (project === null) {
-		return null;
+		return codebaseMemoryIndexAndReadProject(root);
 	}
-	const statusResult = callCodebaseMemoryTool("index_status", {
-		project: project.name,
-	});
-	if (!statusResult.ok) {
-		return null;
+	const status = codebaseMemoryProjectIndexStatus(project.name);
+	if (status !== "ready") {
+		return codebaseMemoryIndexAndReadProject(root);
 	}
-	const status = recordValue(statusResult.value);
-	if (String(status.status ?? "") !== "ready") {
-		return null;
+	const changedCount = codebaseMemoryChangedCount(project.name);
+	if (changedCount === null || changedCount > 0) {
+		return codebaseMemoryIndexAndReadProject(root);
 	}
+	return codebaseMemoryReadyProjectFromIndexedProject(
+		project,
+		status,
+		changedCount,
+	);
+}
+
+/** Converts an already indexed project into ready metadata when status permits it. */
+function codebaseMemoryReadyProjectFromIndexedProject(
+	project: CodebaseMemoryProject,
+	status: string,
+	changedCount: number,
+): CodebaseMemoryReadyProject {
 	return {
 		name: project.name,
 		rootPath: project.root_path,
 		nodes: numberOrNull(project.nodes),
 		edges: numberOrNull(project.edges),
-		status: String(status.status ?? "ready"),
+		status,
+		changedCount,
 	};
 }
 
-/** Finds a CodebaseMemory project and status without rejecting stale indexes. */
-export function codebaseMemoryProjectStatus(
+/** Indexes the repository, then returns the fresh matching project when available. */
+function codebaseMemoryIndexAndReadProject(
 	root: string,
 ): CodebaseMemoryReadyProject | null {
-	if (!codebaseMemoryEnabled()) {
+	const indexResult = callCodebaseMemoryTool(
+		"index_repository",
+		{
+			repo_path: root,
+			mode:
+				process.env.CODEMAP_CODEBASE_MEMORY_INDEX_MODE ?? DEFAULT_INDEX_MODE,
+		},
+		{
+			timeoutMs: INDEX_REQUEST_TIMEOUT_MS,
+		},
+	);
+	if (!indexResult.ok) {
 		return null;
 	}
 	const project = codebaseMemoryProjectForRoot(root);
 	if (project === null) {
 		return null;
 	}
-	const statusResult = callCodebaseMemoryTool("index_status", {
-		project: project.name,
-	});
+	const status = codebaseMemoryProjectIndexStatus(project.name);
+	if (status !== "ready") {
+		return null;
+	}
+	const changedCount = codebaseMemoryChangedCount(project.name);
+	if (changedCount !== null && changedCount > 0) {
+		return null;
+	}
+	return codebaseMemoryReadyProjectFromIndexedProject(
+		project,
+		status,
+		changedCount ?? 0,
+	);
+}
+
+/** Reads CodebaseMemory's raw index status for a project. */
+function codebaseMemoryProjectIndexStatus(project: string): string | null {
+	const statusResult = callCodebaseMemoryTool("index_status", { project });
 	if (!statusResult.ok) {
 		return null;
 	}
 	const status = recordValue(statusResult.value);
-	return {
-		name: project.name,
-		rootPath: project.root_path,
-		nodes: numberOrNull(project.nodes),
-		edges: numberOrNull(project.edges),
-		status: String(status.status ?? "unknown"),
-		changedCount: codebaseMemoryChangedCount(project.name) ?? -1,
-	};
+	return typeof status.status === "string" ? status.status : null;
 }
 
 /** Finds the indexed CodebaseMemory project whose nonempty root matches the target root. */
@@ -123,6 +167,7 @@ function codebaseMemoryProjectForRoot(
 export function callCodebaseMemoryTool(
 	name: string,
 	args: JsonObject,
+	options: CodebaseMemoryToolOptions = {},
 ): CodebaseMemoryToolResult {
 	if (!codebaseMemoryEnabled()) {
 		return { ok: false, reason: "disabled" };
@@ -156,7 +201,7 @@ export function callCodebaseMemoryTool(
 		env: codebaseMemoryChildEnv(),
 		input: `${messages.map((message) => JSON.stringify(message)).join("\n")}\n`,
 		encoding: "utf8",
-		timeout: REQUEST_TIMEOUT_MS,
+		timeout: options.timeoutMs ?? REQUEST_TIMEOUT_MS,
 		maxBuffer: 16 * 1024 * 1024,
 	});
 	if (result.error !== undefined) {
