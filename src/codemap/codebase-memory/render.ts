@@ -1,13 +1,20 @@
 /** Renders normalized CodebaseMemory backend results for Codemap commands. */
 import {
+	type CodebaseMemoryChangeOptions,
+	type CodebaseMemoryGraphSearchOptions,
 	type CodebaseMemoryIndexResult,
 	type CodebaseMemoryInspectResult,
 	type CodebaseMemoryStatusResult,
+	type CodebaseMemoryTraceOptions,
 	codebaseMemoryArchitectureSummary,
 	codebaseMemoryCallTrace,
+	codebaseMemoryChanges,
 	codebaseMemoryGraphSearch,
 	codebaseMemoryIndex,
 	codebaseMemoryInspect,
+	codebaseMemoryProjects,
+	codebaseMemoryQuery,
+	codebaseMemorySchema,
 	codebaseMemorySearch,
 	codebaseMemorySemanticSearch,
 	codebaseMemoryStatus,
@@ -24,7 +31,7 @@ export function printCodebaseMemorySearch(
 		return false;
 	}
 	console.log("\nCodebaseMemory code matches:");
-	console.log(JSON.stringify(result, null, 2));
+	console.log(renderCodebaseMemoryCodeSearch(result, { limit }));
 	return true;
 }
 
@@ -33,13 +40,14 @@ export function printCodebaseMemoryGraphSearch(
 	root: string,
 	searchText: string,
 	limit: number,
+	options: CodebaseMemoryGraphSearchOptions = {},
 ): boolean {
-	const result = codebaseMemoryGraphSearch(root, searchText, limit);
+	const result = codebaseMemoryGraphSearch(root, searchText, limit, options);
 	if (result === null) {
 		return false;
 	}
 	console.log("\nCodebaseMemory graph matches:");
-	console.log(JSON.stringify(result, null, 2));
+	console.log(renderCodebaseMemoryGraphSearch(result, { limit }));
 	return true;
 }
 
@@ -76,9 +84,12 @@ export function printCodebaseMemoryInspect(
 export function printCodebaseMemoryCallTrace(
 	root: string,
 	name: string,
-	{ jsonOutput = false }: { jsonOutput?: boolean } = {},
+	{
+		jsonOutput = false,
+		...options
+	}: CodebaseMemoryTraceOptions & { jsonOutput?: boolean } = {},
 ): boolean {
-	const result = codebaseMemoryCallTrace(root, name);
+	const result = codebaseMemoryCallTrace(root, name, options);
 	if (result === null) {
 		return false;
 	}
@@ -86,8 +97,61 @@ export function printCodebaseMemoryCallTrace(
 		console.log(JSON.stringify(result, null, 2));
 	} else {
 		console.log("CodebaseMemory call trace:");
-		console.log(JSON.stringify(result, null, 2));
+		console.log(renderCodebaseMemoryTrace(result));
 	}
+	return true;
+}
+
+/** Prints indexed CodebaseMemory projects. */
+export function printCodebaseMemoryProjects(root: string): boolean {
+	const result = codebaseMemoryProjects(root);
+	if (result === null) {
+		return false;
+	}
+	console.log(renderCodebaseMemoryProjects(result));
+	return true;
+}
+
+/** Prints CodebaseMemory graph schema details. */
+export function printCodebaseMemorySchema(root: string): boolean {
+	const result = codebaseMemorySchema(root);
+	if (result === null) {
+		return false;
+	}
+	console.log(renderCodebaseMemorySchema(result));
+	return true;
+}
+
+/** Prints a CodebaseMemory Cypher query result. */
+export function printCodebaseMemoryQuery(
+	root: string,
+	query: string,
+	{ jsonOutput = false, maxRows }: { jsonOutput?: boolean; maxRows?: number },
+): boolean {
+	const result = codebaseMemoryQuery(root, query, maxRows);
+	if (result === null) {
+		return false;
+	}
+	console.log(
+		jsonOutput ? JSON.stringify(result, null, 2) : renderRows(result),
+	);
+	return true;
+}
+
+/** Prints CodebaseMemory changed-code impact results. */
+export function printCodebaseMemoryChanges(
+	root: string,
+	options: CodebaseMemoryChangeOptions & { jsonOutput?: boolean },
+): boolean {
+	const result = codebaseMemoryChanges(root, options);
+	if (result === null) {
+		return false;
+	}
+	console.log(
+		options.jsonOutput
+			? JSON.stringify(result, null, 2)
+			: renderCodebaseMemoryChanges(result),
+	);
 	return true;
 }
 
@@ -121,6 +185,121 @@ export function printCodebaseMemoryIndex(root: string): boolean {
 	}
 	console.log(renderCodebaseMemoryIndex(result));
 	return true;
+}
+
+/** Renders compact CodebaseMemory search_code rows. */
+function renderCodebaseMemoryCodeSearch(
+	value: unknown,
+	{ limit }: { limit: number },
+): string {
+	const record = recordValue(value);
+	const rows = arrayValue(record.results).slice(0, limit);
+	const total = numberField(record.total_results) ?? rows.length;
+	const grepTotal = numberField(record.total_grep_matches);
+	const lines = [`results: ${total}`];
+	if (grepTotal !== null) {
+		lines.push(`grep matches: ${grepTotal}`);
+	}
+	if (rows.length === 0) {
+		lines.push("  none");
+		return lines.join("\n");
+	}
+	for (const item of rows) {
+		lines.push(...renderSearchRow(item));
+	}
+	if (total > rows.length) {
+		lines.push("- ...");
+	}
+	return lines.join("\n");
+}
+
+/** Renders compact CodebaseMemory search_graph rows. */
+function renderCodebaseMemoryGraphSearch(
+	value: unknown,
+	{ limit }: { limit: number },
+): string {
+	const record = recordValue(value);
+	const rows = arrayValue(record.results).slice(0, limit);
+	const total = numberField(record.total) ?? numberField(record.total_results);
+	const lines = [
+		`mode: ${stringField(record.search_mode) ?? "graph"}`,
+		`results: ${total ?? rows.length}`,
+	];
+	if (rows.length === 0) {
+		lines.push("  none");
+		return lines.join("\n");
+	}
+	for (const item of rows) {
+		lines.push(...renderSearchRow(item));
+	}
+	if (record.has_more) {
+		lines.push("- ...");
+	}
+	return lines.join("\n");
+}
+
+/** Renders one backend search row with stable score and location fields. */
+function renderSearchRow(value: unknown): string[] {
+	const row = recordValue(value);
+	const nested = recordValue(row.node);
+	const name =
+		stringField(row.name) ??
+		stringField(row.node) ??
+		stringField(nested.name) ??
+		stringField(row.qualified_name) ??
+		stringField(nested.qualified_name);
+	if (name === null) {
+		return [];
+	}
+	const qualifiedName =
+		stringField(row.qualified_name) ?? stringField(nested.qualified_name);
+	const filePath =
+		stringField(row.file) ??
+		stringField(row.file_path) ??
+		stringField(nested.file_path);
+	const startLine =
+		numberField(row.start_line) ?? numberField(nested.start_line);
+	const endLine = numberField(row.end_line) ?? numberField(nested.end_line);
+	const score =
+		numberField(row.rerank_score) ??
+		numberField(row.score) ??
+		numberField(row.rank);
+	const label = stringField(row.label) ?? stringField(nested.label);
+	const degrees = degreeFacts(row);
+	const detail = [
+		label,
+		filePath !== null
+			? `${filePath}${startLine !== null ? `:${startLine}` : ""}${endLine !== null && endLine !== startLine ? `-${endLine}` : ""}`
+			: null,
+		score !== null ? `score=${formatScore(score)}` : null,
+		...degrees,
+	].filter((item) => item !== null);
+	const lines = [
+		`- ${name}${detail.length > 0 ? ` (${detail.join(", ")})` : ""}`,
+	];
+	if (qualifiedName !== null && qualifiedName !== name) {
+		lines.push(`  ${qualifiedName}`);
+	}
+	const context = stringField(row.context);
+	if (context !== null) {
+		const contextLine = context.trim().split(/\r?\n/).find(Boolean);
+		if (contextLine !== undefined) {
+			lines.push(`  ${contextLine.trim()}`);
+		}
+	}
+	return lines;
+}
+
+/** Renders graph degree facts when Codebase Memory includes them. */
+function degreeFacts(row: Record<string, unknown>): string[] {
+	return [
+		numberField(row.in_degree) !== null
+			? `in=${numberField(row.in_degree)}`
+			: null,
+		numberField(row.out_degree) !== null
+			? `out=${numberField(row.out_degree)}`
+			: null,
+	].filter((item) => item !== null);
 }
 
 /** Renders CodebaseMemory status lines. */
@@ -194,6 +373,222 @@ function renderCodebaseMemorySemanticSearch(
 		lines.push("- ...");
 	}
 	return lines.join("\n");
+}
+
+/** Renders CodebaseMemory trace_path output without exposing raw JSON by default. */
+function renderCodebaseMemoryTrace(value: unknown): string {
+	const record = recordValue(value);
+	const lines = [
+		`function: ${stringField(record.function) ?? stringField(record.function_name) ?? "unknown"}`,
+		`mode: ${stringField(record.mode) ?? "calls"}`,
+		`direction: ${stringField(record.direction) ?? "both"}`,
+	];
+	appendTraceSection(lines, "Callers", record.callers);
+	appendTraceSection(lines, "Callees", record.callees);
+	appendTraceSection(lines, "Paths", tracePaths(record));
+	if (lines.length === 3) {
+		lines.push("  none");
+	}
+	return lines.join("\n");
+}
+
+/** Adds a trace section when rows exist. */
+function appendTraceSection(
+	lines: string[],
+	title: string,
+	value: unknown,
+): void {
+	const rows = arrayValue(value)
+		.map(traceRow)
+		.filter((item) => item !== null);
+	if (rows.length === 0) {
+		return;
+	}
+	lines.push(`${title}: ${rows.length}`);
+	for (const row of rows) {
+		lines.push(`- ${row}`);
+	}
+}
+
+/** Reads path-like trace rows from common backend shapes. */
+function tracePaths(record: Record<string, unknown>): unknown[] {
+	return [
+		...arrayValue(record.paths),
+		...arrayValue(record.call_paths),
+		...arrayValue(record.traces),
+		...arrayValue(record.results),
+	];
+}
+
+/** Renders one caller, callee, or path row. */
+function traceRow(value: unknown): string | null {
+	const record = recordValue(value);
+	const name =
+		stringField(record.name) ??
+		stringField(record.qualified_name) ??
+		edgeText(record);
+	if (name === null) {
+		return null;
+	}
+	const hop = numberField(record.hop);
+	const risk = stringField(record.risk);
+	const facts = [
+		hop !== null ? `hop ${hop}` : null,
+		risk !== null ? risk.toLowerCase() : null,
+	].filter((item) => item !== null);
+	return facts.length > 0 ? `${name} (${facts.join(", ")})` : name;
+}
+
+/** Formats a from/to edge row when trace output uses path records. */
+function edgeText(record: Record<string, unknown>): string | null {
+	const from = stringField(record.from) ?? stringField(record.source);
+	const to = stringField(record.to) ?? stringField(record.target);
+	if (from === null || to === null) {
+		return null;
+	}
+	return `${from} -> ${to}`;
+}
+
+/** Renders CodebaseMemory projects from list_projects. */
+function renderCodebaseMemoryProjects(value: unknown): string {
+	const projects = arrayValue(recordValue(value).projects);
+	const lines = [`CodebaseMemory projects: ${projects.length}`];
+	for (const item of projects) {
+		const project = recordValue(item);
+		const name = stringField(project.name);
+		if (name === null) {
+			continue;
+		}
+		const root = stringField(project.root_path);
+		const nodes = numberField(project.nodes);
+		const edges = numberField(project.edges);
+		const detail = [
+			root,
+			nodes !== null ? `nodes=${nodes}` : null,
+			edges !== null ? `edges=${edges}` : null,
+		].filter((item) => item !== null);
+		lines.push(
+			`- ${name}${detail.length > 0 ? ` (${detail.join(", ")})` : ""}`,
+		);
+	}
+	return lines.join("\n");
+}
+
+/** Renders CodebaseMemory schema labels and edge types. */
+function renderCodebaseMemorySchema(value: unknown): string {
+	const record = recordValue(value);
+	const nodeLabels = arrayValue(record.node_labels);
+	const edgeTypes = arrayValue(record.edge_types);
+	return [
+		`CodebaseMemory schema: ${nodeLabels.length} node labels, ${edgeTypes.length} edge types`,
+		...nodeLabels.map((item) => `- node: ${schemaRow(item)}`),
+		...edgeTypes.map((item) => `- edge: ${schemaRow(item)}`),
+	].join("\n");
+}
+
+/** Renders one schema count row from object or string payloads. */
+function schemaRow(value: unknown): string {
+	if (typeof value === "string") {
+		return value;
+	}
+	const record = recordValue(value);
+	const name =
+		stringField(record.label) ?? stringField(record.type) ?? "unknown";
+	const count = numberField(record.count);
+	return count === null ? name : `${name} (${count})`;
+}
+
+/** Renders arbitrary CodebaseMemory query rows compactly. */
+function renderRows(value: unknown): string {
+	const record = recordValue(value);
+	const rows =
+		arrayValue(record.rows).length > 0
+			? arrayValue(record.rows)
+			: arrayValue(record.results);
+	const total = numberField(record.total) ?? rows.length;
+	const lines = [`CodebaseMemory query rows: ${total}`];
+	for (const row of rows) {
+		lines.push(`- ${rowValueText(row)}`);
+	}
+	if (rows.length === 0) {
+		lines.push("  none");
+	}
+	return lines.join("\n");
+}
+
+/** Renders one query row without noisy JSON for scalar or single-column rows. */
+function rowValueText(value: unknown): string {
+	if (
+		typeof value === "string" ||
+		typeof value === "number" ||
+		typeof value === "boolean"
+	) {
+		return String(value);
+	}
+	const values = arrayValue(value);
+	if (values.length === 1) {
+		return rowValueText(values[0]);
+	}
+	if (values.length > 1) {
+		return values.map(rowValueText).join(" | ");
+	}
+	return JSON.stringify(value);
+}
+
+/** Renders CodebaseMemory changed-code impact output. */
+function renderCodebaseMemoryChanges(value: unknown): string {
+	const record = recordValue(value);
+	const lines = ["CodebaseMemory changed-code impact:"];
+	const changedFiles = arrayValue(record.changed_files).filter(
+		(item): item is string => typeof item === "string" && item.length > 0,
+	);
+	if (changedFiles.length > 0) {
+		lines.push(`changed files: ${changedFiles.length}`);
+		appendJsonRows(lines, changedFiles, (item) => item);
+	}
+	const impactedSymbols = arrayValue(record.impacted_symbols);
+	if (impactedSymbols.length > 0) {
+		lines.push(`impacted symbols: ${impactedSymbols.length}`);
+		appendJsonRows(lines, impactedSymbols, symbolImpactRow);
+	}
+	const rows = [
+		...arrayValue(record.changes),
+		...arrayValue(record.impacts),
+		...arrayValue(record.results),
+	];
+	if (rows.length === 0) {
+		if (changedFiles.length === 0 && impactedSymbols.length === 0) {
+			lines.push(JSON.stringify(value, null, 2));
+		}
+		return lines.join("\n");
+	}
+	appendJsonRows(lines, rows, (row) => JSON.stringify(row));
+	return lines.join("\n");
+}
+
+/** Appends a bounded list of JSON-derived rows. */
+function appendJsonRows<T>(
+	lines: string[],
+	rows: T[],
+	render: (row: T) => string,
+): void {
+	const shown = rows.slice(0, 20);
+	for (const row of shown) {
+		lines.push(`- ${render(row)}`);
+	}
+	if (rows.length > shown.length) {
+		lines.push("- ...");
+	}
+}
+
+/** Renders one impacted symbol row from detect_changes. */
+function symbolImpactRow(value: unknown): string {
+	const record = recordValue(value);
+	const name = stringField(record.name) ?? JSON.stringify(value);
+	const label = stringField(record.label);
+	const file = stringField(record.file);
+	const detail = [label, file].filter((item) => item !== null);
+	return `${name}${detail.length > 0 ? ` (${detail.join(", ")})` : ""}`;
 }
 
 /** Renders a compact backend-first inspect report. */

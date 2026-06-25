@@ -40,6 +40,34 @@ export type CodebaseMemoryIndexResult = CodebaseMemoryStatusResult & {
 	elapsedMs: number;
 };
 
+export type CodebaseMemoryGraphSearchOptions = {
+	label?: string;
+	namePattern?: string;
+	qnPattern?: string;
+	filePattern?: string;
+	relationship?: string;
+	minDegree?: number;
+	maxDegree?: number;
+	excludeEntryPoints?: boolean;
+	offset?: number;
+};
+
+export type CodebaseMemoryTraceOptions = {
+	mode?: "calls" | "data_flow" | "cross_service";
+	direction?: "inbound" | "outbound" | "both";
+	depth?: number;
+	parameterName?: string;
+	includeTests?: boolean;
+	riskLabels?: boolean;
+};
+
+export type CodebaseMemoryChangeOptions = {
+	scope?: string;
+	depth?: number;
+	baseBranch?: string;
+	since?: string;
+};
+
 /** Reads graph-augmented CodebaseMemory source search results when available. */
 export function codebaseMemorySearch(
 	root: string,
@@ -76,6 +104,7 @@ export function codebaseMemoryGraphSearch(
 	root: string,
 	searchText: string,
 	limit: number,
+	options: CodebaseMemoryGraphSearchOptions = {},
 ): unknown | null {
 	const project = codebaseMemoryReadyProject(root);
 	if (project === null) {
@@ -84,6 +113,7 @@ export function codebaseMemoryGraphSearch(
 	const result = callCodebaseMemoryTool("search_graph", {
 		project: project.name,
 		query: searchText,
+		...graphSearchArgs(options),
 		limit,
 		include_connected: true,
 	});
@@ -185,6 +215,7 @@ export function codebaseMemoryInspect(
 export function codebaseMemoryCallTrace(
 	root: string,
 	name: string,
+	options: CodebaseMemoryTraceOptions = {},
 ): unknown | null {
 	const project = codebaseMemoryReadyProject(root);
 	if (project === null) {
@@ -193,9 +224,16 @@ export function codebaseMemoryCallTrace(
 	const result = callCodebaseMemoryTool("trace_path", {
 		project: project.name,
 		function_name: name,
-		mode: "calls",
-		direction: "both",
-		depth: 2,
+		mode: options.mode ?? "calls",
+		direction: options.direction ?? "both",
+		depth: options.depth ?? 2,
+		...(options.parameterName !== undefined
+			? { parameter_name: options.parameterName }
+			: {}),
+		...(options.includeTests !== undefined
+			? { include_tests: options.includeTests }
+			: {}),
+		risk_labels: options.riskLabels ?? false,
 	});
 	if (!result.ok) {
 		return null;
@@ -210,6 +248,67 @@ export function codebaseMemoryCallTrace(
 		return null;
 	}
 	return result.value;
+}
+
+/** Lists indexed CodebaseMemory projects after refreshing the current root. */
+export function codebaseMemoryProjects(root: string): unknown | null {
+	const project = codebaseMemoryReadyProject(root);
+	if (project === null) {
+		return null;
+	}
+	const result = callCodebaseMemoryTool("list_projects", {});
+	return result.ok ? result.value : null;
+}
+
+/** Reads CodebaseMemory graph schema details for the current project. */
+export function codebaseMemorySchema(root: string): unknown | null {
+	const project = codebaseMemoryReadyProject(root);
+	if (project === null) {
+		return null;
+	}
+	const result = callCodebaseMemoryTool("get_graph_schema", {
+		project: project.name,
+	});
+	return result.ok ? result.value : null;
+}
+
+/** Executes a read-oriented CodebaseMemory Cypher query for advanced graph analysis. */
+export function codebaseMemoryQuery(
+	root: string,
+	query: string,
+	maxRows: number | undefined,
+): unknown | null {
+	const project = codebaseMemoryReadyProject(root);
+	if (project === null) {
+		return null;
+	}
+	const result = callCodebaseMemoryTool("query_graph", {
+		project: project.name,
+		query,
+		...(maxRows !== undefined ? { max_rows: maxRows } : {}),
+	});
+	return result.ok ? result.value : null;
+}
+
+/** Reads CodebaseMemory's changed-code impact summary for the current project. */
+export function codebaseMemoryChanges(
+	root: string,
+	options: CodebaseMemoryChangeOptions,
+): unknown | null {
+	const project = codebaseMemoryReadyProject(root);
+	if (project === null) {
+		return null;
+	}
+	const result = callCodebaseMemoryTool("detect_changes", {
+		project: project.name,
+		...(options.scope !== undefined ? { scope: options.scope } : {}),
+		...(options.depth !== undefined ? { depth: options.depth } : {}),
+		...(options.baseBranch !== undefined
+			? { base_branch: options.baseBranch }
+			: {}),
+		...(options.since !== undefined ? { since: options.since } : {}),
+	});
+	return result.ok ? result.value : null;
 }
 
 /** Reads CodebaseMemory's architecture and cluster summary when available. */
@@ -354,6 +453,37 @@ function hasSearchAnswer(
 		return false;
 	}
 	return true;
+}
+
+/** Converts optional graph search flags into CodebaseMemory search_graph arguments. */
+function graphSearchArgs(
+	options: CodebaseMemoryGraphSearchOptions,
+): Record<string, unknown> {
+	return {
+		...(options.label !== undefined ? { label: options.label } : {}),
+		...(options.namePattern !== undefined
+			? { name_pattern: options.namePattern }
+			: {}),
+		...(options.qnPattern !== undefined
+			? { qn_pattern: options.qnPattern }
+			: {}),
+		...(options.filePattern !== undefined
+			? { file_pattern: options.filePattern }
+			: {}),
+		...(options.relationship !== undefined
+			? { relationship: options.relationship }
+			: {}),
+		...(options.minDegree !== undefined
+			? { min_degree: options.minDegree }
+			: {}),
+		...(options.maxDegree !== undefined
+			? { max_degree: options.maxDegree }
+			: {}),
+		...(options.excludeEntryPoints !== undefined
+			? { exclude_entry_points: options.excludeEntryPoints }
+			: {}),
+		...(options.offset !== undefined ? { offset: options.offset } : {}),
+	};
 }
 
 /** Keeps only backend semantic search rows from a combined graph payload. */

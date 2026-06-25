@@ -2,6 +2,7 @@
 import type { Command } from "commander";
 
 import {
+	type CodebaseMemoryGraphSearchOptions,
 	printCodebaseMemoryGraphSearch,
 	printCodebaseMemorySearch,
 	printCodebaseMemorySemanticSearch,
@@ -29,6 +30,15 @@ type SearchOptions = {
 	limit?: string | number;
 	graph?: boolean;
 	semantic?: boolean;
+	label?: string;
+	namePattern?: string;
+	qnPattern?: string;
+	filePattern?: string;
+	relationship?: string;
+	minDegree?: number;
+	maxDegree?: number;
+	excludeEntryPoints?: boolean;
+	offset?: number;
 };
 
 type RootOptions = {
@@ -47,6 +57,42 @@ export function addSearchParser(program: Command): void {
 			"Search with derived relationship context instead of the fast source path.",
 		)
 		.option("--semantic", "Use Codebase Memory semantic graph search.")
+		.option("--label <label>", "Filter --graph results by node label.")
+		.option(
+			"--name-pattern <regex>",
+			"Filter --graph results by node name regex.",
+		)
+		.option(
+			"--qn-pattern <regex>",
+			"Filter --graph results by qualified-name regex.",
+		)
+		.option(
+			"--file-pattern <glob>",
+			"Filter --graph results by source file pattern.",
+		)
+		.option(
+			"--relationship <type>",
+			"Filter --graph results by edge relationship.",
+		)
+		.option(
+			"--min-degree <count>",
+			"Filter --graph results by minimum graph degree.",
+			parseIntegerOption,
+		)
+		.option(
+			"--max-degree <count>",
+			"Filter --graph results by maximum graph degree.",
+			parseIntegerOption,
+		)
+		.option(
+			"--exclude-entry-points",
+			"Exclude entry-point nodes from --graph results.",
+		)
+		.option(
+			"--offset <count>",
+			"Page --graph results from an offset.",
+			parseIntegerOption,
+		)
 		.action(async (searchText: string[], options: SearchOptions) => {
 			const exitCode = await commandSearch(
 				searchText,
@@ -89,7 +135,12 @@ export async function commandSearch(
 	}
 	if (
 		options.graph &&
-		printCodebaseMemoryGraphSearch(root, searchText, limit)
+		printCodebaseMemoryGraphSearch(
+			root,
+			searchText,
+			limit,
+			graphSearchOptions(options),
+		)
 	) {
 		return 0;
 	}
@@ -189,6 +240,37 @@ export function printSourceFallbackMatches(
 /** Uses text-only source search when detailed structural work is too broad. */
 function shouldUseTextOnlySourceSearch(root: string): boolean {
 	return runScan(root).files.length > DETAILED_ANALYSIS_FILE_LIMIT;
+}
+
+/** Builds Codebase Memory graph search options without explicit undefined fields. */
+function graphSearchOptions(
+	options: SearchOptions,
+): CodebaseMemoryGraphSearchOptions {
+	return {
+		...(options.label !== undefined ? { label: options.label } : {}),
+		...(options.namePattern !== undefined
+			? { namePattern: options.namePattern }
+			: {}),
+		...(options.qnPattern !== undefined
+			? { qnPattern: options.qnPattern }
+			: {}),
+		...(options.filePattern !== undefined
+			? { filePattern: options.filePattern }
+			: {}),
+		...(options.relationship !== undefined
+			? { relationship: options.relationship }
+			: {}),
+		...(options.minDegree !== undefined
+			? { minDegree: options.minDegree }
+			: {}),
+		...(options.maxDegree !== undefined
+			? { maxDegree: options.maxDegree }
+			: {}),
+		...(options.excludeEntryPoints !== undefined
+			? { excludeEntryPoints: options.excludeEntryPoints }
+			: {}),
+		...(options.offset !== undefined ? { offset: options.offset } : {}),
+	};
 }
 
 /** Parses the search result limit option. */

@@ -25,6 +25,10 @@ import {
 import {
 	commandIndex,
 	commandInspect,
+	commandMemoryChanges,
+	commandMemoryProjects,
+	commandMemoryQuery,
+	commandMemorySchema,
 	commandMemoryStatus,
 	commandSignals,
 } from "../src/codemap/commands/index.js";
@@ -153,6 +157,21 @@ describe("CodebaseMemory client", () => {
 		}
 	});
 
+	it("prints compact backend code search rows", () => {
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+		try {
+			expect(printCodebaseMemorySearch(workDir, "needle", 1)).toBe(true);
+			const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+
+			expect(output).toContain("CodebaseMemory code matches:");
+			expect(output).toContain("results: 1");
+			expect(output).toContain("- needle");
+			expect(output).not.toContain('"results"');
+		} finally {
+			logSpy.mockRestore();
+		}
+	});
+
 	it("lets graph rendering fall back when CodebaseMemory graph search returns no matches", () => {
 		vi.stubEnv("CODEBASE_MEMORY_MOCK_EMPTY_GRAPH", "1");
 		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
@@ -162,6 +181,22 @@ describe("CodebaseMemory client", () => {
 				false,
 			);
 			expect(logSpy).not.toHaveBeenCalled();
+		} finally {
+			logSpy.mockRestore();
+		}
+	});
+
+	it("prints compact backend graph search rows", () => {
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+		try {
+			expect(printCodebaseMemoryGraphSearch(workDir, "needle", 1)).toBe(true);
+			const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+
+			expect(output).toContain("CodebaseMemory graph matches:");
+			expect(output).toContain("mode: graph");
+			expect(output).toContain("results: 1");
+			expect(output).toContain("- needle");
+			expect(output).not.toContain('"results"');
 		} finally {
 			logSpy.mockRestore();
 		}
@@ -205,6 +240,22 @@ describe("CodebaseMemory client", () => {
 		try {
 			expect(printCodebaseMemoryCallTrace(workDir, "needle")).toBe(false);
 			expect(logSpy).not.toHaveBeenCalled();
+		} finally {
+			logSpy.mockRestore();
+		}
+	});
+
+	it("prints compact backend call traces", () => {
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+		try {
+			expect(printCodebaseMemoryCallTrace(workDir, "needle")).toBe(true);
+			const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+
+			expect(output).toContain("CodebaseMemory call trace:");
+			expect(output).toContain("function: needle");
+			expect(output).toContain("Callers: 1");
+			expect(output).toContain("- callerOne (hop 1, high)");
+			expect(output).not.toContain('"callers"');
 		} finally {
 			logSpy.mockRestore();
 		}
@@ -313,6 +364,94 @@ describe("CodebaseMemory client", () => {
 		}
 	});
 
+	it("prints backend project list through the memory command surface", () => {
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+		try {
+			expect(commandMemoryProjects({ projectRoot: workDir })).toBe(0);
+			const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+
+			expect(output).toContain("CodebaseMemory projects: 1");
+			expect(output).toContain("- mock-project");
+			expect(output).toContain("nodes=12");
+			expect(readIndexCalls()).toHaveLength(1);
+		} finally {
+			logSpy.mockRestore();
+		}
+	});
+
+	it("prints backend graph schema through the memory command surface", () => {
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+		try {
+			expect(commandMemorySchema({ projectRoot: workDir })).toBe(0);
+			const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+
+			expect(output).toContain(
+				"CodebaseMemory schema: 1 node labels, 1 edge types",
+			);
+			expect(output).toContain("- node: Function (7)");
+			expect(output).toContain("- edge: CALLS (9)");
+			expect(readIndexCalls()).toHaveLength(1);
+		} finally {
+			logSpy.mockRestore();
+		}
+	});
+
+	it("runs backend graph queries through the memory command surface", () => {
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+		try {
+			expect(
+				commandMemoryQuery(["MATCH", "(f:Function)", "RETURN", "f.name"], {
+					projectRoot: workDir,
+					maxRows: 2,
+				}),
+			).toBe(0);
+			const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+
+			expect(output).toContain("CodebaseMemory query rows: 1");
+			expect(output).toContain("mock-project.src.needle");
+			expect(readIndexCalls()).toHaveLength(1);
+		} finally {
+			logSpy.mockRestore();
+		}
+	});
+
+	it("rejects mutating backend graph queries", () => {
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+		try {
+			expect(
+				commandMemoryQuery(["MATCH", "(f)", "DELETE", "f"], {
+					projectRoot: workDir,
+				}),
+			).toBe(2);
+			const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+
+			expect(output).toContain("read-oriented Cypher only");
+			expect(readIndexCalls()).toHaveLength(0);
+		} finally {
+			logSpy.mockRestore();
+		}
+	});
+
+	it("prints backend change impact through the memory command surface", () => {
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+		try {
+			expect(
+				commandMemoryChanges({
+					projectRoot: workDir,
+					since: "HEAD~1",
+					depth: 2,
+				}),
+			).toBe(0);
+			const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+
+			expect(output).toContain("CodebaseMemory changed-code impact:");
+			expect(output).toContain("src/needle.ts");
+			expect(readIndexCalls()).toHaveLength(1);
+		} finally {
+			logSpy.mockRestore();
+		}
+	});
+
 	it("prints explicit top-level index refresh timing", () => {
 		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 		try {
@@ -406,6 +545,20 @@ const payloads = {
     edges: 34,
     status,
   },
+  get_graph_schema: {
+    node_labels: [
+      {
+        label: "Function",
+        count: 7,
+      },
+    ],
+    edge_types: [
+      {
+        type: "CALLS",
+        count: 9,
+      },
+    ],
+  },
   search_code:
     process.env.CODEBASE_MEMORY_MOCK_EMPTY_SEARCH === "1"
       ? {
@@ -495,6 +648,9 @@ const payloads = {
           total_paths: 0,
         }
       : {
+          function: toolArgs.function_name,
+          direction: toolArgs.direction,
+          mode: toolArgs.mode,
           callers: [
             {
               name: "callerOne",
@@ -517,6 +673,23 @@ const payloads = {
           ],
           total_paths: 1,
         },
+  query_graph: {
+    total: 1,
+    rows: [
+      {
+        qualified_name: "mock-project.src.needle",
+        complexity: 2,
+      },
+    ],
+  },
+  detect_changes: {
+    changes: [
+      {
+        file: "src/needle.ts",
+        impact: "calleeOne",
+      },
+    ],
+  },
 };
 if (toolName === "index_repository") {
   fs.appendFileSync(indexLogPath, JSON.stringify(toolCall?.params?.arguments ?? {}) + "\\n");

@@ -4,6 +4,10 @@ export { addIndexParser, commandIndex } from "./index-memory.js";
 export { addInspectParser, commandInspect } from "./inspect.js";
 export {
 	addMemoryParsers,
+	commandMemoryChanges,
+	commandMemoryProjects,
+	commandMemoryQuery,
+	commandMemorySchema,
 	commandMemoryStatus,
 } from "./memory.js";
 export { addProjectRootArgument, PROJECT_ROOT_HELP } from "./options.js";
