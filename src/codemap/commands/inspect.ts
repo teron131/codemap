@@ -3,7 +3,11 @@ import { statSync } from "node:fs";
 import path from "node:path";
 import type { Command } from "commander";
 
-import { printCodebaseMemoryInspect } from "../codebase-memory/index.js";
+import {
+	type CodebaseMemoryInspectResult,
+	codebaseMemoryInspect,
+	renderCodebaseMemoryInspect,
+} from "../codebase-memory/index.js";
 import { DETAILED_ANALYSIS_FILE_LIMIT, resolveProjectRoot } from "../common.js";
 import {
 	buildLikelyEntries,
@@ -83,14 +87,98 @@ export function commandInspect(
 		console.log("Choose only one inspect lane: --backend or --local.");
 		return 2;
 	}
-	if (!options.local && printCodebaseMemoryInspect(root, target, limit)) {
-		return 0;
+	if (!options.local) {
+		const backendInspection = codebaseMemoryInspect(root, target, limit);
+		if (backendInspection !== null) {
+			console.log(
+				renderEnrichedBackendInspection(root, target, backendInspection, {
+					includeLocal: !options.backend,
+					limit,
+				}),
+			);
+			return 0;
+		}
 	}
 	if (options.backend) {
 		console.log(`No backend match: ${target}`);
 		console.log("Backend: Codebase Memory");
 		return 1;
 	}
+	const inspection = renderCurrentTreeInspection(root, target, { limit });
+	if (inspection === null) {
+		console.log(`No match: ${target}`);
+		console.log(
+			`Run: codemap search --project-root ${root} ${pythonRepr(target)}`,
+		);
+		return 1;
+	}
+	console.log(inspection);
+	return 0;
+}
+
+/** Renders backend inspection with optional current-tree evidence appended. */
+function renderEnrichedBackendInspection(
+	root: string,
+	target: string,
+	backendInspection: CodebaseMemoryInspectResult,
+	{
+		includeLocal,
+		limit,
+	}: {
+		includeLocal: boolean;
+		limit: number;
+	},
+): string {
+	const backendOutput = renderCodebaseMemoryInspect(backendInspection, {
+		limit,
+	});
+	if (!includeLocal) {
+		return backendOutput;
+	}
+	const localOutput = firstCurrentTreeInspection(
+		root,
+		[target, backendInspection.filePath],
+		{ limit },
+	);
+	if (localOutput === null) {
+		return backendOutput;
+	}
+	return [
+		backendOutput,
+		"## Current Tree Evidence",
+		"",
+		demoteInspectionHeadings(localOutput),
+	]
+		.join("\n")
+		.trim();
+}
+
+/** Renders the first current-tree inspection that resolves from candidate targets. */
+function firstCurrentTreeInspection(
+	root: string,
+	targets: Array<string | null>,
+	{ limit }: { limit: number },
+): string | null {
+	const seen = new Set<string>();
+	for (const candidate of targets) {
+		if (candidate === null || seen.has(candidate)) {
+			continue;
+		}
+		seen.add(candidate);
+		const inspection = renderCurrentTreeInspection(root, candidate, { limit });
+		if (inspection !== null) {
+			return inspection;
+		}
+	}
+	return null;
+}
+
+/** Runs the current-tree inspect workflow without printing command fallback text. */
+function renderCurrentTreeInspection(
+	root: string,
+	target: string,
+	{ limit }: { limit: number },
+): string | null {
 	const pathTargetKind = inspectPathTargetKind(root, target);
 	let pathTargetScan: ReturnType<typeof runScan> | null = null;
 	if (pathTargetKind !== null) {
@@ -110,8 +198,7 @@ export function commandInspect(
 							likelyEntries,
 						});
 			if (inspection !== null) {
-				console.log(inspection);
-				return 0;
+				return inspection;
 			}
 		}
 	}
@@ -126,14 +213,25 @@ export function commandInspect(
 		likelyEntries,
 	});
 	if (inspection === null) {
-		console.log(`No match: ${target}`);
-		console.log(
-			`Run: codemap search --project-root ${root} ${pythonRepr(target)}`,
-		);
-		return 1;
+		return null;
 	}
-	console.log(inspection);
-	return 0;
+	return inspection;
+}
+
+/** Demotes nested Markdown headings before appending local evidence under backend output. */
+function demoteInspectionHeadings(output: string): string {
+	return output
+		.split("\n")
+		.map((line) => {
+			if (line.startsWith("## ")) {
+				return `### ${line.slice(3)}`;
+			}
+			if (line.startsWith("# ")) {
+				return `### ${line.slice(2)}`;
+			}
+			return line;
+		})
+		.join("\n");
 }
 
 /** Classifies a target that directly names a filesystem path. */

@@ -14,12 +14,16 @@ export type CodebaseMemoryInspectResult = {
 	filePath: string | null;
 	startLine: number | null;
 	endLine: number | null;
+	matchRank: number | null;
+	matchScore: number | null;
 	signalFacts: string[];
+	graphFacts: string[];
 	signature: string | null;
 	source: string | null;
 	callers: string[];
 	callees: string[];
 	related: string[];
+	graphNeighbors: string[];
 };
 
 export type CodebaseMemoryStatusResult = {
@@ -173,6 +177,7 @@ export function codebaseMemoryInspect(
 		target,
 		root,
 		match,
+		searchResult.value,
 		snippetResult.value,
 		traceResult.ok ? traceResult.value : null,
 	);
@@ -259,6 +264,7 @@ function inspectResultFromPayloads(
 	target: string,
 	root: string,
 	match: Record<string, unknown>,
+	searchValue: unknown,
 	snippetValue: unknown,
 	traceValue: unknown,
 ): CodebaseMemoryInspectResult {
@@ -279,7 +285,10 @@ function inspectResultFromPayloads(
 		filePath,
 		startLine: numberField(snippet.start_line) ?? numberField(match.start_line),
 		endLine: numberField(snippet.end_line) ?? numberField(match.end_line),
+		matchRank: ordinalRank(numberField(match.rank)),
+		matchScore: matchScore(match),
 		signalFacts: signalFacts(snippet),
+		graphFacts: graphFacts(match),
 		signature: signatureText(snippet),
 		source: stringField(snippet.source),
 		callers: traceRows(trace.callers),
@@ -290,7 +299,28 @@ function inspectResultFromPayloads(
 			...traceNames(trace.callers),
 			...traceNames(trace.callees),
 		]).filter((item) => !testLikeName(item)),
+		graphNeighbors: graphNeighbors(searchValue, qualifiedName).filter(
+			(item) => !testLikeName(item),
+		),
 	};
+}
+
+/** Reads an ordinal graph result rank when the backend supplies one. */
+function ordinalRank(value: number | null): number | null {
+	return value !== null && Number.isInteger(value) && value > 0 ? value : null;
+}
+
+/** Reads the best available graph match confidence score. */
+function matchScore(match: Record<string, unknown>): number | null {
+	const score =
+		numberField(match.rerank_score) ??
+		numberField(match.score) ??
+		numberField(match.similarity);
+	if (score !== null) {
+		return score;
+	}
+	const rank = numberField(match.rank);
+	return ordinalRank(rank) === null ? rank : null;
 }
 
 /** Checks common CodebaseMemory search payload fields for no-answer responses. */
@@ -345,6 +375,81 @@ function signalFacts(snippet: Record<string, unknown>): string[] {
 	]
 		.filter((item): item is [string, number] => item[1] !== null)
 		.map(([name, value]) => `${name}=${value}`);
+}
+
+/** Builds compact node metadata facts from a graph search match. */
+function graphFacts(match: Record<string, unknown>): string[] {
+	return [
+		["label", stringField(match.label) ?? stringField(match.node_label)],
+		["kind", stringField(match.kind) ?? stringField(match.type)],
+		["package", stringField(match.package) ?? stringField(match.package_name)],
+		["language", stringField(match.language)],
+	]
+		.filter((item): item is [string, string] => item[1] !== null)
+		.map(([name, value]) => `${name}=${value}`);
+}
+
+/** Extracts readable neighbor rows from common graph search payload shapes. */
+function graphNeighbors(value: unknown, qualifiedName: string): string[] {
+	const record = recordValue(value);
+	return uniqueRows([
+		...neighborRows(record.connected_nodes, qualifiedName),
+		...neighborRows(record.neighbors, qualifiedName),
+		...relationshipRows(record.relationships, qualifiedName),
+		...relationshipRows(record.edges, qualifiedName),
+	]);
+}
+
+/** Extracts graph neighbor rows from node-like arrays. */
+function neighborRows(value: unknown, qualifiedName: string): string[] {
+	return arrayValue(value)
+		.map((item) => {
+			const record = recordValue(item);
+			const name =
+				stringField(record.name) ??
+				stringField(record.qualified_name) ??
+				stringField(record.target);
+			if (name === null || name === qualifiedName) {
+				return null;
+			}
+			const relation =
+				stringField(record.relationship) ??
+				stringField(record.edge_type) ??
+				stringField(record.type);
+			return relation === null ? name : `${relation}: ${name}`;
+		})
+		.filter((item) => item !== null);
+}
+
+/** Extracts graph neighbor rows from edge-like arrays. */
+function relationshipRows(value: unknown, qualifiedName: string): string[] {
+	return arrayValue(value)
+		.map((item) => {
+			const record = recordValue(item);
+			const source =
+				stringField(record.source) ??
+				stringField(record.from) ??
+				stringField(record.source_name);
+			const target =
+				stringField(record.target) ??
+				stringField(record.to) ??
+				stringField(record.target_name);
+			const relation =
+				stringField(record.type) ??
+				stringField(record.relationship) ??
+				stringField(record.edge_type);
+			const other =
+				source === qualifiedName
+					? target
+					: target === qualifiedName
+						? source
+						: null;
+			if (other === null || other === undefined || other === qualifiedName) {
+				return null;
+			}
+			return relation === null ? other : `${relation}: ${other}`;
+		})
+		.filter((item) => item !== null);
 }
 
 /** Builds a compact signature row from CodebaseMemory snippet fields. */

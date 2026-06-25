@@ -120,7 +120,7 @@ export function printCodebaseMemoryStatus(root: string): boolean {
 }
 
 /** Renders a compact backend-first inspect report. */
-function renderCodebaseMemoryInspect(
+export function renderCodebaseMemoryInspect(
 	result: CodebaseMemoryInspectResult,
 	{ limit }: { limit: number },
 ): string {
@@ -135,11 +135,31 @@ function renderCodebaseMemoryInspect(
 			`Source: ${result.filePath}${result.startLine !== null ? `:${result.startLine}` : ""}${result.endLine !== null && result.endLine !== result.startLine ? `-${result.endLine}` : ""}`,
 		);
 	}
+	appendCodebaseMemoryMatchLines(lines, result);
 	appendCodebaseMemorySignalLines(lines, result.signalFacts);
 	appendCodebaseMemoryCode(lines, result, { limit });
 	appendCodebaseMemoryTrace(lines, result, { limit });
+	appendCodebaseMemoryGraphNeighbors(lines, result.graphNeighbors, { limit });
 	appendCodebaseMemoryRelated(lines, result.related, { limit });
 	return lines.join("\n").trim();
+}
+
+/** Adds backend graph match rank and node metadata. */
+function appendCodebaseMemoryMatchLines(
+	lines: string[],
+	result: CodebaseMemoryInspectResult,
+): void {
+	const matchFacts = [
+		result.matchRank !== null ? `rank=${result.matchRank}` : null,
+		result.matchScore !== null
+			? `score=${formatScore(result.matchScore)}`
+			: null,
+		...result.graphFacts,
+	].filter((item) => item !== null);
+	if (matchFacts.length === 0) {
+		return;
+	}
+	lines.push(`Match: ${matchFacts.join(", ")}`);
 }
 
 /** Adds compact complexity and graph degree facts from a snippet payload. */
@@ -208,6 +228,26 @@ function appendCodebaseMemoryTrace(
 	}
 }
 
+/** Adds graph-neighborhood rows supplied by Codebase Memory search. */
+function appendCodebaseMemoryGraphNeighbors(
+	lines: string[],
+	neighbors: string[],
+	{ limit }: { limit: number },
+): void {
+	const shown = neighbors.slice(0, limit);
+	if (shown.length === 0) {
+		return;
+	}
+	lines.push("");
+	lines.push("## Graph Neighborhood");
+	for (const item of shown) {
+		lines.push(`- ${item}`);
+	}
+	if (neighbors.length > shown.length) {
+		lines.push("- ...");
+	}
+}
+
 /** Adds a short next-read list from trace and snippet neighbors. */
 function appendCodebaseMemoryRelated(
 	lines: string[],
@@ -240,4 +280,9 @@ function codeFenceLanguage(filePath: string | null): string {
 		return "json";
 	}
 	return "";
+}
+
+/** Formats backend confidence scores without noisy floating-point tails. */
+function formatScore(value: number): string {
+	return value.toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
 }

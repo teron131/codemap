@@ -20,7 +20,9 @@ import {
 	printCodebaseMemoryGraphSearch,
 	printCodebaseMemorySearch,
 	printCodebaseMemorySemanticSearch,
+	renderCodebaseMemoryInspect,
 } from "../src/codemap/codebase-memory/render.js";
+import { commandInspect } from "../src/codemap/commands/index.js";
 
 const workspaceRoot = process.cwd();
 let workDir: string;
@@ -158,13 +160,75 @@ describe("CodebaseMemory client", () => {
 			filePath: "src/needle.ts",
 			startLine: 4,
 			endLine: 8,
+			matchRank: 1,
+			matchScore: 0.87,
 			signalFacts: ["complexity=2", "cognitive=3", "lines=5"],
+			graphFacts: ["label=Function", "language=TypeScript"],
 			signature: "function needle(): string",
 			source: "export function needle() {\n  return 'needle';\n}",
 			callers: ["callerOne (hop 1, high)"],
 			callees: ["calleeOne (hop 1, medium)"],
 			related: ["callerOne", "calleeOne"],
+			graphNeighbors: ["CALLS: mock-project.src.calleeOne"],
 		});
+	});
+
+	it("renders enriched CodebaseMemory inspect output with graph rank and neighbors", () => {
+		const result = codebaseMemoryInspect(workDir, "needle", 2);
+
+		if (result === null) {
+			throw new Error("expected backend inspect result");
+		}
+		const output = renderCodebaseMemoryInspect(result, { limit: 2 });
+
+		expect(output).toContain("Match: rank=1, score=0.87");
+		expect(output).toContain("label=Function");
+		expect(output).toContain("## Graph Neighborhood");
+		expect(output).toContain("- CALLS: mock-project.src.calleeOne");
+	});
+
+	it("renders score-like graph rank values as scores", () => {
+		vi.stubEnv("CODEBASE_MEMORY_MOCK_SCORE_LIKE_RANK", "1");
+		const result = codebaseMemoryInspect(workDir, "needle", 2);
+
+		if (result === null) {
+			throw new Error("expected backend inspect result");
+		}
+		const output = renderCodebaseMemoryInspect(result, { limit: 2 });
+
+		expect(result.matchRank).toBeNull();
+		expect(result.matchScore).toBe(-19.05778987685244);
+		expect(output).toContain("Match: score=-19.058");
+		expect(output).not.toContain("rank=-19");
+	});
+
+	it("combines backend inspect and current-tree evidence by default", () => {
+		mkdirSync(path.join(workDir, "src"), { recursive: true });
+		writeFileSync(
+			path.join(workDir, "src", "needle.ts"),
+			[
+				"export function needle() {",
+				"  return helper();",
+				"}",
+				"",
+				"export function helper() {",
+				"  return 'ok';",
+				"}",
+			].join("\n"),
+			"utf8",
+		);
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+		try {
+			expect(commandInspect("needle", { projectRoot: workDir })).toBe(0);
+			const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+
+			expect(output).toContain("Backend: Codebase Memory");
+			expect(output).toContain("## Current Tree Evidence");
+			expect(output).toContain("### needle in src/needle.ts:1");
+			expect(output).toContain("calls: helper in src/needle.ts:5");
+		} finally {
+			logSpy.mockRestore();
+		}
 	});
 
 	it("indexes projects when index_status is not ready", () => {
@@ -277,6 +341,16 @@ const payloads = {
               file_path: ${JSON.stringify(path.join(workDir, "src", "needle.ts"))},
               start_line: 4,
               end_line: 8,
+              rank: process.env.CODEBASE_MEMORY_MOCK_SCORE_LIKE_RANK === "1" ? -19.05778987685244 : 1,
+              rerank_score: process.env.CODEBASE_MEMORY_MOCK_SCORE_LIKE_RANK === "1" ? undefined : 0.87,
+              label: "Function",
+              language: "TypeScript",
+            },
+          ],
+          connected_nodes: [
+            {
+              relationship: "CALLS",
+              qualified_name: "mock-project.src.calleeOne",
             },
           ],
           semantic_results: [],
