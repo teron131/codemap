@@ -1,18 +1,10 @@
 /** Re-exports command parsers, dispatchers, and handlers. */
-export {
-	addArtifactsParsers,
-	commandArtifactsCreate,
-	commandArtifactsStatus,
-	commandArtifactsUpdate,
-	commandArtifactsView,
-} from "./artifacts.js";
 export { buildParser, dispatch, main, run } from "./cli.js";
 export { addInspectParser, commandInspect } from "./inspect.js";
 export { addProjectRootArgument, PROJECT_ROOT_HELP } from "./options.js";
 export {
 	addSearchParser,
 	commandSearch,
-	printSemanticMatches,
 	printSourceMatches,
 } from "./search.js";
 export {
@@ -23,11 +15,7 @@ export {
 	commandSearchMatch,
 	commandSearchRule,
 } from "./search-structural.js";
-export {
-	addSemanticParsers,
-	commandSemanticInit,
-	commandSemanticStatus,
-} from "./semantic.js";
+export { addSemanticParsers, commandSemanticStatus } from "./semantic.js";
 export {
 	addSignalsParser,
 	commandSignals,

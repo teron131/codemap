@@ -14,8 +14,8 @@ export function currentTreeInspectGraph(
 	rawTarget: string,
 	existingScan: ReturnType<typeof runScan> | null = null,
 ): [GraphPayload, Record<string, unknown>] {
-	const scan = existingScan ?? runScan(root, { persist: false });
-	const importResult = runImportMap(root, scan.files, { persist: false });
+	const scan = existingScan ?? runScan(root);
+	const importResult = runImportMap(root, scan.files);
 	const importMap = importResult.importMap;
 	const pythonTreesByPath = importResult._pythonTrees;
 	const fileMetricsByPath = importResult._typescriptMetrics;
@@ -32,8 +32,6 @@ export function currentTreeInspectGraph(
 		structureFiles = structureFiles.filter((item) => emitPaths.has(item.path));
 	}
 	const structure = runStructure(root, structureFiles, importMap, {
-		label: "current",
-		persist: false,
 		fileMetricsByPath,
 		pythonTreesByPath,
 	});

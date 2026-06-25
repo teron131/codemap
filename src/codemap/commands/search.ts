@@ -6,11 +6,7 @@ import {
 	tryPrintCodebaseMemorySearch,
 	tryPrintCodebaseMemorySemanticSearch,
 } from "../codebaseMemory/index.js";
-import {
-	DETAILED_ANALYSIS_FILE_LIMIT,
-	resolveProjectRoot,
-	semanticIndexPath,
-} from "../common.js";
+import { DETAILED_ANALYSIS_FILE_LIMIT, resolveProjectRoot } from "../common.js";
 import {
 	renderGraphMatchLines,
 	type SourceFallbackGroup,
@@ -19,13 +15,6 @@ import {
 	sourceFallbackMatches,
 	sourceMatches,
 } from "../search/index.js";
-import {
-	EmbeddingSearchError,
-	loadEmbeddingConfig,
-	loadSemanticIndex,
-	semanticIndexExists,
-	semanticMatches,
-} from "../search/semantic/index.js";
 import { runScan } from "../source/extraction/index.js";
 import { currentTreeGraph } from "../source/graph/index.js";
 import { addProjectRootArgument, parseIntegerOption } from "./options.js";
@@ -59,7 +48,7 @@ export function addSearchParser(program: Command): void {
 		)
 		.option(
 			"--semantic",
-			"Also search a saved semantic index. Run `codemap semantic init` first.",
+			"Prefer Codebase Memory semantic graph search when a ready backend index exists.",
 		)
 		.action(async (searchText: string[], options: SearchOptions) => {
 			const exitCode = await commandSearch(
@@ -146,7 +135,10 @@ export async function commandSearch(
 		}
 	}
 	if (options.semantic) {
-		return printSemanticMatches(root, searchText, limit);
+		console.log("\nSemantic graph matches:");
+		console.log(
+			"  unavailable: no ready Codebase Memory index; used current-tree search fallback.",
+		);
 	}
 	return 0;
 }
@@ -199,60 +191,7 @@ export function printSourceFallbackMatches(
 
 /** Uses text-only source search when detailed structural work is too broad. */
 function shouldUseTextOnlySourceSearch(root: string): boolean {
-	return (
-		runScan(root, { persist: false }).files.length >
-		DETAILED_ANALYSIS_FILE_LIMIT
-	);
-}
-
-/** Prints semantic search results or setup guidance. */
-export async function printSemanticMatches(
-	root: string,
-	searchText: string,
-	limit: number,
-): Promise<number> {
-	try {
-		if (!semanticIndexExists(root)) {
-			console.log("\nSemantic card matches:");
-			console.log(
-				`  unavailable: no semantic index: ${semanticIndexPath(root)}`,
-			);
-			console.log(`  run: codemap semantic init --project-root ${root}`);
-			return 1;
-		}
-		const config = loadEmbeddingConfig(root);
-		if (config === null) {
-			console.log("\nSemantic card matches:");
-			console.log(
-				"  unavailable: no embedding setup found; set GEMINI_API_KEY in the environment or .env",
-			);
-			return 1;
-		}
-		const index = loadSemanticIndex(root);
-		const cardMatches = await semanticMatches(index, searchText, {
-			config,
-			limit,
-		});
-		console.log("\nSemantic card matches:");
-		if (cardMatches.length === 0) {
-			console.log("  none");
-		}
-		for (const item of cardMatches) {
-			const lineRange = item.lineRange.length > 0 ? item.lineRange : ["?", "?"];
-			console.log(
-				`  - ${item.kind} ${item.filePath}:${lineRange[0]}-${lineRange[1]} score=${item.score.toFixed(3)}`,
-			);
-			console.log(`      ${item.title}`);
-		}
-		return 0;
-	} catch (error) {
-		if (error instanceof EmbeddingSearchError || error instanceof Error) {
-			console.log("\nSemantic card matches:");
-			console.log(`  unavailable: ${error.message}`);
-			return 1;
-		}
-		throw error;
-	}
+	return runScan(root).files.length > DETAILED_ANALYSIS_FILE_LIMIT;
 }
 
 /** Parses the search result limit option. */

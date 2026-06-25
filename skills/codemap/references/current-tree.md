@@ -1,6 +1,6 @@
 # Current Tree Reference
 
-Use Codemap when the task is about current files: orientation, discovery, focused inspection, smart target cards, relationship context, or refactor evidence. Normal current-tree commands do not require or write `.context-graph`.
+Use Codemap when the task is about current files: orientation, discovery, focused inspection, smart target cards, relationship context, or refactor evidence. Normal current-tree commands do not write persistent Codemap storage.
 
 ## Orient In An Unknown Repo
 
@@ -55,9 +55,9 @@ Use `signals` for structural refactor evidence. The default output is a compact 
 
 Signals should help choose what to read or change next; they should not automatically decide that code is wrong. Broad function and variable name pools are naming-pressure evidence only. Dense file text rows use `signals` for the summed structural count when full analysis is available. Large-repo fallback rows use `lines` because they are scanner-only file-size hints, while JSON keeps the field name `total` for existing scripts. Rows have an internal high cap to prevent runaway output. Source-specific rows skip generated/vendor-style files, and file-specific rows skip likely tests by default; add `--include-tests` for whole-tree rows. Use `--json` with `jq` for filtering, slicing, scripts, and agent pipelines.
 
-## Artifact Boundary
+## Backend Boundary
 
-Do not run `artifacts create` or `artifacts update` for normal search, inspect, summary, or signals requests. Use artifacts only when the user asks for saved output, durable handoff evidence, CI-style evidence, or point-in-time output.
+Codebase Memory MCP is the persistent graph backend. Use `codemap semantic status` to check whether a backend index is ready, and use `search --semantic` or backend-backed default/graph search when persistent graph evidence is useful. If the backend is unavailable, continue with current-tree Codemap commands.
 
 ## Non-Goals
 
