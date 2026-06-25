@@ -15,11 +15,11 @@ import {
 	codebaseMemoryReadyProject,
 } from "../src/codemap/codebase-memory/index.js";
 import {
-	tryPrintCodebaseMemoryCallTrace,
-	tryPrintCodebaseMemoryGraphSearch,
-	tryPrintCodebaseMemorySearch,
-	tryPrintCodebaseMemorySemanticSearch,
-} from "../src/codemap/codebase-memory/renderers.js";
+	printCodebaseMemoryCallTrace,
+	printCodebaseMemoryGraphSearch,
+	printCodebaseMemorySearch,
+	printCodebaseMemorySemanticSearch,
+} from "../src/codemap/codebase-memory/render.js";
 
 const workspaceRoot = process.cwd();
 let workDir: string;
@@ -107,7 +107,7 @@ describe("CodebaseMemory client", () => {
 		vi.stubEnv("CODEBASE_MEMORY_MOCK_ERROR_TOOL", "search_code");
 		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 		try {
-			expect(tryPrintCodebaseMemorySearch(workDir, "needle", 1)).toBe(false);
+			expect(printCodebaseMemorySearch(workDir, "needle", 1)).toBe(false);
 			expect(logSpy).not.toHaveBeenCalled();
 		} finally {
 			logSpy.mockRestore();
@@ -118,7 +118,7 @@ describe("CodebaseMemory client", () => {
 		vi.stubEnv("CODEBASE_MEMORY_MOCK_EMPTY_SEARCH", "1");
 		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 		try {
-			expect(tryPrintCodebaseMemorySearch(workDir, "needle", 1)).toBe(false);
+			expect(printCodebaseMemorySearch(workDir, "needle", 1)).toBe(false);
 			expect(logSpy).not.toHaveBeenCalled();
 		} finally {
 			logSpy.mockRestore();
@@ -129,10 +129,8 @@ describe("CodebaseMemory client", () => {
 		vi.stubEnv("CODEBASE_MEMORY_MOCK_EMPTY_GRAPH", "1");
 		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 		try {
-			expect(tryPrintCodebaseMemoryGraphSearch(workDir, "needle", 1)).toBe(
-				false,
-			);
-			expect(tryPrintCodebaseMemorySemanticSearch(workDir, "needle", 1)).toBe(
+			expect(printCodebaseMemoryGraphSearch(workDir, "needle", 1)).toBe(false);
+			expect(printCodebaseMemorySemanticSearch(workDir, "needle", 1)).toBe(
 				false,
 			);
 			expect(logSpy).not.toHaveBeenCalled();
@@ -145,7 +143,7 @@ describe("CodebaseMemory client", () => {
 		vi.stubEnv("CODEBASE_MEMORY_MOCK_EMPTY_TRACE", "1");
 		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 		try {
-			expect(tryPrintCodebaseMemoryCallTrace(workDir, "needle")).toBe(false);
+			expect(printCodebaseMemoryCallTrace(workDir, "needle")).toBe(false);
 			expect(logSpy).not.toHaveBeenCalled();
 		} finally {
 			logSpy.mockRestore();

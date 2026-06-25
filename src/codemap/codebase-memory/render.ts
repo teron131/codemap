@@ -8,8 +8,8 @@ import {
 	recordValue,
 } from "./client.js";
 
-/** Tries to print graph-augmented CodebaseMemory source search results. */
-export function tryPrintCodebaseMemorySearch(
+/** Prints graph-augmented CodebaseMemory source search results when available. */
+export function printCodebaseMemorySearch(
 	root: string,
 	searchText: string,
 	limit: number,
@@ -41,8 +41,8 @@ export function tryPrintCodebaseMemorySearch(
 	return true;
 }
 
-/** Tries to print CodebaseMemory graph search results for relationship-oriented search. */
-export function tryPrintCodebaseMemoryGraphSearch(
+/** Prints CodebaseMemory graph search results for relationship-oriented search when available. */
+export function printCodebaseMemoryGraphSearch(
 	root: string,
 	searchText: string,
 	limit: number,
@@ -74,8 +74,8 @@ export function tryPrintCodebaseMemoryGraphSearch(
 	return true;
 }
 
-/** Tries to print CodebaseMemory semantic graph matches for semantic search. */
-export function tryPrintCodebaseMemorySemanticSearch(
+/** Prints CodebaseMemory semantic graph matches for semantic search when available. */
+export function printCodebaseMemorySemanticSearch(
 	root: string,
 	searchText: string,
 	limit: number,
@@ -108,8 +108,8 @@ export function tryPrintCodebaseMemorySemanticSearch(
 	return true;
 }
 
-/** Tries to print a CodebaseMemory snippet for a symbol inspection target. */
-export function tryPrintCodebaseMemoryInspect(
+/** Prints a CodebaseMemory snippet for a symbol inspection target when available. */
+export function printCodebaseMemoryInspect(
 	root: string,
 	target: string,
 	limit: number,
@@ -164,8 +164,8 @@ export function tryPrintCodebaseMemoryInspect(
 	return true;
 }
 
-/** Tries to print CodebaseMemory caller/callee traces for search calls. */
-export function tryPrintCodebaseMemoryCallTrace(
+/** Prints CodebaseMemory caller/callee traces for search calls when available. */
+export function printCodebaseMemoryCallTrace(
 	root: string,
 	name: string,
 	{ jsonOutput = false }: { jsonOutput?: boolean } = {},
@@ -202,10 +202,8 @@ export function tryPrintCodebaseMemoryCallTrace(
 	return true;
 }
 
-/** Tries to print CodebaseMemory's architecture and cluster summary. */
-export function tryPrintCodebaseMemoryArchitectureSummary(
-	root: string,
-): boolean {
+/** Prints CodebaseMemory's architecture and cluster summary when available. */
+export function printCodebaseMemoryArchitectureSummary(root: string): boolean {
 	const project = codebaseMemoryReadyProject(root);
 	if (project === null) {
 		return false;
@@ -223,8 +221,8 @@ export function tryPrintCodebaseMemoryArchitectureSummary(
 	return true;
 }
 
-/** Tries to print CodebaseMemory index status and graph schema. */
-export function tryPrintCodebaseMemoryStatus(root: string): boolean {
+/** Prints CodebaseMemory index status and graph schema when available. */
+export function printCodebaseMemoryStatus(root: string): boolean {
 	const project = codebaseMemoryReadyProject(root);
 	if (project === null) {
 		return false;

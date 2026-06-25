@@ -2,9 +2,9 @@
 import type { Command } from "commander";
 
 import {
-	tryPrintCodebaseMemoryGraphSearch,
-	tryPrintCodebaseMemorySearch,
-	tryPrintCodebaseMemorySemanticSearch,
+	printCodebaseMemoryGraphSearch,
+	printCodebaseMemorySearch,
+	printCodebaseMemorySemanticSearch,
 } from "../codebase-memory/index.js";
 import { DETAILED_ANALYSIS_FILE_LIMIT, resolveProjectRoot } from "../common.js";
 import {
@@ -86,17 +86,17 @@ export async function commandSearch(
 	console.log(`Search: ${searchText}`);
 	if (
 		options.semantic &&
-		tryPrintCodebaseMemorySemanticSearch(root, searchText, limit)
+		printCodebaseMemorySemanticSearch(root, searchText, limit)
 	) {
 		return 0;
 	}
 	if (
 		options.graph &&
-		tryPrintCodebaseMemoryGraphSearch(root, searchText, limit)
+		printCodebaseMemoryGraphSearch(root, searchText, limit)
 	) {
 		return 0;
 	}
-	if (!options.graph && tryPrintCodebaseMemorySearch(root, searchText, limit)) {
+	if (!options.graph && printCodebaseMemorySearch(root, searchText, limit)) {
 		return 0;
 	}
 	if (options.graph) {
