@@ -57,7 +57,7 @@ Signals should help choose what to read or change next; they should not automati
 
 ## Backend Boundary
 
-Codebase Memory MCP is the persistent graph backend. Use `codemap semantic status` to check whether a backend index is ready, and use `search --semantic` or backend-backed default/graph search when persistent graph evidence is useful. If the backend is unavailable, continue with current-tree Codemap commands.
+Codebase Memory MCP is the persistent graph backend. Backend-backed Codemap commands ask Codebase Memory MCP to index the project before querying, then use `search_code`, `search_graph`, `trace_path`, snippets, architecture, or status results where those primitives fit. If the backend is unavailable, continue with current-tree Codemap commands where a local answer still makes sense.
 
 ## Non-Goals
 
