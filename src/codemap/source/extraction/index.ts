@@ -1,7 +1,6 @@
 /** Builds scan, import, and structure extraction payloads. */
 import path from "node:path";
 
-import { intermediateDir, writeJson } from "../../common.js";
 import {
 	PY_SUFFIXES,
 	scanFile,
@@ -50,7 +49,6 @@ export type ImportMapPayload = {
 export function runImportMap(
 	root: string,
 	files: ScanEntry[],
-	{ persist = false }: { persist?: boolean } = {},
 ): ImportMapPayload {
 	const filePaths = new Set(files.map((scanEntry) => String(scanEntry.path)));
 	const pythonModules = pythonModuleIndex(filePaths);
@@ -89,7 +87,7 @@ export function runImportMap(
 			importMap[relPath] = [];
 		}
 	}
-	const payload: ImportMapPayload = {
+	return {
 		importMap,
 		stats: {
 			filesScanned: files.length,
@@ -101,13 +99,6 @@ export function runImportMap(
 		_pythonTrees: pythonTreesByPath,
 		_typescriptMetrics: typescriptMetricsByPath,
 	};
-	if (persist) {
-		writeJson(path.join(intermediateDir(root), "import-map.json"), {
-			importMap: payload.importMap,
-			stats: payload.stats,
-		});
-	}
-	return payload;
 }
 
 export {

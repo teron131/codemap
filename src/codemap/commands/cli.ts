@@ -1,6 +1,5 @@
 /** Builds and dispatches the top-level Codemap CLI parser. */
 import { Command, CommanderError } from "commander";
-import { addArtifactsParsers } from "./artifacts.js";
 import { addInspectParser } from "./inspect.js";
 import { PROJECT_ROOT_HELP } from "./options.js";
 import { addSearchParser } from "./search.js";
@@ -10,7 +9,6 @@ import { addSummaryParser } from "./summary.js";
 import { addSyntaxParsers } from "./syntax.js";
 
 const COMMAND_NAMES = new Set([
-	"artifacts",
 	"inspect",
 	"search",
 	"semantic",
@@ -35,7 +33,6 @@ export function buildParser(): Command {
 	addSearchParser(program);
 	addInspectParser(program);
 	addSyntaxParsers(program);
-	addArtifactsParsers(program);
 	addSemanticParsers(program);
 	return program;
 }

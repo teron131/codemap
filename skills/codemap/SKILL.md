@@ -1,11 +1,11 @@
 ---
 name: codemap
-description: Use when Codex needs current-tree source navigation in a local codebase: repo orientation, code search, focused file/symbol inspection, refactor signals, ast-grep structural search, syntax rewrites, semantic indexed search, or explicit saved handoff artifacts.
+description: Use when Codex needs current-tree source navigation in a local codebase: repo orientation, code search, focused file/symbol inspection, refactor signals, ast-grep structural search, syntax rewrites, or Codebase Memory-backed graph search.
 ---
 
 # Codemap
 
-Codemap is the current-tree source navigation and refactor-scoping tool. Use it to decide what to read next, locate code, inspect one target's neighborhood, gather refactor evidence, run guarded ast-grep operations, and create saved handoff output only when explicitly useful. Graph payloads and saved views are supporting evidence, not the primary interface.
+Codemap is the current-tree source navigation and refactor-scoping tool. Use it to decide what to read next, locate code, inspect one target's neighborhood, gather refactor evidence, and run guarded ast-grep operations. Codebase Memory MCP is the optional persistent graph backend when an index is ready.
 
 ## Use Cases
 
@@ -75,35 +75,25 @@ codemap syntax debug --project-root <path> --lang <lang> --pattern "<pattern>"
 
 Use `search rule --rule <rule.yml>` for read-only rule matches. Use `syntax rule --rule <rule.yml> --apply --yes` only for YAML rules with safe fixes. Codemap runs YAML rules through its shared ast-grep layer; it does not manage ast-grep rule projects.
 
-### Search A Saved Semantic Index
+### Use Codebase Memory Backend Search
 
-Use semantic search only after an explicit index exists:
+Use backend semantic or graph search when a ready Codebase Memory MCP index exists:
 
 ```sh
-codemap semantic init --project-root <path>
 codemap search --semantic --project-root <path> "<words>"
+codemap semantic status --project-root <path>
 ```
 
-Semantic search is for fuzzy concept matching over saved cards. It is not source scanning, graph building, or ambient indexing.
-
-### Create Saved Handoff Output
-
-Normal `summary`, `search`, `inspect`, and `signals` read current files and do not write `.context-graph`. Use artifacts only when the user asks for saved artifacts, point-in-time output, CI evidence, or handoff output:
-
-```sh
-codemap artifacts create --project-root <path>
-codemap artifacts view --project-root <path> summary
-```
+Backend search is for persistent graph facts, snippets, traces, architecture summaries, and semantic graph matches. If the backend is missing or stale, Codemap falls back to current-tree evidence instead of writing its own index.
 
 ## Reference Routing
 
 Read only the reference needed for the task:
 
 - `references/current-tree.md`: summary, search, inspect, likely-entry target cards, signals, relationship context, and artifact-free current-code workflows.
-- `references/search.md`: default source search, relationship-context search, regex, semantic search, ast-grep patterns, and syntax handoff.
+- `references/search.md`: default source search, relationship-context search, Codebase Memory backend search, regex, ast-grep patterns, and syntax handoff.
 - `references/syntax.md`: ast-grep pattern workflow, YAML rules, rewrite previews, and syntax codemods.
 - `references/python.md`: Python import, symbol, docstring, entrypoint, and package-map behavior.
-- `references/artifacts.md`: explicit saved `.context-graph` artifacts, artifact update, artifact view, and semantic index boundary.
 
 ## Boundaries
 

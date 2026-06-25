@@ -3,11 +3,6 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 import {
-	GENERATED_PREFIXES,
-	intermediateDir,
-	writeJson,
-} from "../../common.js";
-import {
 	discoverFiles,
 	relativePath,
 	sourceLineCount,
@@ -85,19 +80,12 @@ export const CONFIG_BASENAMES = new Set([
 	"uv.lock",
 ]);
 
-/** Scans project files into inventory rows and optional persisted output. */
-export function runScan(
-	root: string,
-	{ persist = false }: { persist?: boolean } = {},
-): ScanPayload {
+/** Scans project files into inventory rows. */
+export function runScan(root: string): ScanPayload {
 	const files = discoverFiles(root).map((filePath) =>
 		scanEntry(root, filePath),
 	);
-	const scan = filterScan({ files });
-	if (persist) {
-		writeJson(path.join(intermediateDir(root), "scan.json"), scan);
-	}
-	return scan;
+	return filterScan({ files });
 }
 
 /** Builds one scan inventory entry from a project-relative path. */
@@ -171,9 +159,7 @@ export function categoryForPath(relPath: string): string {
 /** Filters scan payload files to a selected path subset. */
 export function filterScan(scan: { files?: ScanEntry[] }): ScanPayload {
 	const originalFiles = scan.files ?? [];
-	const files = originalFiles.filter(
-		(entry) => !String(entry.path ?? "").startsWith(GENERATED_PREFIXES),
-	);
+	const files = originalFiles;
 	const byCategory = countBy(files, (entry) =>
 		String(entry.fileCategory ?? "unknown"),
 	);

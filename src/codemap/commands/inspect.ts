@@ -81,7 +81,7 @@ export function commandInspect(
 	const pathTargetKind = inspectPathTargetKind(root, target);
 	let pathTargetScan: ReturnType<typeof runScan> | null = null;
 	if (pathTargetKind !== null) {
-		const scan = runScan(root, { persist: false });
+		const scan = runScan(root);
 		pathTargetScan = scan;
 		if (scan.files.length > DETAILED_ANALYSIS_FILE_LIMIT) {
 			const likelyEntries = likelyEntryContextByFile(
@@ -216,7 +216,7 @@ function recordValue(value: unknown): Record<string, unknown> {
 		: {};
 }
 
-/** Renders directory inspection from scan data when graph artifacts are absent. */
+/** Renders directory inspection from scan data when graph analysis is skipped. */
 function renderLightweightDirectoryInspection(
 	root: string,
 	target: string,

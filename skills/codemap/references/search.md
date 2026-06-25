@@ -13,7 +13,7 @@ Search has four lanes:
 - Default `search`: `codemap.search.source`, shared ast-grep plus `rg`, fast and current-tree only.
 - `search match`, `search calls`, and `search rule`: `codemap.search.structural`, explicit read-only ast-grep matching.
 - `search --graph`: `codemap.search.graph`, relationship evidence when imports, contains edges, or nearby summaries matter.
-- `search --semantic`: `codemap.search.semantic`, query an existing embedding index, never build repo embeddings live.
+- `search --semantic`: Codebase Memory MCP semantic graph search when a ready backend index exists, otherwise current-tree fallback.
 
 Default `search` does not evaluate regular expressions. For raw regex text search, use `rg` directly:
 
@@ -30,14 +30,14 @@ codemap search --graph --project-root <path> "<words>"
 
 Relationship-context search builds the heavier derived evidence path and can show nearby imports, contains edges, summaries, and supporting evidence. It is slower on large repos, so default shared ast-grep plus rg search should stay first.
 
-Use semantic search only after an explicit index exists:
+Use semantic search when Codebase Memory MCP has an index for the project:
 
 ```sh
-codemap semantic init --project-root <path>
+codemap semantic status --project-root <path>
 codemap search --semantic --project-root <path> "<words>"
 ```
 
-Semantic search is the embedding-backed branch of search. It is for fuzzy concept matching over saved cards, not source scanning, graph building, or artifact rendering. It is not the default search path, and it should not run just because a project has credentials or a `.env` file.
+Semantic search is a backend-backed graph branch. It is for fuzzy concept matching over Codebase Memory's persistent graph, not a Codemap-owned saved index. It is not the default search path.
 
 Use structural search when the query is an ast-grep pattern, call target, or read-only YAML rule. Start with simple pattern arguments or call wrappers; for rewrite previews and syntax codemods, read `references/syntax.md`.
 
