@@ -87,6 +87,13 @@ export function commandInspect(
 		console.log("Choose only one inspect lane: --backend or --local.");
 		return 2;
 	}
+	if (!options.backend && inspectPathTargetKind(root, target) !== null) {
+		const inspection = renderCurrentTreeInspection(root, target, { limit });
+		if (inspection !== null) {
+			console.log(inspection);
+			return 0;
+		}
+	}
 	if (!options.local) {
 		const backendInspection = codebaseMemoryInspect(root, target, limit);
 		if (backendInspection !== null) {

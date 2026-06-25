@@ -1,5 +1,9 @@
 /** Re-exports source, structural, graph, and target-card search APIs. */
-export { graphMatches, renderGraphMatchLines } from "./graph.js";
+export {
+	type GraphMatchOptions,
+	graphMatches,
+	renderGraphMatchLines,
+} from "./graph.js";
 export {
 	appendMatch,
 	astGrepMatch,

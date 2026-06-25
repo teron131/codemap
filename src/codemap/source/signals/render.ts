@@ -58,48 +58,44 @@ export function appendTop(lines: string[], top: Record<string, unknown>): void {
 	const functions = recordValue(top.functions);
 	const variables = recordValue(top.variables);
 	const files = recordValue(top.files);
+	const longFunctions = arrayValue(functions.longFunctions);
+	const lowUseFunctions = arrayValue(functions.lowUseDefinitions);
+	const lowUseVariables = arrayValue(variables.leastUsedDefinitions);
+	const broadNamePools = arrayValue(variables.broadNamePools);
+	const denseFiles = arrayValue(files.denseFiles);
+	if (
+		longFunctions.length === 0 &&
+		lowUseFunctions.length === 0 &&
+		lowUseVariables.length === 0 &&
+		broadNamePools.length === 0 &&
+		denseFiles.length === 0
+	) {
+		lines.push("No local refactor signal rows.");
+		lines.push("");
+		return;
+	}
 	lines.push("## Functions");
-	appendDefinitionRows(
-		lines,
-		"Long Functions",
-		arrayValue(functions.longFunctions),
-		{
-			heading: "###",
-			skipEmpty: true,
-		},
-	);
-	appendDefinitionRows(
-		lines,
-		"Low-Use Definitions",
-		arrayValue(functions.lowUseDefinitions),
-		{
-			heading: "###",
-			skipEmpty: true,
-		},
-	);
+	appendDefinitionRows(lines, "Long Functions", longFunctions, {
+		heading: "###",
+		skipEmpty: true,
+	});
+	appendDefinitionRows(lines, "Low-Use Definitions", lowUseFunctions, {
+		heading: "###",
+		skipEmpty: true,
+	});
 	lines.push("");
 	lines.push("## Variables");
-	appendDefinitionRows(
-		lines,
-		"Low-Use Definitions",
-		arrayValue(variables.leastUsedDefinitions),
-		{
-			heading: "###",
-			skipEmpty: true,
-		},
-	);
-	appendNameRows(
-		lines,
-		"Broad Name Pools",
-		arrayValue(variables.broadNamePools),
-		{
-			heading: "###",
-			skipEmpty: true,
-		},
-	);
+	appendDefinitionRows(lines, "Low-Use Definitions", lowUseVariables, {
+		heading: "###",
+		skipEmpty: true,
+	});
+	appendNameRows(lines, "Broad Name Pools", broadNamePools, {
+		heading: "###",
+		skipEmpty: true,
+	});
 	lines.push("");
 	lines.push("## Files");
-	appendDenseFileRows(lines, arrayValue(files.denseFiles), {
+	appendDenseFileRows(lines, denseFiles, {
 		heading: "###",
 		skipEmpty: true,
 	});
