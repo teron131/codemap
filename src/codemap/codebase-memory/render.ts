@@ -54,7 +54,7 @@ export function printCodebaseMemorySemanticSearch(
 		return false;
 	}
 	console.log("\nCodebaseMemory semantic matches:");
-	console.log(JSON.stringify(result, null, 2));
+	console.log(renderCodebaseMemorySemanticSearch(result, { limit }));
 	return true;
 }
 
@@ -150,6 +150,50 @@ export function renderCodebaseMemoryIndex(
 		`elapsed: ${formatElapsedMs(result.elapsedMs)}`,
 		renderCodebaseMemoryStatus(result),
 	].join("\n");
+}
+
+/** Renders CodebaseMemory semantic graph search rows. */
+function renderCodebaseMemorySemanticSearch(
+	value: unknown,
+	{ limit }: { limit: number },
+): string {
+	const record = recordValue(value);
+	const rows = arrayValue(record.semantic_results).slice(0, limit);
+	const total = numberField(record.semantic_total) ?? rows.length;
+	const lines = [
+		`mode: ${stringField(record.search_mode) ?? "semantic"}`,
+		`semantic results: ${total}`,
+	];
+	if (rows.length === 0) {
+		lines.push("  none");
+		return lines.join("\n");
+	}
+	for (const item of rows) {
+		const row = recordValue(item);
+		const name = stringField(row.name) ?? stringField(row.qualified_name);
+		if (name === null) {
+			continue;
+		}
+		const label = stringField(row.label);
+		const filePath = stringField(row.file_path);
+		const score = numberField(row.score);
+		const detail = [
+			label,
+			filePath,
+			score !== null ? `score=${formatScore(score)}` : null,
+		].filter((item) => item !== null);
+		lines.push(
+			`- ${name}${detail.length > 0 ? ` (${detail.join(", ")})` : ""}`,
+		);
+		const qualifiedName = stringField(row.qualified_name);
+		if (qualifiedName !== null && qualifiedName !== name) {
+			lines.push(`  ${qualifiedName}`);
+		}
+	}
+	if (record.has_more) {
+		lines.push("- ...");
+	}
+	return lines.join("\n");
 }
 
 /** Renders a compact backend-first inspect report. */
@@ -326,4 +370,26 @@ function formatElapsedMs(value: number): string {
 		return `${value.toFixed(1)} ms`;
 	}
 	return `${(value / 1000).toFixed(2)} s`;
+}
+
+/** Reads object records while rejecting arrays and primitives. */
+function recordValue(value: unknown): Record<string, unknown> {
+	return value !== null && typeof value === "object" && !Array.isArray(value)
+		? (value as Record<string, unknown>)
+		: {};
+}
+
+/** Reads arrays while rejecting other values. */
+function arrayValue(value: unknown): unknown[] {
+	return Array.isArray(value) ? value : [];
+}
+
+/** Reads string fields while rejecting empty values. */
+function stringField(value: unknown): string | null {
+	return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+/** Reads number fields while rejecting other values. */
+function numberField(value: unknown): number | null {
+	return typeof value === "number" ? value : null;
 }

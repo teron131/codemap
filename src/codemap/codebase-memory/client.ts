@@ -245,8 +245,16 @@ function toolPayload(result: unknown): unknown {
 
 /** Extracts a tool-level error from decoded MCP text payloads. */
 function toolPayloadError(value: unknown): string | null {
+	if (typeof value === "string" && codebaseMemoryErrorText(value)) {
+		return value;
+	}
 	const error = recordValue(value).error;
 	return typeof error === "string" && error.length > 0 ? error : null;
+}
+
+/** Detects plain-text CodebaseMemory tool errors. */
+function codebaseMemoryErrorText(value: string): boolean {
+	return /^(error|failed|invalid)\b/i.test(value) || /\bmust be\b/i.test(value);
 }
 
 /** Coerces a raw CodebaseMemory project record into the local project shape. */
