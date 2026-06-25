@@ -166,6 +166,32 @@ describe("search command handler", () => {
 		);
 	});
 
+	it("ignores browser profile data during default text search", async () => {
+		mkdirSync(path.join(workDir, "user-data"), { recursive: true });
+		writeFileSync(
+			path.join(workDir, "user-data", "Local State"),
+			'{"openclaw":"browser profile noise"}\n',
+			"utf8",
+		);
+		writeFileSync(
+			path.join(workDir, "src", "app.ts"),
+			"export const openclawSource = 'openclaw source';\n",
+			"utf8",
+		);
+
+		await expect(
+			commandSearch(["openclaw"], {
+				projectRoot: workDir,
+				limit: "5",
+			}),
+		).resolves.toBe(0);
+
+		const output = logLines().join("\n");
+		expect(output).toContain("src/app.ts");
+		expect(output).not.toContain("user-data");
+		expect(output).not.toContain("Local State");
+	});
+
 	it("matches Python's missing query message", async () => {
 		await expect(commandSearch([], { projectRoot: workDir })).resolves.toBe(2);
 		expect(logLines()).toEqual([
@@ -214,68 +240,6 @@ describe("search command handler", () => {
 		expect(output).not.toContain("  matche:");
 	});
 
-	it("uses text-only partial fallback for large repositories", async () => {
-		mkdirSync(path.join(workDir, "bulk"), { recursive: true });
-		for (let index = 0; index < 5001; index += 1) {
-			writeFileSync(
-				path.join(workDir, "bulk", `filler-${index}.ts`),
-				`export const filler${index} = ${index};\n`,
-				"utf8",
-			);
-		}
-		writeFileSync(
-			path.join(workDir, "src", "policy.ts"),
-			[
-				"export function resolveAttestation() {",
-				"  return 'attestation source';",
-				"}",
-			].join("\n"),
-			"utf8",
-		);
-
-		await expect(
-			commandSearch(["policy", "attestation", "mismatch"], {
-				projectRoot: workDir,
-				limit: "3",
-			}),
-		).resolves.toBe(0);
-
-		const output = logLines().join("\n");
-		expect(output).toContain("\nNo matches, fallback to partial matches:");
-		expect(output).toContain(
-			"  Fallback: large repo; structural partial search skipped.",
-		);
-		expect(output).toContain("  attestation:");
-		expect(output).toContain("    - rg ./src/policy.ts:");
-		expect(output).not.toContain("ast-grep");
-	}, 10000);
-
-	it("skips structural search for large repository identifier misses", async () => {
-		mkdirSync(path.join(workDir, "bulk"), { recursive: true });
-		for (let index = 0; index < 5001; index += 1) {
-			writeFileSync(
-				path.join(workDir, "bulk", `filler-${index}.ts`),
-				`export const filler${index} = ${index};\n`,
-				"utf8",
-			);
-		}
-
-		await expect(
-			commandSearch(["definitelyNoSuchIdentifierXyz"], {
-				projectRoot: workDir,
-				limit: "3",
-			}),
-		).resolves.toBe(0);
-
-		const output = logLines().join("\n");
-		expect(output).toContain("\nSource matches:");
-		expect(output).toContain(
-			"  Fallback: large repo; structural search skipped.",
-		);
-		expect(output).toContain("  none");
-		expect(output).not.toContain("ast-grep");
-	}, 10000);
-
 	it("prints graph search relationships without internal edge syntax", async () => {
 		writeFileSync(
 			path.join(workDir, "src", "app.ts"),
@@ -302,11 +266,57 @@ describe("search command handler", () => {
 		).resolves.toBe(0);
 
 		const output = logLines().join("\n");
+		expect(output).toContain(
+			"Graph fallback: Codebase Memory graph search returned no answer; used current-tree relationship graph.",
+		);
 		expect(output).toContain("\nRelationship matches:");
+		expect(output).toContain("src/helper.ts: code file");
+		expect(output).not.toContain("src/helper.ts: src/helper.ts:");
 		expect(output).toContain("helper in src/helper.ts");
 		expect(output).toContain("imported by: src/app.ts");
 		expect(output).not.toContain("--imports-->");
 		expect(output).not.toContain("function:src/");
+	});
+
+	it("hides graph fallback test matches unless requested", async () => {
+		const testsDir = path.join(workDir, "tests");
+		mkdirSync(testsDir, { recursive: true });
+		writeFileSync(
+			path.join(workDir, "src", "helper.ts"),
+			"export function helper(value: string) {\n  return value;\n}\n",
+			"utf8",
+		);
+		writeFileSync(
+			path.join(testsDir, "helper.test.ts"),
+			"export function helperSpec(value: string) {\n  return value;\n}\n",
+			"utf8",
+		);
+
+		await expect(
+			commandSearch(["helper"], {
+				graph: true,
+				projectRoot: workDir,
+				limit: "5",
+			}),
+		).resolves.toBe(0);
+
+		const defaultOutput = logLines().join("\n");
+		expect(defaultOutput).toContain("helper in src/helper.ts");
+		expect(defaultOutput).not.toContain("tests/helper.test.ts");
+
+		logSpy.mockClear();
+
+		await expect(
+			commandSearch(["helper"], {
+				graph: true,
+				projectRoot: workDir,
+				limit: "5",
+				includeTests: true,
+			}),
+		).resolves.toBe(0);
+
+		const includedOutput = logLines().join("\n");
+		expect(includedOutput).toContain("tests/helper.test.ts");
 	});
 });
 

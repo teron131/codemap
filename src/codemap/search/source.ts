@@ -9,6 +9,7 @@ import {
 	type SyntaxMatch,
 	targetFiles,
 } from "../ast-grep/index.js";
+import { IGNORED_DIR_NAMES } from "../source/scanner/index.js";
 
 export const IDENTIFIER_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 
@@ -383,8 +384,7 @@ export function ripgrepMatches(
 			"2",
 			"--max-columns",
 			"240",
-			"--glob",
-			"!.context-graph/**",
+			...ripgrepExcludeArgs(),
 			"--",
 			searchText,
 			".",
@@ -393,6 +393,11 @@ export function ripgrepMatches(
 		ripgrepMatch,
 		{ limit },
 	);
+}
+
+/** Builds ripgrep glob exclusions from the shared source-scan ignore set. */
+function ripgrepExcludeArgs(): string[] {
+	return [...IGNORED_DIR_NAMES].flatMap((name) => ["--glob", `!**/${name}/**`]);
 }
 
 /** Parses streamed ripgrep JSON into source match rows. */

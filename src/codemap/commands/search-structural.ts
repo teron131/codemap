@@ -36,6 +36,7 @@ export type SearchCallsOptions = {
 	mode?: string | undefined;
 	direction?: string | undefined;
 	depth?: number | undefined;
+	limit?: number | undefined;
 	parameter?: string | undefined;
 	includeTests?: boolean | undefined;
 };
@@ -92,6 +93,11 @@ export function addSearchCallsParser(command: Command): void {
 			"Backend trace direction: inbound, outbound, or both.",
 		)
 		.option("--depth <count>", "Backend trace depth.", parseIntegerOption)
+		.option(
+			"--limit <count>",
+			"Maximum backend trace rows per section.",
+			parseIntegerOption,
+		)
 		.option("--parameter <name>", "Parameter to trace in data_flow mode.")
 		.option("--include-tests", "Include test nodes in backend trace output.")
 		.option("--json")
@@ -182,6 +188,7 @@ export function commandSearchCalls(options: SearchCallsOptions): number {
 		printCodebaseMemoryCallTrace(root, options.name, {
 			jsonOutput: Boolean(options.json),
 			...backendTraceOptions(options),
+			...(options.limit !== undefined ? { limit: options.limit } : {}),
 			riskLabels: true,
 		})
 	) {

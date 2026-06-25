@@ -11,6 +11,8 @@ Codemap is an agent-facing source navigation and refactor-scoping tool. It shoul
 - `src/codemap/ast-grep` is the shared ast-grep boundary; `rg` stays the subprocess boundary for text search and file discovery.
 - `search` is broad discovery; `inspect <target>` is the explicit path for one known file, symbol, or neighborhood.
 - Codebase Memory MCP is the backend for persistent graph search, semantic graph search, snippets, traces, architecture summaries, backend-informed signals, schema/project inspection, graph queries, changed-code impact, and backend status.
+- Backend search output suppresses likely test rows by default; pass `--include-tests` when test hits are the point.
+- Semantic graph search hides below-floor score rows and falls back to current-tree search instead of printing low-signal matches.
 - `signals` are backend-informed local refactor evidence, not lint findings.
 
 ## Install

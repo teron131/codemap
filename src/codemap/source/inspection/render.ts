@@ -86,6 +86,27 @@ export function appendContainsSection(
 	appendLimitMarker(lines, contains.length, limit);
 }
 
+/** Appends class definitions contained directly by an inspected file node. */
+function appendClassesInFileSection(
+	lines: string[],
+	contains: GraphEdge[],
+	nodesById: Record<string, GraphNode | undefined>,
+	{ limit }: { limit: number },
+): void {
+	const classes = contains
+		.map((edge) => nodesById[String(edge.target)])
+		.filter((node): node is GraphNode => node?.type === "class");
+	if (classes.length === 0) {
+		return;
+	}
+	lines.push("");
+	lines.push("## Classes In File");
+	for (const item of classes.slice(0, limit)) {
+		lines.push(`- ${nodeLabel(item)}`);
+	}
+	appendLimitMarker(lines, classes.length, limit);
+}
+
 /** Appends related import and symbol sections to inspection output. */
 export function appendRelatedSections(
 	lines: string[],
@@ -94,6 +115,7 @@ export function appendRelatedSections(
 	nodesById: Record<string, GraphNode | undefined>,
 	{ limit }: { limit: number },
 ): void {
+	const node = nodesById[nodeId];
 	const importEdges: GraphEdge[] = [];
 	const containsEdges: GraphEdge[] = [];
 	const callEdges: GraphEdge[] = [];
@@ -109,7 +131,19 @@ export function appendRelatedSections(
 	appendEdgeSection(lines, "## Imports", importEdges, nodeId, nodesById, {
 		limit,
 	});
-	appendContainsSection(lines, containsEdges, nodesById, { limit });
+	if (node?.type === "file") {
+		appendClassesInFileSection(lines, containsEdges, nodesById, { limit });
+		appendContainsSection(
+			lines,
+			containsEdges.filter(
+				(edge) => nodesById[String(edge.target)]?.type !== "class",
+			),
+			nodesById,
+			{ limit },
+		);
+	} else {
+		appendContainsSection(lines, containsEdges, nodesById, { limit });
+	}
 	appendEdgeSection(lines, "## Calls", callEdges, nodeId, nodesById, {
 		limit,
 	});

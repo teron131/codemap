@@ -25,6 +25,32 @@ afterEach(() => {
 });
 
 describe("signals CLI", () => {
+	it("prints a concise note for sparse top signals", () => {
+		const output = renderSignalText(
+			{
+				top: {
+					functions: {
+						longFunctions: [],
+						lowUseDefinitions: [],
+					},
+					variables: {
+						leastUsedDefinitions: [],
+						broadNamePools: [],
+					},
+					files: {
+						denseFiles: [],
+					},
+				},
+			},
+			"top",
+		);
+
+		expect(output).toContain("No local refactor signal rows.");
+		expect(output).not.toContain("## Functions");
+		expect(output).not.toContain("## Variables");
+		expect(output).not.toContain("## Files");
+	});
+
 	it("filters tests, bundles, and non-source files in lightweight signal rows", () => {
 		const payload = buildLightweightSignalPayload(
 			[
