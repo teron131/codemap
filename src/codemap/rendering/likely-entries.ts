@@ -40,7 +40,8 @@ export function buildLikelyEntries(
 	});
 	return selectLikelyEntriesWithSurfaceCap(scored, 8).map((node, index) =>
 		likelyEntryRow(node, index, {
-			description: `High-signal file with ${fanIn.get(node.id) ?? 0} incoming and ${fanOut.get(node.id) ?? 0} outgoing import edges.`,
+			description: likelyEntryDescription(node, fanIn, fanOut),
+			relationshipCount: (fanIn.get(node.id) ?? 0) + (fanOut.get(node.id) ?? 0),
 		}),
 	);
 }
@@ -65,6 +66,7 @@ export function buildPathRankedLikelyEntries(nodes: GraphNode[]): Row[] {
 	return scored.slice(0, 8).map((node, index) =>
 		likelyEntryRow(node, index, {
 			description: "Fallback entry candidate; detailed graph skipped.",
+			relationshipCount: 0,
 		}),
 	);
 }
@@ -98,9 +100,12 @@ function likelyEntryCandidates(nodes: GraphNode[]): GraphNode[] {
 function likelyEntryRow(
 	node: GraphNode,
 	index: number,
-	{ description }: { description: string },
+	{
+		description,
+		relationshipCount,
+	}: { description: string; relationshipCount?: number },
 ): Row {
-	const role = likelyEntryRole(node);
+	const role = likelyEntryRole(node, relationshipCount);
 	return {
 		order: index + 1,
 		title: String(node.filePath || node.name || node.id),
@@ -109,6 +114,28 @@ function likelyEntryRow(
 		description,
 		nodeIds: [node.id],
 	};
+}
+
+/** Describes why a likely-entry candidate was selected. */
+function likelyEntryDescription(
+	node: GraphNode,
+	fanIn: Map<string, number>,
+	fanOut: Map<string, number>,
+): string {
+	const incoming = fanIn.get(node.id) ?? 0;
+	const outgoing = fanOut.get(node.id) ?? 0;
+	if (incoming === 0 && outgoing === 0) {
+		return "Source file selected without import relationship edges.";
+	}
+	if (incoming + outgoing <= 1) {
+		return `Low-relationship source file with ${importEdgeCountText(incoming, "incoming")} and ${importEdgeCountText(outgoing, "outgoing")}.`;
+	}
+	return `High-signal file with ${incoming} incoming and ${outgoing} outgoing import edges.`;
+}
+
+/** Formats an import edge count with singular/plural wording. */
+function importEdgeCountText(count: number, direction: string): string {
+	return `${count} ${direction} import ${count === 1 ? "edge" : "edges"}`;
 }
 
 /** Keeps likely entries from being only package barrels. */
@@ -244,7 +271,10 @@ function isSupportApiPath(filePath: string): boolean {
 }
 
 /** Names the navigation role and concise rationale for one likely-entry row. */
-function likelyEntryRole(node: GraphNode): LikelyEntryRole {
+function likelyEntryRole(
+	node: GraphNode,
+	relationshipCount?: number,
+): LikelyEntryRole {
 	const filePath = node.filePath;
 	if (isSupportApiPath(filePath)) {
 		return {
@@ -286,6 +316,12 @@ function likelyEntryRole(node: GraphNode): LikelyEntryRole {
 		return {
 			label: "support source",
 			reason: "support path retained by relationship evidence",
+		};
+	}
+	if (relationshipCount !== undefined && relationshipCount <= 1) {
+		return {
+			label: "source file",
+			reason: "selected by source/path evidence",
 		};
 	}
 	return {

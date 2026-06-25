@@ -68,6 +68,8 @@ export type CodebaseMemoryChangeOptions = {
 	since?: string;
 };
 
+const MIN_SEMANTIC_SCORE = 0.2;
+
 /** Reads graph-augmented CodebaseMemory source search results when available. */
 export function codebaseMemorySearch(
 	root: string,
@@ -386,6 +388,7 @@ function inspectResultFromPayloads(
 		stringField(snippet.qualified_name) ??
 		stringField(match.qualified_name) ??
 		target;
+	const excludedNames = excludedTraceNames([name, qualifiedName]);
 	const filePath = displayFilePath(
 		stringField(snippet.file_path) ?? stringField(match.file_path),
 		root,
@@ -400,16 +403,16 @@ function inspectResultFromPayloads(
 		matchScore: matchScore(match),
 		signalFacts: signalFacts(snippet),
 		graphFacts: graphFacts(match),
-		signature: signatureText(snippet),
+		signature: signatureText(snippet, name),
 		source: stringField(snippet.source),
-		callers: traceRows(trace.callers),
-		callees: traceRows(trace.callees),
+		callers: traceRows(trace.callers, excludedNames),
+		callees: traceRows(trace.callees, excludedNames),
 		related: uniqueRows([
 			...stringArray(snippet.caller_names),
 			...stringArray(snippet.callee_names),
-			...traceNames(trace.callers),
-			...traceNames(trace.callees),
-		]).filter((item) => !testLikeName(item)),
+			...traceNames(trace.callers, excludedNames),
+			...traceNames(trace.callees, excludedNames),
+		]).filter((item) => !testLikeName(item) && !excludedNames.has(item)),
 		graphNeighbors: graphNeighbors(searchValue, qualifiedName).filter(
 			(item) => !testLikeName(item),
 		),
@@ -428,10 +431,10 @@ function matchScore(match: Record<string, unknown>): number | null {
 		numberField(match.score) ??
 		numberField(match.similarity);
 	if (score !== null) {
-		return score;
+		return score >= 0 ? score : null;
 	}
 	const rank = numberField(match.rank);
-	return ordinalRank(rank) === null ? rank : null;
+	return rank !== null && ordinalRank(rank) === null && rank >= 0 ? rank : null;
 }
 
 /** Checks common CodebaseMemory search payload fields for no-answer responses. */
@@ -489,19 +492,24 @@ function graphSearchArgs(
 /** Keeps only backend semantic search rows from a combined graph payload. */
 function semanticSearchPayload(value: unknown): Record<string, unknown> {
 	const record = recordValue(value);
-	const semanticResults = arrayValue(record.semantic_results);
+	const semanticResults = arrayValue(record.semantic_results).filter(
+		semanticResultHasSignal,
+	);
 	return {
 		search_mode: "semantic",
-		semantic_total:
-			typeof record.semantic_total === "number"
-				? record.semantic_total
-				: semanticResults.length,
+		semantic_total: semanticResults.length,
 		semantic_results: semanticResults,
 		has_more:
 			typeof record.semantic_has_more === "boolean"
 				? record.semantic_has_more
 				: false,
 	};
+}
+
+/** Keeps only semantic rows whose score clears the useful-signal floor. */
+function semanticResultHasSignal(value: unknown): boolean {
+	const score = numberField(recordValue(value).score);
+	return score !== null && score >= MIN_SEMANTIC_SCORE;
 }
 
 /** Extracts the first graph search result record. */
@@ -613,44 +621,130 @@ function relationshipRows(value: unknown, qualifiedName: string): string[] {
 }
 
 /** Builds a compact signature row from CodebaseMemory snippet fields. */
-function signatureText(snippet: Record<string, unknown>): string | null {
+function signatureText(
+	snippet: Record<string, unknown>,
+	name: string,
+): string | null {
 	const signature = stringField(snippet.signature);
 	const returnType = stringField(snippet.return_type);
 	if (signature === null) {
 		return null;
 	}
-	return `${signature}${returnType ?? ""}`.replace(/\s+/g, " ").trim();
+	if (
+		returnType === null ||
+		signatureAlreadyIncludesReturnType(signature, returnType)
+	) {
+		return compactSignature(signature, name);
+	}
+	const separator = returnType.startsWith(":")
+		? ""
+		: returnType.startsWith("->")
+			? " "
+			: " -> ";
+	return compactSignature(`${signature}${separator}${returnType}`, name);
+}
+
+/** Compacts backend signature fragments into a readable one-line signature. */
+function compactSignature(signature: string, name: string): string {
+	const text = signature
+		.replace(/\s+/g, " ")
+		.replace(/\(\s+/g, "(")
+		.replace(/\s+\)/g, ")")
+		.replace(/,\s*\)/g, ")")
+		.trim();
+	return text.startsWith("(") ? `${name}${text}` : text;
+}
+
+/** Detects return types already attached to the end of a backend signature. */
+function signatureAlreadyIncludesReturnType(
+	signature: string,
+	returnType: string,
+): boolean {
+	const normalized = signature.replace(/\s+/g, " ").trim();
+	const normalizedReturn = returnType.replace(/\s+/g, " ").trim();
+	if (normalizedReturn.startsWith(":") || normalizedReturn.startsWith("->")) {
+		return normalized.endsWith(normalizedReturn);
+	}
+	return (
+		normalized.endsWith(`-> ${normalizedReturn}`) ||
+		normalized.endsWith(`: ${normalizedReturn}`)
+	);
 }
 
 /** Builds readable trace rows from Codebase Memory trace arrays. */
-function traceRows(value: unknown): string[] {
+function traceRows(
+	value: unknown,
+	excluded: Set<string> = new Set(),
+): string[] {
+	return uniqueTraceRows(
+		arrayValue(value)
+			.map((item) => {
+				const record = recordValue(item);
+				const name =
+					stringField(record.name) ?? stringField(record.qualified_name);
+				if (name === null) {
+					return null;
+				}
+				const qualifiedName = stringField(record.qualified_name);
+				if (
+					excluded.has(name) ||
+					(qualifiedName !== null && excluded.has(qualifiedName))
+				) {
+					return null;
+				}
+				const hop = numberField(record.hop);
+				const risk = stringField(record.risk);
+				const facts = [
+					hop !== null ? `hop ${hop}` : null,
+					risk !== null ? risk.toLowerCase() : null,
+				].filter((item) => item !== null);
+				return facts.length > 0 ? `${name} (${facts.join(", ")})` : name;
+			})
+			.filter((item) => item !== null),
+	);
+}
+
+/** Extracts names from trace records for the next-read section. */
+function traceNames(
+	value: unknown,
+	excluded: Set<string> = new Set(),
+): string[] {
 	return arrayValue(value)
 		.map((item) => {
 			const record = recordValue(item);
 			const name =
 				stringField(record.name) ?? stringField(record.qualified_name);
-			if (name === null) {
-				return null;
-			}
-			const hop = numberField(record.hop);
-			const risk = stringField(record.risk);
-			const facts = [
-				hop !== null ? `hop ${hop}` : null,
-				risk !== null ? risk.toLowerCase() : null,
-			].filter((item) => item !== null);
-			return facts.length > 0 ? `${name} (${facts.join(", ")})` : name;
+			return name !== null && !excluded.has(name) ? name : null;
 		})
 		.filter((item) => item !== null);
 }
 
-/** Extracts names from trace records for the next-read section. */
-function traceNames(value: unknown): string[] {
-	return arrayValue(value)
-		.map((item) => {
-			const record = recordValue(item);
-			return stringField(record.name) ?? stringField(record.qualified_name);
-		})
-		.filter((item) => item !== null);
+/** Deduplicates trace rows by symbol name while preserving nearest-hop order. */
+function uniqueTraceRows(rows: string[]): string[] {
+	const seen = new Set<string>();
+	const unique: string[] = [];
+	for (const row of rows) {
+		const key = row.replace(/\s+\(.*/, "");
+		if (seen.has(key)) {
+			continue;
+		}
+		seen.add(key);
+		unique.push(row);
+	}
+	return unique;
+}
+
+/** Builds an exact-name exclusion set for target/self trace rows. */
+function excludedTraceNames(names: string[]): Set<string> {
+	const excluded = new Set<string>();
+	for (const name of names) {
+		excluded.add(name);
+		const short = name.split(".").pop();
+		if (short !== undefined && short.length > 0) {
+			excluded.add(short);
+		}
+	}
+	return excluded;
 }
 
 /** Reads string fields while rejecting empty values. */

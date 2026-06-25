@@ -140,6 +140,7 @@ export const IGNORED_DIR_NAMES = new Set([
 	"public",
 	"references",
 	"target",
+	"user-data",
 	"venv",
 	"vendor",
 ]);

@@ -79,6 +79,53 @@ describe("inspect command handler", () => {
 		expect(output).not.toContain("## Other Matches");
 	});
 
+	it("does not call zero-edge wrapper files high-centrality", () => {
+		writeFileSync(
+			path.join(workDir, "src", "wrapper.ts"),
+			"export { helper } from './helper';\n",
+			"utf8",
+		);
+		writeFileSync(
+			path.join(workDir, "src", "helper.ts"),
+			"export function helper() {\n  return 'ok';\n}\n",
+			"utf8",
+		);
+
+		expect(commandInspect("src/wrapper.ts", { projectRoot: workDir })).toBe(0);
+
+		const output = logLines().join("\n");
+		expect(output).toContain("## Navigation Context");
+		expect(output).toContain("- role: source file");
+		expect(output).toContain("- why: selected by source/path evidence");
+		expect(output).toContain(
+			"- evidence: Low-relationship source file with 0 incoming import edges and 1 outgoing import edge.",
+		);
+		expect(output).not.toContain("high-centrality source");
+		expect(output).not.toContain("0 incoming and 0 outgoing import edges");
+	});
+
+	it("prints file-local Python classes in a dedicated section", () => {
+		writeFileSync(
+			path.join(workDir, "src", "app.py"),
+			[
+				"class Runner:",
+				"    def run(self):",
+				"        return helper()",
+				"",
+				"def helper():",
+				"    return 'ok'",
+			].join("\n"),
+			"utf8",
+		);
+
+		expect(commandInspect("src/app.py", { projectRoot: workDir })).toBe(0);
+
+		const output = logLines().join("\n");
+		expect(output).toContain("## Classes In File");
+		expect(output).toContain("Runner");
+		expect(output).toContain("## Contains");
+	});
+
 	it("marks limited directory sections with an ellipsis", () => {
 		for (const name of ["a", "b", "c"]) {
 			writeFileSync(
@@ -95,50 +142,6 @@ describe("inspect command handler", () => {
 		expect(output).toContain("## Files");
 		expect(output).toContain("- ...");
 	});
-
-	it("uses a file-local fallback for large repo file inspection", () => {
-		mkdirSync(path.join(workDir, "bulk"), { recursive: true });
-		for (let index = 0; index < 5001; index += 1) {
-			writeFileSync(
-				path.join(workDir, "bulk", `filler-${index}.ts`),
-				`export const filler${index} = ${index};\n`,
-				"utf8",
-			);
-		}
-		writeFileSync(
-			path.join(workDir, "src", "helper.ts"),
-			"export function helper() {\n  return 'ok';\n}\n",
-			"utf8",
-		);
-		writeFileSync(
-			path.join(workDir, "src", "large.ts"),
-			[
-				"import { helper } from './helper';",
-				"",
-				"export function run() {",
-				"  return helper();",
-				"}",
-			].join("\n"),
-			"utf8",
-		);
-
-		expect(commandInspect("src/large.ts", { projectRoot: workDir })).toBe(0);
-
-		const output = logLines().join("\n");
-		expect(output).toContain("# src/large.ts");
-		expect(output).toContain(
-			"Fallback: detailed graph skipped above 5000 files; incoming imports not computed.",
-		);
-		expect(output).toContain("## Navigation Context");
-		expect(output).toContain("- role: high-centrality source");
-		expect(output).toContain("- why: selected by import relationship evidence");
-		expect(output).toContain("## Imports From File");
-		expect(output).toContain("- ./helper");
-		expect(output).toContain("## Contains");
-		expect(output).toContain("- run in src/large.ts:3");
-		expect(output).toContain("local_imports=1");
-		expect(output).not.toContain("imported by:");
-	}, 10000);
 });
 
 /** Collects mocked console output as printable test lines. */

@@ -9,6 +9,7 @@ import {
 } from "../codebase-memory/index.js";
 import { DETAILED_ANALYSIS_FILE_LIMIT, resolveProjectRoot } from "../common.js";
 import {
+	type GraphMatchOptions,
 	renderGraphMatchLines,
 	type SourceFallbackGroup,
 	type SourceMatch,
@@ -39,6 +40,7 @@ type SearchOptions = {
 	maxDegree?: number;
 	excludeEntryPoints?: boolean;
 	offset?: number;
+	includeTests?: boolean;
 };
 
 type RootOptions = {
@@ -93,6 +95,7 @@ export function addSearchParser(program: Command): void {
 			"Page --graph results from an offset.",
 			parseIntegerOption,
 		)
+		.option("--include-tests", "Include backend test rows in search output.")
 		.action(async (searchText: string[], options: SearchOptions) => {
 			const exitCode = await commandSearch(
 				searchText,
@@ -129,27 +132,48 @@ export async function commandSearch(
 	console.log(`Search: ${searchText}`);
 	if (
 		options.semantic &&
-		printCodebaseMemorySemanticSearch(root, searchText, limit)
+		printCodebaseMemorySemanticSearch(
+			root,
+			searchText,
+			limit,
+			backendOutputOptions(options),
+		)
 	) {
 		return 0;
 	}
 	if (
 		options.graph &&
-		printCodebaseMemoryGraphSearch(
+		printCodebaseMemoryGraphSearch(root, searchText, limit, {
+			...graphSearchOptions(options),
+			...backendOutputOptions(options),
+		})
+	) {
+		return 0;
+	}
+	if (
+		!options.graph &&
+		printCodebaseMemorySearch(
 			root,
 			searchText,
 			limit,
-			graphSearchOptions(options),
+			backendOutputOptions(options),
 		)
 	) {
 		return 0;
 	}
-	if (!options.graph && printCodebaseMemorySearch(root, searchText, limit)) {
-		return 0;
-	}
 	if (options.graph) {
 		const graph = currentTreeGraph(root, { includeSignals: false });
-		console.log(renderGraphMatchLines(graph, searchText, limit).join("\n"));
+		console.log(
+			"\nGraph fallback: Codebase Memory graph search returned no answer; used current-tree relationship graph.",
+		);
+		console.log(
+			renderGraphMatchLines(
+				graph,
+				searchText,
+				limit,
+				graphMatchOptions(options),
+			).join("\n"),
+		);
 	} else {
 		const textOnlySearch = shouldUseTextOnlySourceSearch(root);
 		const matches = sourceMatches(root, searchText, {
@@ -242,6 +266,16 @@ function shouldUseTextOnlySourceSearch(root: string): boolean {
 	return runScan(root).files.length > DETAILED_ANALYSIS_FILE_LIMIT;
 }
 
+/** Builds current-tree graph fallback filters without explicit undefined fields. */
+function graphMatchOptions(options: SearchOptions): GraphMatchOptions {
+	return {
+		...(options.includeTests !== undefined
+			? { includeTests: options.includeTests }
+			: {}),
+		...graphSearchOptions(options),
+	};
+}
+
 /** Builds Codebase Memory graph search options without explicit undefined fields. */
 function graphSearchOptions(
 	options: SearchOptions,
@@ -270,6 +304,17 @@ function graphSearchOptions(
 			? { excludeEntryPoints: options.excludeEntryPoints }
 			: {}),
 		...(options.offset !== undefined ? { offset: options.offset } : {}),
+	};
+}
+
+/** Builds backend output options without explicit undefined fields. */
+function backendOutputOptions(options: SearchOptions): {
+	includeTests?: boolean;
+} {
+	return {
+		...(options.includeTests !== undefined
+			? { includeTests: options.includeTests }
+			: {}),
 	};
 }
 
