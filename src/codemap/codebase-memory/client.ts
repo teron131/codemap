@@ -125,9 +125,6 @@ function codebaseMemoryIndexAndReadProject(
 		return null;
 	}
 	const changedCount = codebaseMemoryChangedCount(project.name);
-	if (changedCount !== null && changedCount > 0) {
-		return null;
-	}
 	return codebaseMemoryReadyProjectFromIndexedProject(
 		project,
 		status,
