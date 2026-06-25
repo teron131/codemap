@@ -3,7 +3,7 @@ import { statSync } from "node:fs";
 import path from "node:path";
 import type { Command } from "commander";
 
-import { tryPrintCodebaseMemoryInspect } from "../codebase-memory/index.js";
+import { printCodebaseMemoryInspect } from "../codebase-memory/index.js";
 import { DETAILED_ANALYSIS_FILE_LIMIT, resolveProjectRoot } from "../common.js";
 import {
 	buildLikelyEntries,
@@ -83,7 +83,7 @@ export function commandInspect(
 		console.log("Choose only one inspect lane: --backend or --local.");
 		return 2;
 	}
-	if (!options.local && tryPrintCodebaseMemoryInspect(root, target, limit)) {
+	if (!options.local && printCodebaseMemoryInspect(root, target, limit)) {
 		return 0;
 	}
 	if (options.backend) {

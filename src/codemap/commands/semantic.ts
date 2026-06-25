@@ -1,7 +1,7 @@
 /** Defines CLI behavior for Codebase Memory backend status. */
 import type { Command } from "commander";
 
-import { tryPrintCodebaseMemoryStatus } from "../codebase-memory/index.js";
+import { printCodebaseMemoryStatus } from "../codebase-memory/index.js";
 import { resolveProjectRoot } from "../common.js";
 import { addProjectRootArgument } from "./options.js";
 
@@ -42,7 +42,7 @@ export function commandSemanticStatus(
 	const root = resolveProjectRoot(
 		options.projectRoot ?? rootOptions.projectRoot,
 	);
-	if (tryPrintCodebaseMemoryStatus(root)) {
+	if (printCodebaseMemoryStatus(root)) {
 		return 0;
 	}
 	console.log(
