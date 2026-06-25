@@ -1,6 +1,7 @@
 /** Defines CLI behavior for refactor signal output. */
 import type { Command } from "commander";
 
+import { codebaseMemoryStatus } from "../codebase-memory/index.js";
 import { DETAILED_ANALYSIS_FILE_LIMIT, resolveProjectRoot } from "../common.js";
 import { runScan } from "../source/extraction/index.js";
 import {
@@ -22,6 +23,16 @@ type SignalOptions = {
 
 type SignalPayloadOptions = {
 	includeTests?: boolean;
+};
+
+type BackendSignalContext = {
+	backend: "Codebase Memory";
+	project: string;
+	status: string;
+	nodes: number | null;
+	edges: number | null;
+	schemaNodeLabels: number | null;
+	schemaEdgeTypes: number | null;
 };
 
 type RootOptions = {
@@ -81,12 +92,78 @@ export function commandSignals(
 		console.error(error instanceof Error ? error.message : String(error));
 		return 1;
 	}
+	const backendContext = codebaseMemorySignalContext(root);
 	if (options.json) {
-		console.log(JSON.stringify(selected, null, 2));
+		console.log(
+			JSON.stringify(
+				backendContext === null
+					? selected
+					: { backend: backendContext, ...selected },
+				null,
+				2,
+			),
+		);
 	} else {
-		console.log(renderSignalText(selected, section).trim());
+		console.log(renderSignalTextWithBackend(selected, section, backendContext));
 	}
 	return 0;
+}
+
+/** Renders signal text with backend context below the main title. */
+function renderSignalTextWithBackend(
+	payload: Record<string, unknown>,
+	section: string,
+	backendContext: BackendSignalContext | null,
+): string {
+	const signalText = renderSignalText(payload, section).trim();
+	const backendText = renderBackendSignalContext(backendContext);
+	if (!backendText) {
+		return signalText;
+	}
+	const [title = "", ...body] = signalText.split("\n");
+	return [title, "", backendText, ...body].join("\n").trim();
+}
+
+/** Reads backend context for signal output without making it mandatory. */
+function codebaseMemorySignalContext(
+	root: string,
+): BackendSignalContext | null {
+	const status = codebaseMemoryStatus(root);
+	if (status === null) {
+		return null;
+	}
+	return {
+		backend: "Codebase Memory",
+		project: status.projectName,
+		status: status.status,
+		nodes: status.nodes,
+		edges: status.edges,
+		schemaNodeLabels: status.schemaNodeLabels,
+		schemaEdgeTypes: status.schemaEdgeTypes,
+	};
+}
+
+/** Renders optional backend graph context for signal text output. */
+function renderBackendSignalContext(
+	context: BackendSignalContext | null,
+): string {
+	if (context === null) {
+		return "";
+	}
+	const lines = [
+		"## Backend Graph",
+		`- backend: ${context.backend}`,
+		`- project: ${context.project}`,
+		`- status: ${context.status}`,
+		`- nodes: ${context.nodes ?? "unknown"}`,
+		`- edges: ${context.edges ?? "unknown"}`,
+	];
+	if (context.schemaNodeLabels !== null && context.schemaEdgeTypes !== null) {
+		lines.push(
+			`- schema: ${context.schemaNodeLabels} node labels, ${context.schemaEdgeTypes} edge types`,
+		);
+	}
+	return lines.join("\n");
 }
 
 /** Builds the selected current-tree signal payload for CLI output. */

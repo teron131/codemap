@@ -7,11 +7,13 @@ export {
 	codebaseMemoryReadyProject,
 } from "./client.js";
 export {
+	type CodebaseMemoryIndexResult,
 	type CodebaseMemoryInspectResult,
 	type CodebaseMemoryStatusResult,
 	codebaseMemoryArchitectureSummary,
 	codebaseMemoryCallTrace,
 	codebaseMemoryGraphSearch,
+	codebaseMemoryIndex,
 	codebaseMemoryInspect,
 	codebaseMemorySearch,
 	codebaseMemorySemanticSearch,
@@ -21,6 +23,7 @@ export {
 	printCodebaseMemoryArchitectureSummary,
 	printCodebaseMemoryCallTrace,
 	printCodebaseMemoryGraphSearch,
+	printCodebaseMemoryIndex,
 	printCodebaseMemoryInspect,
 	printCodebaseMemorySearch,
 	printCodebaseMemorySemanticSearch,
