@@ -10,7 +10,7 @@ Codemap is an agent-facing source navigation and refactor-scoping tool. It shoul
 - Current-tree commands inspect live files and do not write Codemap-owned graph storage.
 - `src/codemap/ast-grep` is the shared ast-grep boundary; `rg` stays the subprocess boundary for text search and file discovery.
 - `search` is broad discovery; `inspect <target>` is the explicit path for one known file, symbol, or neighborhood.
-- Codebase Memory MCP is the backend for persistent graph search, semantic graph search, snippets, traces, architecture summaries, backend-informed signals, and backend status.
+- Codebase Memory MCP is the backend for persistent graph search, semantic graph search, snippets, traces, architecture summaries, backend-informed signals, schema/project inspection, graph queries, changed-code impact, and backend status.
 - `signals` are backend-informed local refactor evidence, not lint findings.
 
 ## Install
@@ -29,7 +29,7 @@ For agent use, enable the Codemap skill in the matching agent guidance so agents
 
 | Area | Commands | Reads | Writes / guard | Purpose |
 | --- | --- | --- | --- | --- |
-| Backend wrappers | `summary`, `search <text>`, `search --graph <text>`, `search --semantic <text>`, `inspect <symbol>`, `search calls <name>`, `memory status`, `index` | Codebase Memory MCP after synchronous indexing, with local fallback where useful | Backend index only | Discovery, focused source neighborhoods, traces, architecture, snippets, status, and explicit refresh timing. |
+| Backend wrappers | `summary`, `search <text>`, `search --graph <text>`, `search --semantic <text>`, `inspect <symbol>`, `search calls <name>`, `memory projects`, `memory status`, `memory schema`, `memory query <cypher>`, `memory changes`, `index` | Codebase Memory MCP after synchronous indexing, with local fallback where useful | Backend index only | Discovery, focused source neighborhoods, traces, architecture, snippets, schema/project inspection, graph queries, changed-code impact, status, and explicit refresh timing. |
 | Current tree | `signals [section]`, path/file `inspect <target>` | Codebase Memory status plus current tree | Backend index only for signal context | Refactor evidence and direct file or directory inspection. |
 | Structural search | `search match`, `search rule`, scoped `search calls` | Current tree plus pattern, rule, language, or path input | None | Explicit read-only ast-grep matches under the search surface. |
 
@@ -77,7 +77,7 @@ flowchart TD
 
     subgraph BackendLane["Persistent backend"]
         CBM["Codebase Memory MCP"]
-        GraphTools["search_graph / search_code / trace_path / get_code_snippet / get_architecture"]
+        GraphTools["search_graph / search_code / trace_path / get_code_snippet / get_architecture / query_graph / detect_changes"]
 
         CBM --> GraphTools
     end
@@ -91,4 +91,4 @@ flowchart TD
 - Source evidence lives in `src/codemap/source`: scanner, extraction, graph, signals, inspection.
 - ast-grep usage is centralized in `src/codemap/ast-grep`; `rg` stays a subprocess boundary.
 - Search lanes are direct code boundaries: `src/codemap/search/source`, `src/codemap/search/structural`, and `src/codemap/search/graph`.
-- `src/codemap/codebase-memory` owns the persistent backend adapter, unconditional indexing trigger, semantic graph search, and renderer shortcuts.
+- `src/codemap/codebase-memory` owns the persistent backend adapter, unconditional indexing trigger, graph and semantic graph search, trace/query/change wrappers, and compact renderer shortcuts.
