@@ -5,6 +5,7 @@ import { codebaseMemoryStatus } from "../codebase-memory/index.js";
 import { DETAILED_ANALYSIS_FILE_LIMIT, resolveProjectRoot } from "../common.js";
 import { runScan } from "../source/extraction/index.js";
 import {
+	buildSignalExport,
 	buildSignalPayload,
 	renderSignalText,
 	runSignalsExport,
@@ -44,7 +45,7 @@ export function addSignalsParser(program: Command): void {
 	const signals = program
 		.command("signals")
 		.description(
-			"Print current-tree relationship, usage, function length, variable pool, and file profile tables.",
+			"Print current-tree relationship, usage, function length, docstring, variable pool, and file profile tables.",
 		)
 		.argument("[section]", "Signal section to print.", "all")
 		.option(
@@ -172,6 +173,10 @@ export function buildCurrentTreeSignalPayload(
 	section: string,
 	options: SignalPayloadOptions = {},
 ): Record<string, unknown> {
+	if (isDocstringSection(section)) {
+		const payload = docstringSignalPayload(root, section);
+		return selectPayloadSection(payload, section);
+	}
 	const scan = runScan(root);
 	if (scan.files.length > DETAILED_ANALYSIS_FILE_LIMIT) {
 		const payload = buildLightweightSignalPayload(scan.files, {
@@ -190,5 +195,38 @@ export function buildCurrentTreeSignalPayload(
 		limit: SIGNAL_OUTPUT_ROW_LIMIT,
 		includeTests: Boolean(options.includeTests),
 	});
+	if (section === "all") {
+		Object.assign(payload, docstringSignalPayload(root, "docstring-signals"));
+	}
 	return selectPayloadSection(payload, section);
+}
+
+/** Checks whether a requested section needs docstring extraction. */
+function isDocstringSection(
+	section: string,
+): section is "docstring-signals" | "docstrings" {
+	return section === "docstring-signals" || section === "docstrings";
+}
+
+/** Builds docstring sections without forcing full signal export work. */
+function docstringSignalPayload(
+	root: string,
+	section: "docstring-signals" | "docstrings",
+): Record<string, unknown> {
+	const signalExport = buildSignalExport(root, {
+		sectionMode: section,
+		expanded: false,
+	});
+	const sections = recordValue(signalExport.sections);
+	return {
+		docstring_signals: sections.docstring_signals ?? {},
+		docstrings: sections.docstrings ?? {},
+	};
+}
+
+/** Reads a record field from untrusted JSON-like data. */
+function recordValue(value: unknown): Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value)
+		? (value as Record<string, unknown>)
+		: {};
 }

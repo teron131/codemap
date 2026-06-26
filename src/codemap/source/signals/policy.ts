@@ -8,6 +8,8 @@ export const SIGNAL_SECTION_CHOICES = [
 	"functions",
 	"variables",
 	"usage",
+	"docstring-signals",
+	"docstrings",
 ] as const;
 
 export type SignalSection = (typeof SIGNAL_SECTION_CHOICES)[number];

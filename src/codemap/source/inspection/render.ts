@@ -1,10 +1,13 @@
 /** Formats inspection profiles and related graph context as text. */
+import path from "node:path";
+
 import {
 	type GraphEdge,
 	type GraphNode,
 	type GraphPayload,
 	relatedEdges,
 } from "../graph/index.js";
+import { docstringForSymbol } from "../signals/docstrings/index.js";
 import {
 	appendFileProfile,
 	appendSymbolProfile,
@@ -192,6 +195,7 @@ export function renderInspection(
 
 	appendLikelyEntryContext(lines, likelyEntries[relPath]);
 	appendSymbolProfile(lines, node);
+	appendDocstringSection(lines, root, node);
 	appendRelatedSections(lines, graph, nodeId, nodesById, { limit });
 	if (relPath) {
 		appendFileProfile(lines, fileMetricsForPath(metrics, relPath), { limit });
@@ -239,6 +243,51 @@ export function appendLikelyEntryContext(
 	if (description) {
 		lines.push(`- evidence: ${description}`);
 	}
+}
+
+/** Appends the target symbol's source docstring or declaration comment. */
+function appendDocstringSection(
+	lines: string[],
+	root: string,
+	node: GraphNode,
+): void {
+	const docstring = docstringForNode(root, node);
+	if (docstring === null) {
+		return;
+	}
+	lines.push("");
+	lines.push("## Docstring");
+	for (const line of compactDocstringLines(docstring)) {
+		lines.push(line);
+	}
+}
+
+/** Finds a docstring report entry matching one inspected graph node. */
+function docstringForNode(root: string, node: GraphNode): string | null {
+	const relPath = String(node.filePath ?? "");
+	const nodeType = String(node.type ?? "");
+	if (!relPath || (nodeType !== "class" && nodeType !== "function")) {
+		return null;
+	}
+	return docstringForSymbol(path.join(root, relPath), {
+		displayPath: relPath,
+		kind: nodeType,
+		name: String(node.name ?? ""),
+		line: Number(node.lineRange?.[0] ?? 0),
+	});
+}
+
+/** Keeps inspected docstrings useful without dumping long blocks. */
+function compactDocstringLines(docstring: string): string[] {
+	const lines = docstring
+		.split(/\r?\n/)
+		.map((line) => line.trim())
+		.filter(Boolean);
+	const shown = lines.slice(0, 8);
+	if (lines.length > shown.length) {
+		shown.push("...");
+	}
+	return shown;
 }
 
 /** Marks list sections that were shortened by the display limit. */

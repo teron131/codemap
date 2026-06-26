@@ -51,6 +51,41 @@ describe("signals CLI", () => {
 		expect(output).not.toContain("## Files");
 	});
 
+	it("keeps full docstring text output bounded", () => {
+		const output = renderSignalText(
+			{
+				docstrings: {
+					files: 21,
+					typescript_files: 21,
+					python_files: 0,
+					functions: 9,
+					class_methods: 0,
+					classes: 0,
+					file_reports: Array.from({ length: 21 }, (_, index) => ({
+						file: `src/file${index}.ts`,
+						file_docstring_preview: `File ${index}.`,
+						functions:
+							index === 0
+								? Array.from({ length: 9 }, (_, functionIndex) => ({
+										qualified_name: `fn${functionIndex}`,
+										line: functionIndex + 1,
+										docstring_preview: `Function ${functionIndex}.`,
+									}))
+								: [],
+						classes: [],
+					})),
+				},
+			},
+			"docstrings",
+		);
+
+		expect(output).toContain("## Docstring Files");
+		expect(output).toContain("- ... 1 more files");
+		expect(output).toContain("  - ... 1 more functions");
+		expect(output).not.toContain("src/file20.ts");
+		expect(output).not.toContain("fn8");
+	});
+
 	it("filters tests, bundles, and non-source files in lightweight signal rows", () => {
 		const payload = buildLightweightSignalPayload(
 			[
@@ -182,6 +217,94 @@ describe("signals CLI", () => {
 					jsx_components: 0,
 					decorators: 0,
 					samples: ["run", "helper"],
+				},
+			],
+		});
+	});
+
+	it("prints compact docstring signal text", () => {
+		writeFileSync(
+			path.join(workDir, "src", "app.ts"),
+			[
+				"/** App module docs. */",
+				"",
+				"/** Runs the command flow. */",
+				"export function run(value: string) {",
+				"  return value;",
+				"}",
+			].join("\n"),
+			"utf8",
+		);
+
+		const result = spawnSync(
+			"pnpm",
+			[
+				"exec",
+				"tsx",
+				"src/codemap/cli.ts",
+				"signals",
+				"--project-root",
+				workDir,
+				"docstring-signals",
+			],
+			{ cwd: workspaceRoot, encoding: "utf8" },
+		);
+
+		expect(result.status).toBe(0);
+		expect(result.stderr).toBe("");
+		expect(result.stdout).toContain("# Docstring Signals");
+		expect(result.stdout).toContain("- file docstrings: 1/1");
+		expect(result.stdout).toContain("- src/app.ts: App module docs.");
+		expect(result.stdout).toContain(
+			"- src/app.ts:4 run: Runs the command flow.",
+		);
+	});
+
+	it("prints full docstring payload JSON", () => {
+		writeFileSync(
+			path.join(workDir, "src", "app.ts"),
+			[
+				"/** App module docs. */",
+				"",
+				"/** Runs the command flow. */",
+				"export function run(value: string) {",
+				"  return value;",
+				"}",
+			].join("\n"),
+			"utf8",
+		);
+
+		const result = spawnSync(
+			"pnpm",
+			[
+				"exec",
+				"tsx",
+				"src/codemap/cli.ts",
+				"signals",
+				"--project-root",
+				workDir,
+				"--json",
+				"docstrings",
+			],
+			{ cwd: workspaceRoot, encoding: "utf8" },
+		);
+
+		expect(result.status).toBe(0);
+		expect(result.stderr).toBe("");
+		const payload = JSON.parse(result.stdout);
+		expect(payload.docstrings).toMatchObject({
+			files: 1,
+			typescript_files: 1,
+			file_reports: [
+				{
+					file: "src/app.ts",
+					file_docstring_preview: "App module docs.",
+					functions: [
+						{
+							name: "run",
+							docstring_preview: "Runs the command flow.",
+						},
+					],
 				},
 			],
 		});
