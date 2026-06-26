@@ -55,7 +55,7 @@ export function buildSignalPayload(
 			},
 		),
 	};
-	const payload = {
+	const payload: Record<string, unknown> = {
 		relationships: sections.relationships ?? {},
 		files: limitedRows(fileRows, limit),
 		lengths: lengthRows,
@@ -63,6 +63,9 @@ export function buildSignalPayload(
 		functions: functionPayload(usageTables, limit, { includeTests }),
 		variables: variablePayload(usageTables, limit, { includeTests }),
 	};
+	if ("docstring_signals" in sections) {
+		payload.docstring_signals = sections.docstring_signals ?? {};
+	}
 	return {
 		top: topPayload(
 			{
@@ -361,7 +364,16 @@ export function selectPayloadSection(
 	if (section === "all") {
 		return payload;
 	}
-	return { [section]: payload[section] ?? {} };
+	const key = payloadKeyForSection(section);
+	return { [key]: payload[key] ?? {} };
+}
+
+/** Maps CLI section names to payload field names. */
+function payloadKeyForSection(section: string): string {
+	if (section === "docstring-signals") {
+		return "docstring_signals";
+	}
+	return section;
 }
 
 /** Sorts text values with stable lexical ordering. */

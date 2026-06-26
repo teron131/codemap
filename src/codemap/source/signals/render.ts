@@ -4,6 +4,9 @@ import type { SignalRow } from "./schema.js";
 
 type Row = SignalRow;
 
+const DOCSTRING_REPORT_TEXT_LIMIT = 20;
+const DOCSTRING_DEFINITION_TEXT_LIMIT = 8;
+
 /** Renders selected signal payload sections as text. */
 export function renderSignalText(
 	payload: Record<string, unknown>,
@@ -18,6 +21,12 @@ export function renderSignalText(
 	}
 	if ("usage" in payload) {
 		appendUsageDistribution(lines, recordValue(payload.usage));
+	}
+	if ("docstring_signals" in payload) {
+		appendDocstringSignals(lines, recordValue(payload.docstring_signals));
+	}
+	if ("docstrings" in payload) {
+		appendDocstrings(lines, recordValue(payload.docstrings));
 	}
 	if ("functions" in payload) {
 		appendFunctionSignals(lines, recordValue(payload.functions));
@@ -47,6 +56,8 @@ export function signalTitle(section: string): string {
 		functions: "# Function Signals",
 		variables: "# Variable Signals",
 		usage: "# Usage Signals",
+		"docstring-signals": "# Docstring Signals",
+		docstrings: "# Docstrings",
 	};
 	return (
 		titles[section] ?? `# ${titleCase(section.replaceAll("-", " "))} Signals`
@@ -242,6 +253,71 @@ export function appendFiles(lines: string[], rows: Row[]): void {
 	lines.push("");
 }
 
+/** Appends compact docstring coverage and preview rows to signal output. */
+export function appendDocstringSignals(
+	lines: string[],
+	payload: Record<string, unknown>,
+): void {
+	lines.push("## Docstring Coverage");
+	const fileDocstrings = recordValue(payload.file_docstrings);
+	lines.push(
+		`- files: ${valueOrDefault(payload.files_considered, 0)} considered (${valueOrDefault(payload.typescript_files_considered, 0)} TypeScript, ${valueOrDefault(payload.python_files_considered, 0)} Python)`,
+	);
+	lines.push(
+		`- file docstrings: ${valueOrDefault(fileDocstrings.present, 0)}/${valueOrDefault(fileDocstrings.total, 0)}`,
+	);
+	appendDocstringPreviewRows(
+		lines,
+		"File Docstring Previews",
+		arrayValue(payload.file_docstring_previews),
+	);
+	appendDocstringPreviewRows(
+		lines,
+		"Likely Main Function Docstrings",
+		arrayValue(payload.likely_main_function_docstrings),
+		{ includeLine: true },
+	);
+	lines.push("");
+}
+
+/** Appends full docstring report rows with compact previews. */
+export function appendDocstrings(
+	lines: string[],
+	payload: Record<string, unknown>,
+): void {
+	lines.push("## Docstring Files");
+	lines.push(
+		`- files: ${valueOrDefault(payload.files, 0)} (${valueOrDefault(payload.typescript_files, 0)} TypeScript, ${valueOrDefault(payload.python_files, 0)} Python)`,
+	);
+	lines.push(
+		`- definitions: ${valueOrDefault(payload.functions, 0)} functions, ${valueOrDefault(payload.class_methods, 0)} methods, ${valueOrDefault(payload.classes, 0)} classes`,
+	);
+	const reports = arrayValue(payload.file_reports);
+	if (reports.length === 0) {
+		lines.push("- none");
+		lines.push("");
+		return;
+	}
+	const shownReports = reports.slice(0, DOCSTRING_REPORT_TEXT_LIMIT);
+	for (const report of shownReports) {
+		const file = String(report.file ?? "");
+		const preview = previewText(report.file_docstring_preview);
+		lines.push(`- ${file}: file=${preview}`);
+		appendDefinitionPreviewChildren(lines, arrayValue(report.functions), {
+			prefix: "function",
+		});
+		appendDefinitionPreviewChildren(lines, arrayValue(report.classes), {
+			prefix: "class",
+		});
+	}
+	if (reports.length > shownReports.length) {
+		lines.push(
+			`- ... ${reports.length - shownReports.length} more files (use --json for full docstring payload)`,
+		);
+	}
+	lines.push("");
+}
+
 /** Appends definition rows with references and samples to text output. */
 export function appendDefinitionRows(
 	lines: string[],
@@ -304,6 +380,73 @@ export function appendDenseFileRows(
 	for (const item of rows) {
 		lines.push(`- ${item.file}: ${denseFileCounters(item)}`);
 	}
+}
+
+/** Appends rows that carry file/name/preview docstring fields. */
+function appendDocstringPreviewRows(
+	lines: string[],
+	title: string,
+	rows: Row[],
+	{ includeLine = false }: { includeLine?: boolean } = {},
+): void {
+	lines.push(`### ${title}`);
+	if (rows.length === 0) {
+		lines.push("- none");
+		return;
+	}
+	for (const item of rows) {
+		const file = String(item.file ?? "");
+		const name = String(item.qualified_name ?? item.name ?? "").trim();
+		const line = includeLine && item.line ? `:${item.line}` : "";
+		const label = name ? `${file}${line} ${name}` : `${file}${line}`;
+		lines.push(
+			`- ${label}: ${previewText(item.docstring_preview ?? item.preview)}`,
+		);
+	}
+}
+
+/** Appends nested function/class previews for one full docstring file report. */
+function appendDefinitionPreviewChildren(
+	lines: string[],
+	rows: Row[],
+	{ prefix }: { prefix: string },
+): void {
+	const shownRows = rows.slice(0, DOCSTRING_DEFINITION_TEXT_LIMIT);
+	for (const row of shownRows) {
+		const name = String(row.qualified_name ?? row.name ?? "").trim();
+		const line = row.line ? `:${row.line}` : "";
+		lines.push(
+			`  - ${prefix} ${name}${line}: ${previewText(row.docstring_preview)}`,
+		);
+		if (prefix === "class") {
+			appendDefinitionPreviewChildren(lines, arrayValue(row.methods), {
+				prefix: "method",
+			});
+			appendDefinitionPreviewChildren(lines, arrayValue(row.nested_classes), {
+				prefix: "class",
+			});
+		} else {
+			appendDefinitionPreviewChildren(lines, arrayValue(row.nested_functions), {
+				prefix,
+			});
+		}
+	}
+	if (rows.length > shownRows.length) {
+		lines.push(
+			`  - ... ${rows.length - shownRows.length} more ${definitionPlural(prefix)}`,
+		);
+	}
+}
+
+/** Formats a compact docstring preview fallback. */
+function previewText(value: unknown): string {
+	const text = String(value ?? "").trim();
+	return text || "none";
+}
+
+/** Pluralizes one compact definition label for truncated docstring output. */
+function definitionPlural(prefix: string): string {
+	return prefix === "class" ? "classes" : `${prefix}s`;
 }
 
 /** Formats the dense-file counters shared by signals and inspect output. */

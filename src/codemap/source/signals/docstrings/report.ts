@@ -62,6 +62,8 @@ export type FilePreview = {
 	preview: string;
 };
 
+export type SymbolDocstringKind = "class" | "function";
+
 export type DocstringSignals = {
 	files_considered: number;
 	python_files_considered: number;
@@ -328,6 +330,78 @@ export function collectReports(
 		}
 	}
 	return [moduleRoot, reports];
+}
+
+/** Finds one symbol docstring in a supported source file report. */
+export function docstringForSymbol(
+	filePath: string,
+	{
+		displayPath,
+		kind,
+		name,
+		line = 0,
+	}: {
+		displayPath: string;
+		kind: SymbolDocstringKind;
+		name: string;
+		line?: number;
+	},
+): string | null {
+	const suffix = path.extname(filePath);
+	if (!DOCSTRING_SUFFIXES.has(suffix)) {
+		return null;
+	}
+	const report = PYTHON_SUFFIXES.has(suffix)
+		? buildPythonFileReport(filePath, { displayPath })
+		: buildTypescriptFileReport(filePath, { displayPath });
+	if (kind === "class") {
+		return matchingClassDocstring(report.classes, name, line);
+	}
+	return matchingFunctionDocstring(report.functions, name, line);
+}
+
+/** Finds a function docstring by name with line-number disambiguation. */
+function matchingFunctionDocstring(
+	reports: FunctionReport[],
+	name: string,
+	line: number,
+): string | null {
+	for (const report of reports) {
+		if (report.name === name && (line <= 0 || report.lineno === line)) {
+			return report.docstring;
+		}
+		const nested = matchingFunctionDocstring(
+			report.nestedFunctions,
+			name,
+			line,
+		);
+		if (nested !== null) {
+			return nested;
+		}
+	}
+	return null;
+}
+
+/** Finds a class or method docstring by name with line-number disambiguation. */
+function matchingClassDocstring(
+	reports: ClassReport[],
+	name: string,
+	line: number,
+): string | null {
+	for (const report of reports) {
+		if (report.name === name && (line <= 0 || report.lineno === line)) {
+			return report.docstring;
+		}
+		const nested = matchingClassDocstring(report.nestedClasses, name, line);
+		if (nested !== null) {
+			return nested;
+		}
+		const method = matchingFunctionDocstring(report.methods, name, line);
+		if (method !== null) {
+			return method;
+		}
+	}
+	return null;
 }
 
 /** Collects full docstring report data for a target path. */
