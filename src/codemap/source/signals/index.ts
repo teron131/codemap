@@ -71,6 +71,8 @@ export {
 export {
 	appendDefinitionRows,
 	appendDenseFileRows,
+	appendDocstringSignals,
+	appendDocstrings,
 	appendFileCountRows,
 	appendFiles,
 	appendFunctionSignals,

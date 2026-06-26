@@ -30,6 +30,7 @@ describe("inspect command handler", () => {
 		writeFileSync(
 			path.join(workDir, "src", "app.ts"),
 			[
+				"/** Runs the public app workflow. */",
 				"export function run(value: string) {",
 				"  const cleaned = value.trim();",
 				"  return helper(cleaned);",
@@ -45,11 +46,13 @@ describe("inspect command handler", () => {
 		expect(commandInspect("run", { projectRoot: workDir })).toBe(0);
 
 		const output = logLines().join("\n");
-		expect(output).toContain("# run in src/app.ts:1");
+		expect(output).toContain("# run in src/app.ts:2");
 		expect(output).not.toContain("Type:");
 		expect(output).not.toContain("Complexity:");
+		expect(output).toContain("## Docstring");
+		expect(output).toContain("Runs the public app workflow.");
 		expect(output).toContain("## Calls");
-		expect(output).toContain("calls: helper in src/app.ts:6");
+		expect(output).toContain("calls: helper in src/app.ts:7");
 	});
 
 	it("does not repeat contained symbols as other matches for file inspection", () => {
@@ -109,6 +112,7 @@ describe("inspect command handler", () => {
 			path.join(workDir, "src", "app.py"),
 			[
 				"class Runner:",
+				'    """Runs the Python workflow."""',
 				"    def run(self):",
 				"        return helper()",
 				"",
@@ -124,6 +128,29 @@ describe("inspect command handler", () => {
 		expect(output).toContain("## Classes In File");
 		expect(output).toContain("Runner");
 		expect(output).toContain("## Contains");
+	});
+
+	it("prints Python class docstrings for symbol inspection", () => {
+		writeFileSync(
+			path.join(workDir, "src", "app.py"),
+			[
+				"class Runner:",
+				'    """Runs the Python workflow."""',
+				"    def run(self):",
+				"        return helper()",
+				"",
+				"def helper():",
+				"    return 'ok'",
+			].join("\n"),
+			"utf8",
+		);
+
+		expect(commandInspect("Runner", { projectRoot: workDir })).toBe(0);
+
+		const output = logLines().join("\n");
+		expect(output).toContain("# Runner in src/app.py:1");
+		expect(output).toContain("## Docstring");
+		expect(output).toContain("Runs the Python workflow.");
 	});
 
 	it("marks limited directory sections with an ellipsis", () => {

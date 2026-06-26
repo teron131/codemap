@@ -20,6 +20,7 @@ export type {
 	DocstringSignals,
 	DocstringsData,
 	FilePreview,
+	SymbolDocstringKind,
 } from "./report.js";
 export {
 	buildDocstringSignals,
@@ -33,6 +34,7 @@ export {
 	countClassMethods,
 	countFunctions,
 	displayPath,
+	docstringForSymbol,
 	docstringPreview,
 	functionPriority,
 	functionSignalCandidates,
