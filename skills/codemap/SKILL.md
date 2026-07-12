@@ -50,7 +50,7 @@ codemap signals --project-root <path>
 codemap signals --json --project-root <path> | jq '{functionPressure, smallFunctions, longNames}'
 ```
 
-Default signals are bounded to twelve rows and contain evidence rather than recommendations:
+Default signals contain evidence rather than recommendations. Each nonempty bucket is capped at twenty rows only to prevent overflow:
 
 - `functionPressure`: backend complexity and concrete scan-in-loop metrics.
 - `smallFunctions`: private functions no longer than eight lines with few lexical mentions.

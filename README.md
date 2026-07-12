@@ -31,7 +31,7 @@ npm install -g .
 | `search calls <name>` | ast-grep, or labeled Python regex fallback | Call-shaped source matches, capped at 20 by default. |
 | `search match` / `search rule` | ast-grep | Built-in JS/TS structural discovery; simple Python patterns require the ast-grep CLI. |
 | `inspect <target>` | Codebase Memory for symbols, current tree for paths and fallback | Focused in-to-out neighborhood inspection. |
-| `signals` | Codebase Memory function metrics plus current-tree definitions | At most four function-pressure, four small low-use, and four long-name rows. |
+| `signals` | Codebase Memory function metrics plus current-tree definitions | Up to twenty useful rows in each nonempty default evidence bucket. |
 | `memory ...` | Raw Codebase Memory diagnostics | Projects, status, schema, Cypher queries, and change impact. |
 | `index` | Codebase Memory indexing | Explicit refresh timing and status. |
 
@@ -55,25 +55,15 @@ The three default buckets are deliberately factual:
 - `smallFunctions`: private functions no longer than eight lines with few lexical mentions.
 - `longNames`: camelCase or snake_case variable-like identifiers at least thirty characters long with lexical mention counts; conventional constants and PascalCase owners are excluded.
 
-Function-pressure fields use compact standard names: `cognitive` is a unitless control-flow understandability score that rises with nesting and branching; `cyclomatic` approximates independent control-flow paths; `lines` is the physical function span; and `linear_scan_in_loop` counts detected scan sites such as `find`, `filter`, or `some` inside loops. Higher values are stronger review pressure, not correctness failures. A scan site may operate on a bounded collection, so it is not proof of a performance problem.
+Each bucket is capped at twenty rows only to prevent overflow; filters and ranking remove noise before that cap is applied. Detailed sections retain their broader fifty-row views.
+
+Function-pressure fields use compact standard names: `cognitive` is a unitless control-flow understandability score that rises with nesting and branching; `cyclomatic` approximates independent control-flow paths; `lines` is the physical function span; and JSON's `linearScanInLoop` (rendered as `linear_scan_in_loop` in readable text) counts detected scan sites such as `find`, `filter`, or `some` inside loops. Higher values are stronger review pressure, not correctness failures. A scan site may operate on a bounded collection, so it is not proof of a performance problem.
 
 Lexical mentions are not graph references and are labeled accordingly. The rows are review leads, not deletion or rename instructions.
 
 Detailed sections remain explicit for narrower investigations: `relationships`, `files`, `lengths`, `functions`, `variables`, `usage`, `docstring-signals`, and `docstrings`.
 
 ## Backend Boundary
-
-```mermaid
-flowchart LR
-    CLI["Codemap command"] --> LOCK["lock root in system cache"]
-    LOCK --> RESET["delete matching cache entry"]
-    RESET --> INDEX["index_repository persistence=false"]
-    INDEX --> CBM["Codebase Memory query"]
-    CBM --> NORMALIZE["feature-owned compact result"]
-    LOCAL["rg + ast-grep + current tree"] --> NORMALIZE
-    NORMALIZE --> TEXT["readable text"]
-    NORMALIZE --> JSON["normalized JSON"]
-```
 
 `src/codemap/codebase-memory` owns MCP transport, manual clean-index lifecycle, cross-process root serialization, payload validation, and backend result normalization. Its short-lived MCP children start outside the target repository so upstream session auto-indexing and watching do not race the explicit lifecycle. Search, inspect, signals, summary, and memory commands own their selection and presentation policy.
 
