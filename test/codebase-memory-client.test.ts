@@ -1,12 +1,15 @@
-/** Checks CodebaseMemory readiness and status behavior with mocked MCP output. */
+/** Checks the CodebaseMemory adapter and clean-index lifecycle with mocked MCP output. */
+import { spawn } from "node:child_process";
 import {
 	chmodSync,
 	existsSync,
 	mkdirSync,
 	readFileSync,
 	rmSync,
+	symlinkSync,
 	writeFileSync,
 } from "node:fs";
+import { homedir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -14,7 +17,9 @@ import {
 	callCodebaseMemoryTool,
 	codebaseMemoryInspect,
 	codebaseMemoryQueryRows,
-	codebaseMemoryReadyProject,
+	codebaseMemorySchema,
+	codebaseMemoryStatus,
+	withFreshCodebaseMemoryProject,
 } from "../src/codemap/codebase-memory/index.js";
 import {
 	printCodebaseMemoryArchitectureSummary,
@@ -52,6 +57,7 @@ beforeEach(() => {
 	chmodSync(serverPath, 0o755);
 	vi.stubEnv("CODEMAP_CODEBASE_MEMORY", "1");
 	vi.stubEnv("CODEMAP_CODEBASE_MEMORY_COMMAND", serverPath);
+	vi.stubEnv("CBM_CACHE_DIR", path.join(workDir, "cbm-cache"));
 });
 
 afterEach(() => {
@@ -73,7 +79,7 @@ describe("CodebaseMemory client", () => {
 		expect(codebaseMemoryQueryRows({ message: "ok" })).toBeNull();
 	});
 
-	it("reads mocked CodebaseMemory tool payloads", () => {
+	it("reads tool payloads outside upstream session discovery", () => {
 		const result = callCodebaseMemoryTool("list_projects", {});
 		if (!result.ok) {
 			throw new Error(result.reason);
@@ -86,10 +92,14 @@ describe("CodebaseMemory client", () => {
 				}),
 			]),
 		});
+		expect(readChildCwds()).toEqual([homedir()]);
 	});
 
 	it("indexes ready projects before use", () => {
-		const project = codebaseMemoryReadyProject(workDir);
+		const project = withFreshCodebaseMemoryProject(
+			workDir,
+			(readyProject) => readyProject,
+		);
 
 		expect(project).toMatchObject({
 			name: "mock-project",
@@ -105,12 +115,16 @@ describe("CodebaseMemory client", () => {
 		expect(readDeleteCalls()).toEqual([{ project: "mock-project" }]);
 	});
 
-	it("indexes before every backend readiness check", () => {
-		expect(codebaseMemoryReadyProject(workDir)).toMatchObject({
+	it("performs one clean refresh per top-level operation", () => {
+		expect(
+			withFreshCodebaseMemoryProject(workDir, (project) => project),
+		).toMatchObject({
 			name: "mock-project",
 			status: "ready",
 		});
-		expect(codebaseMemoryReadyProject(workDir)).toMatchObject({
+		expect(
+			withFreshCodebaseMemoryProject(workDir, (project) => project),
+		).toMatchObject({
 			name: "mock-project",
 			status: "ready",
 		});
@@ -128,24 +142,120 @@ describe("CodebaseMemory client", () => {
 		]);
 	});
 
+	it("reuses one clean snapshot across nested backend operations", () => {
+		const result = withFreshCodebaseMemoryProject(workDir, () => ({
+			status: codebaseMemoryStatus(workDir),
+			schema: codebaseMemorySchema(workDir),
+		}));
+
+		expect(result).toMatchObject({
+			status: { projectName: "mock-project", status: "ready" },
+			schema: { node_labels: [{ label: "Function", count: 7 }] },
+		});
+		expect(readDeleteCalls()).toHaveLength(1);
+		expect(readIndexCalls()).toHaveLength(1);
+	});
+
+	it("rejects asynchronous nested operations before releasing the lock", () => {
+		let invoked = false;
+		expect(() =>
+			withFreshCodebaseMemoryProject(workDir, () =>
+				withFreshCodebaseMemoryProject(workDir, async () => {
+					invoked = true;
+				}),
+			),
+		).toThrow("CodebaseMemory project operations must be synchronous");
+		expect(invoked).toBe(false);
+		expect(readDeleteCalls()).toHaveLength(1);
+		expect(readIndexCalls()).toHaveLength(1);
+	});
+
+	it("serializes concurrent same-root refreshes through their queries", async () => {
+		const [first, second] = await Promise.all([
+			runSchemaCli("first"),
+			runSchemaCli("second"),
+		]);
+
+		expect(first).toMatchObject({ status: 0 });
+		expect(second).toMatchObject({ status: 0 });
+		expect(first.stdout).toContain("CodebaseMemory schema");
+		expect(second.stdout).toContain("CodebaseMemory schema");
+		const starts = readOperationEvents().filter(
+			(event) => event.phase === "start",
+		);
+		const operationOrder = starts
+			.map((event) => event.operationId)
+			.filter(
+				(operationId, index, values) =>
+					index === 0 || operationId !== values[index - 1],
+			);
+		expect(operationOrder).toHaveLength(2);
+		expect(new Set(operationOrder)).toEqual(new Set(["first", "second"]));
+		for (const operationId of ["first", "second"]) {
+			expect(
+				starts
+					.filter((event) => event.operationId === operationId)
+					.map((event) => event.toolName),
+			).toEqual([
+				"list_projects",
+				"delete_project",
+				"index_repository",
+				"get_graph_schema",
+			]);
+		}
+	});
+
+	it("keeps an orphaned MCP child serialized after its CLI parent dies", async () => {
+		const first = startSchemaCli("orphan", { queryDelayMs: 1_000 });
+		await waitForOperationStart("orphan", "get_graph_schema");
+		expect(first.child.kill("SIGKILL")).toBe(true);
+		await first.result;
+
+		const successor = startSchemaCli("successor");
+		await delay(150);
+		expect(
+			readOperationEvents().some((event) => event.operationId === "successor"),
+		).toBe(false);
+		expect(await successor.result).toMatchObject({ status: 0 });
+
+		const events = readOperationEvents();
+		const orphanEnd = events.findIndex(
+			(event) =>
+				event.operationId === "orphan" &&
+				event.toolName === "get_graph_schema" &&
+				event.phase === "end",
+		);
+		const successorStart = events.findIndex(
+			(event) => event.operationId === "successor" && event.phase === "start",
+		);
+		expect(orphanEnd).toBeGreaterThanOrEqual(0);
+		expect(successorStart).toBeGreaterThan(orphanEnd);
+	});
+
 	it("rejects index responses without a project name", () => {
 		vi.stubEnv("CODEBASE_MEMORY_MOCK_NO_INDEX_PROJECT", "1");
 
-		expect(codebaseMemoryReadyProject(workDir)).toBeNull();
+		expect(
+			withFreshCodebaseMemoryProject(workDir, (project) => project),
+		).toBeNull();
 	});
 
 	it("rejects missing, nonterminal, and unknown index statuses", () => {
 		for (const status of ["", "indexing", "queued", "mystery"]) {
 			vi.stubEnv("CODEBASE_MEMORY_MOCK_INDEX_STATUS", status);
 
-			expect(codebaseMemoryReadyProject(workDir)).toBeNull();
+			expect(
+				withFreshCodebaseMemoryProject(workDir, (project) => project),
+			).toBeNull();
 		}
 	});
 
 	it("marks indexes with skipped files as partial", () => {
 		vi.stubEnv("CODEBASE_MEMORY_MOCK_SKIPPED_COUNT", "2");
 
-		expect(codebaseMemoryReadyProject(workDir)).toMatchObject({
+		expect(
+			withFreshCodebaseMemoryProject(workDir, (project) => project),
+		).toMatchObject({
 			name: "mock-project",
 			status: "partial",
 		});
@@ -606,6 +716,8 @@ describe("CodebaseMemory client", () => {
 			callers: ["callerOne"],
 			callees: ["calleeOne"],
 		});
+		expect(readDeleteCalls()).toHaveLength(1);
+		expect(readIndexCalls()).toHaveLength(1);
 	});
 
 	it("lets inspect fall back on unknown snippet payloads", () => {
@@ -713,14 +825,6 @@ describe("CodebaseMemory client", () => {
 		}
 	});
 
-	it("returns ready project metadata after the required index pass", () => {
-		expect(codebaseMemoryReadyProject(workDir)).toMatchObject({
-			name: "mock-project",
-			status: "ready",
-		});
-		expect(readIndexCalls()).toHaveLength(1);
-	});
-
 	it("prints memory status through the backend command surface", () => {
 		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 		try {
@@ -750,6 +854,27 @@ describe("CodebaseMemory client", () => {
 			expect(readIndexCalls()).toHaveLength(1);
 		} finally {
 			logSpy.mockRestore();
+		}
+	});
+
+	it("normalizes backend paths against symlinked project roots", () => {
+		const aliasRoot = `${workDir}-alias`;
+		symlinkSync(
+			workDir,
+			aliasRoot,
+			process.platform === "win32" ? "junction" : "dir",
+		);
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+		try {
+			expect(codebaseMemoryInspect(aliasRoot, "needle", 2)?.filePath).toBe(
+				"src/needle.ts",
+			);
+			expect(commandMemoryProjects({ projectRoot: aliasRoot })).toBe(0);
+			const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+			expect(output).toContain("current: mock-project");
+		} finally {
+			logSpy.mockRestore();
+			rmSync(aliasRoot, { force: true });
 		}
 	});
 
@@ -1020,6 +1145,122 @@ function readDeleteCalls(): unknown[] {
 		.map((line) => JSON.parse(line));
 }
 
+/** Reads child working directories recorded by the MCP test server. */
+function readChildCwds(): string[] {
+	const logPath = path.join(workDir, "child-cwds.jsonl");
+	if (!existsSync(logPath)) {
+		return [];
+	}
+	return readFileSync(logPath, "utf8")
+		.split(/\r?\n/)
+		.filter(Boolean)
+		.map((line) => JSON.parse(line));
+}
+
+type OperationEvent = {
+	operationId: string;
+	phase: "start" | "end";
+	toolName: string;
+};
+
+type SchemaCliResult = {
+	status: number | null;
+	stderr: string;
+	stdout: string;
+};
+
+/** Reads cross-process tool events emitted by the MCP test server. */
+function readOperationEvents(): OperationEvent[] {
+	const logPath = path.join(workDir, "operation-events.jsonl");
+	if (!existsSync(logPath)) {
+		return [];
+	}
+	return readFileSync(logPath, "utf8")
+		.split(/\r?\n/)
+		.filter(Boolean)
+		.map((line) => JSON.parse(line));
+}
+
+/** Runs the public schema command in a separate process for lock verification. */
+function runSchemaCli(operationId: string): Promise<SchemaCliResult> {
+	return startSchemaCli(operationId).result;
+}
+
+/** Starts a schema command and exposes its process for crash-path tests. */
+function startSchemaCli(
+	operationId: string,
+	{ queryDelayMs = 200 }: { queryDelayMs?: number } = {},
+) {
+	const child = spawn(
+		process.execPath,
+		[
+			"--import",
+			"tsx",
+			path.join(workspaceRoot, "src", "codemap", "cli.ts"),
+			"memory",
+			"schema",
+			"--project-root",
+			workDir,
+		],
+		{
+			cwd: workspaceRoot,
+			env: {
+				...process.env,
+				CBM_CACHE_DIR: path.join(workDir, "cbm-cache"),
+				CODEBASE_MEMORY_MOCK_INDEX_DELAY_MS: "100",
+				CODEBASE_MEMORY_MOCK_OPERATION_ID: operationId,
+				CODEBASE_MEMORY_MOCK_QUERY_DELAY_MS: String(queryDelayMs),
+				CODEMAP_CODEBASE_MEMORY: "1",
+				CODEMAP_CODEBASE_MEMORY_COMMAND: serverPath,
+			},
+		},
+	);
+	const result = new Promise<SchemaCliResult>((resolve, reject) => {
+		let stderr = "";
+		let stdout = "";
+		child.stderr.setEncoding("utf8");
+		child.stdout.setEncoding("utf8");
+		child.stderr.on("data", (chunk: string) => {
+			stderr += chunk;
+		});
+		child.stdout.on("data", (chunk: string) => {
+			stdout += chunk;
+		});
+		child.once("error", reject);
+		child.once("close", (status) => {
+			resolve({ status, stderr, stdout });
+		});
+	});
+	return { child, result };
+}
+
+/** Waits until one mock backend tool has entered its delayed work. */
+async function waitForOperationStart(
+	operationId: string,
+	toolName: string,
+): Promise<void> {
+	const deadline = Date.now() + 5_000;
+	while (Date.now() <= deadline) {
+		if (
+			readOperationEvents().some(
+				(event) =>
+					event.operationId === operationId &&
+					event.toolName === toolName &&
+					event.phase === "start",
+			)
+		) {
+			return;
+		}
+		await delay(10);
+	}
+	throw new Error(`Timed out waiting for ${operationId}:${toolName}`);
+}
+
+/** Yields briefly while process-level test fixtures make progress. */
+function delay(milliseconds: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
 /** Builds a tiny newline JSON-RPC server for CodebaseMemory tool calls. */
 function mockServerSource(): string {
 	return `#!/usr/bin/env node
@@ -1037,6 +1278,29 @@ const toolArgs = toolCall?.params?.arguments ?? {};
 const root = process.env.CODEBASE_MEMORY_MOCK_ROOT ?? ${JSON.stringify(workDir)};
 const indexLogPath = ${JSON.stringify(path.join(workDir, "index-calls.jsonl"))};
 const deleteLogPath = ${JSON.stringify(path.join(workDir, "delete-calls.jsonl"))};
+const cwdLogPath = ${JSON.stringify(path.join(workDir, "child-cwds.jsonl"))};
+fs.appendFileSync(cwdLogPath, JSON.stringify(process.cwd()) + "\\n");
+const operationId = process.env.CODEBASE_MEMORY_MOCK_OPERATION_ID;
+if (operationId) {
+  const eventLogPath = ${JSON.stringify(path.join(workDir, "operation-events.jsonl"))};
+  const appendEvent = (phase) =>
+    fs.appendFileSync(
+      eventLogPath,
+      JSON.stringify({ operationId, phase, toolName }) + "\\n",
+    );
+  appendEvent("start");
+  const delayMs = Number(
+    toolName === "index_repository"
+      ? process.env.CODEBASE_MEMORY_MOCK_INDEX_DELAY_MS ?? 0
+      : toolName === "get_graph_schema"
+        ? process.env.CODEBASE_MEMORY_MOCK_QUERY_DELAY_MS ?? 0
+        : 0,
+  );
+  if (delayMs > 0) {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delayMs);
+  }
+  appendEvent("end");
+}
 const payloads = {
   index_repository: {
 	project: process.env.CODEBASE_MEMORY_MOCK_NO_INDEX_PROJECT === "1" ? null : "mock-project",
