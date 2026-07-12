@@ -1,4 +1,4 @@
-/** Re-exports the shared ast-grep adapter and rendering surface. */
+/** Re-exports the shared ast-grep adapter surface. */
 export type { SyntaxMatch } from "./adapter.js";
 export {
 	astGrepRoot,
@@ -15,4 +15,3 @@ export {
 	targetFiles,
 	targetLanguages,
 } from "./adapter.js";
-export { matchJson, printSyntaxMatches } from "./render.js";

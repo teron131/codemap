@@ -1,4 +1,5 @@
 /** Builds canonical current-tree graph payloads and relationship helpers. */
+import { DETAILED_ANALYSIS_FILE_LIMIT } from "../../common.js";
 import type { ScanEntry } from "../extraction/index.js";
 import {
 	type ImportMapPayload,
@@ -7,7 +8,7 @@ import {
 	runStructure,
 } from "../extraction/index.js";
 import type { StructureEntry } from "./builder.js";
-import { buildNodesAndEdges } from "./builder.js";
+import { buildNodesAndEdges, fileNode } from "./builder.js";
 import type {
 	GraphEdge,
 	GraphNode,
@@ -76,6 +77,38 @@ export function currentTreeGraph(
 		pythonTreesByPath: importResult._pythonTrees,
 	});
 	return buildGraphPayload(scan, structure, importResult, { emitPaths });
+}
+
+/** Builds summary graph evidence, using path-ranked inventory above the detailed-analysis limit. */
+export function currentTreeSummaryGraph(
+	root: string,
+	scan: ReturnType<typeof runScan> = runScan(root),
+): GraphPayload {
+	if (scan.files.length <= DETAILED_ANALYSIS_FILE_LIMIT) {
+		return currentTreeGraph(root);
+	}
+	const nodes = scan.files.map((entry) =>
+		fileNode(entry.path, entry, null, []),
+	);
+	return {
+		stats: {
+			files: scan.files.length,
+			nodes: nodes.length,
+			edges: 0,
+			nodeTypes: countBy(nodes, (node) => node.type),
+			edgeTypes: {},
+			languages: scan.stats.byLanguage,
+			categories: scan.stats.byCategory,
+		},
+		nodes,
+		edges: [],
+		evidence: {
+			importMap: {
+				mode: "lightweight-summary",
+				reason: `skipped detailed graph above ${DETAILED_ANALYSIS_FILE_LIMIT} files`,
+			},
+		},
+	};
 }
 
 /** Builds the canonical graph payload from scan, import, and structure data. */

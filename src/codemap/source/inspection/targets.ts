@@ -7,6 +7,25 @@ import type { ScanEntry, ScanPayload } from "../extraction/index.js";
 import type { GraphNode } from "../graph/index.js";
 import { type FileMetrics, scanFile } from "../scanner/index.js";
 
+type InspectTargetKind = "directory" | "file";
+
+/** Classifies a target that directly names a filesystem path. */
+export function inspectPathTargetKind(
+	root: string,
+	target: string,
+): InspectTargetKind | null {
+	const targetPath = path.resolve(root, target);
+	try {
+		const stats = statSync(targetPath);
+		if (stats.isDirectory()) {
+			return "directory";
+		}
+		return stats.isFile() ? "file" : null;
+	} catch {
+		return null;
+	}
+}
+
 /** Converts inspect targets into normalized slash-separated paths. */
 export function normalizeTarget(root: string, target: string): string {
 	const expanded = expandUser(target);
