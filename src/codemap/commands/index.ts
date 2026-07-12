@@ -1,15 +1,16 @@
 /** Re-exports command parsers, dispatchers, and handlers. */
+
+export {
+	addBackendParsers,
+	commandBackendChanges,
+	commandBackendProjects,
+	commandBackendQuery,
+	commandBackendSchema,
+	commandBackendStatus,
+} from "./backend.js";
 export { buildParser, dispatch, main, run } from "./cli.js";
 export { addIndexParser, commandIndex } from "./index-memory.js";
 export { addInspectParser, commandInspect } from "./inspect.js";
-export {
-	addMemoryParsers,
-	commandMemoryChanges,
-	commandMemoryProjects,
-	commandMemoryQuery,
-	commandMemorySchema,
-	commandMemoryStatus,
-} from "./memory.js";
 export { addProjectRootArgument, PROJECT_ROOT_HELP } from "./options.js";
 export {
 	addSearchParser,
