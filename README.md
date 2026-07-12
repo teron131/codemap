@@ -2,7 +2,7 @@
 
 Codemap is an opinionated, token-conscious wrapper around Codebase Memory MCP, `rg`, and ast-grep for Python and TypeScript/JavaScript codebases. Codebase Memory supplies indexed graph intelligence, `rg` remains the exact-text baseline, and ast-grep owns built-in JavaScript/TypeScript structural search.
 
-Codemap does not own a persistent graph store. Every graph-backed command clears this root's operational Codebase Memory cache entry, indexes once with `persistence: false`, uses that fresh snapshot for the command, and falls back to current-tree evidence where a local answer exists.
+Codemap does not own a persistent graph store or rely on Codebase Memory's session auto-indexing. Every Codemap graph-backed operation serializes access to this root, clears its matching operational Codebase Memory cache entry when present, indexes once with `persistence: false`, reuses that clean snapshot for all backend queries in the operation, and falls back to current-tree evidence where a local answer exists.
 
 ## Product Contract
 
@@ -65,7 +65,8 @@ Detailed sections remain explicit for narrower investigations: `relationships`, 
 
 ```mermaid
 flowchart LR
-    CLI["Codemap command"] --> RESET["delete matching cache entry"]
+    CLI["Codemap command"] --> LOCK["lock root in system cache"]
+    LOCK --> RESET["delete matching cache entry"]
     RESET --> INDEX["index_repository persistence=false"]
     INDEX --> CBM["Codebase Memory query"]
     CBM --> NORMALIZE["feature-owned compact result"]
@@ -74,7 +75,7 @@ flowchart LR
     NORMALIZE --> JSON["normalized JSON"]
 ```
 
-`src/codemap/codebase-memory` owns MCP transport, indexing, payload validation, and backend result normalization. Search, inspect, signals, summary, and memory commands own their selection and presentation policy.
+`src/codemap/codebase-memory` owns MCP transport, manual clean-index lifecycle, cross-process root serialization, payload validation, and backend result normalization. Its short-lived MCP children start outside the target repository so upstream session auto-indexing and watching do not race the explicit lifecycle. Search, inspect, signals, summary, and memory commands own their selection and presentation policy.
 
 ## Limits
 
