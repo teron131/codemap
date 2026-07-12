@@ -1,27 +1,106 @@
-/** Formats inspection profiles and related graph context as text. */
+/** Builds and formats current-tree inspection profiles and related graph context. */
 import path from "node:path";
 
+import { DETAILED_ANALYSIS_FILE_LIMIT } from "../../common.js";
 import {
+	buildLikelyEntries,
+	buildPathRankedLikelyEntries,
+} from "../../rendering/index.js";
+import { runScan } from "../extraction/index.js";
+import {
+	currentTreeSummaryGraph,
 	type GraphEdge,
 	type GraphNode,
 	type GraphPayload,
 	relatedEdges,
 } from "../graph/index.js";
 import { docstringForSymbol } from "../signals/docstrings/index.js";
+import { currentTreeInspectGraph } from "./graph.js";
 import {
 	appendFileProfile,
+	appendLikelyEntryContext,
 	appendSymbolProfile,
 	fileMetricsForPath,
+	type LikelyEntryContext,
 	renderDirectoryProfile,
+	renderLightweightDirectoryInspection,
+	renderLightweightFileInspection,
 	renderVariableProfile,
 } from "./profiles.js";
-import { inspectCandidates, nodeLabel, normalizeTarget } from "./targets.js";
+import {
+	inspectCandidates,
+	inspectPathTargetKind,
+	nodeLabel,
+	normalizeTarget,
+} from "./targets.js";
 
-export type LikelyEntryContext = {
-	role?: unknown;
-	reason?: unknown;
-	description?: unknown;
-};
+/** Runs the current-tree inspect workflow without command-specific fallback text. */
+export function renderCurrentTreeInspection(
+	root: string,
+	target: string,
+	{ limit }: { limit: number },
+): string | null {
+	const pathTargetKind = inspectPathTargetKind(root, target);
+	let pathTargetScan: ReturnType<typeof runScan> | null = null;
+	if (pathTargetKind !== null) {
+		const scan = runScan(root);
+		pathTargetScan = scan;
+		if (scan.files.length > DETAILED_ANALYSIS_FILE_LIMIT) {
+			const likelyEntries = likelyEntryContextByFile(
+				currentTreeSummaryGraph(root, scan),
+			);
+			const inspection =
+				pathTargetKind === "directory"
+					? renderLightweightDirectoryInspection(root, target, scan.files, {
+							limit,
+						})
+					: renderLightweightFileInspection(root, target, scan.files, {
+							limit,
+							likelyEntries,
+						});
+			if (inspection !== null) {
+				return inspection;
+			}
+		}
+	}
+	const [graph, metrics] = currentTreeInspectGraph(
+		root,
+		target,
+		pathTargetScan,
+	);
+	return renderInspection(root, graph, metrics, target, {
+		limit,
+		likelyEntries: likelyEntryContextByFile(graph),
+	});
+}
+
+/** Builds likely-entry context keyed by source file path from graph evidence. */
+function likelyEntryContextByFile(
+	graph: GraphPayload,
+): Record<string, LikelyEntryContext> {
+	const importMapEvidence = recordValue(graph.evidence.importMap);
+	const entries =
+		importMapEvidence.mode === "lightweight-summary"
+			? buildPathRankedLikelyEntries(graph.nodes)
+			: buildLikelyEntries(graph.nodes, graph.edges);
+	const byFile: Record<string, LikelyEntryContext> = {};
+	for (const entry of entries) {
+		if (entry === null || typeof entry !== "object") {
+			continue;
+		}
+		const row = entry as Record<string, unknown>;
+		const filePath = String(row.title ?? "");
+		if (!filePath) {
+			continue;
+		}
+		byFile[filePath] = {
+			role: row.role,
+			reason: row.reason,
+			description: row.description,
+		};
+	}
+	return byFile;
+}
 
 /** Renders the opposite endpoint and direction for a graph edge. */
 export function edgeEndpoint(
@@ -218,33 +297,6 @@ export function renderInspection(
 		.trim();
 }
 
-/** Appends likely-entry navigation context for inspected files. */
-export function appendLikelyEntryContext(
-	lines: string[],
-	context: LikelyEntryContext | undefined,
-): void {
-	if (context === undefined) {
-		return;
-	}
-	const role = String(context.role ?? "").trim();
-	const reason = String(context.reason ?? "").trim();
-	const description = String(context.description ?? "").trim();
-	if (!role && !reason && !description) {
-		return;
-	}
-	lines.push("");
-	lines.push("## Navigation Context");
-	if (role) {
-		lines.push(`- role: ${role}`);
-	}
-	if (reason) {
-		lines.push(`- why: ${reason}`);
-	}
-	if (description) {
-		lines.push(`- evidence: ${description}`);
-	}
-}
-
 /** Appends the target symbol's source docstring or declaration comment. */
 function appendDocstringSection(
 	lines: string[],
@@ -288,6 +340,13 @@ function compactDocstringLines(docstring: string): string[] {
 		shown.push("...");
 	}
 	return shown;
+}
+
+/** Reads a record field from untrusted graph evidence. */
+function recordValue(value: unknown): Record<string, unknown> {
+	return value !== null && typeof value === "object" && !Array.isArray(value)
+		? (value as Record<string, unknown>)
+		: {};
 }
 
 /** Marks list sections that were shortened by the display limit. */

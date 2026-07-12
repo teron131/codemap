@@ -28,6 +28,13 @@ import { buildUsageSection } from "./usage.js";
 
 type Row = SignalRow;
 
+const SIGNAL_EXPORT_SECTIONS = [
+	"relationships",
+	"usage",
+	"function-lengths",
+	"file-profiles",
+] as const;
+
 /** Summarizes import, entrypoint, AGENTS, and source relationship counts. */
 function buildRelationshipsSection(
 	displayFiles: string[],
@@ -203,6 +210,24 @@ export function buildSignalExport(
 		sections.docstrings = buildDocstringsData(targetPath);
 	}
 	return { sections };
+}
+
+/** Builds the full signal export with a stable status and error envelope. */
+export function runSignalsExport(root: string): Row {
+	try {
+		const payload = buildSignalExport(root, {
+			sectionMode: [...SIGNAL_EXPORT_SECTIONS],
+		});
+		return {
+			...payload,
+			status: "ok",
+		};
+	} catch (error) {
+		return {
+			status: "error",
+			message: error instanceof Error ? error.message : String(error),
+		};
+	}
 }
 
 /** Totals line counts from rows that expose a numeric length field. */

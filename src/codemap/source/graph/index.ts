@@ -20,6 +20,7 @@ export {
 export {
 	buildGraphPayload,
 	currentTreeGraph,
+	currentTreeSummaryGraph,
 	graphStats,
 	relatedEdges,
 } from "./canonical.js";

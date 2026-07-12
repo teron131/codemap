@@ -67,6 +67,29 @@ describe("search command handler", () => {
 		expect(output).not.toContain("const untouched = helper;");
 	});
 
+	it("marks hidden continuation lines in structural-search output", async () => {
+		writeFileSync(
+			path.join(workDir, "src", "calls.ts"),
+			["const value = 'visible';", "console.log(", "  value,", ");"].join("\n"),
+			"utf8",
+		);
+
+		await expect(
+			dispatch(buildParser(), [
+				"node",
+				"codemap",
+				"search",
+				"calls",
+				"--project-root",
+				workDir,
+				"console.log",
+				"src/calls.ts",
+			]),
+		).resolves.toBe(0);
+
+		expect(logLines()).toEqual(["src/calls.ts:2:1: console.log( ..."]);
+	});
+
 	it("bounds default call-site output", async () => {
 		writeFileSync(
 			path.join(workDir, "src", "many-calls.ts"),
