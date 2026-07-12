@@ -30,13 +30,14 @@ import {
 	renderCodebaseMemoryInspect,
 } from "../src/codemap/codebase-memory/render.js";
 import {
+	buildParser,
+	commandBackendChanges,
+	commandBackendProjects,
+	commandBackendQuery,
+	commandBackendSchema,
+	commandBackendStatus,
 	commandIndex,
 	commandInspect,
-	commandMemoryChanges,
-	commandMemoryProjects,
-	commandMemoryQuery,
-	commandMemorySchema,
-	commandMemoryStatus,
 	commandSignals,
 } from "../src/codemap/commands/index.js";
 
@@ -66,6 +67,15 @@ afterEach(() => {
 });
 
 describe("CodebaseMemory client", () => {
+	it("exposes the backend namespace without a memory alias", () => {
+		const commandNames = buildParser().commands.map((command) =>
+			command.name(),
+		);
+
+		expect(commandNames).toContain("backend");
+		expect(commandNames).not.toContain("memory");
+	});
+
 	it("normalizes query columns and rows into records", () => {
 		expect(
 			codebaseMemoryQueryRows({
@@ -825,10 +835,10 @@ describe("CodebaseMemory client", () => {
 		}
 	});
 
-	it("prints memory status through the backend command surface", () => {
+	it("prints status through the backend command surface", () => {
 		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 		try {
-			expect(commandMemoryStatus({ projectRoot: workDir })).toBe(0);
+			expect(commandBackendStatus({ projectRoot: workDir })).toBe(0);
 			const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
 
 			expect(output).toContain("CodebaseMemory index: mock-project");
@@ -839,10 +849,10 @@ describe("CodebaseMemory client", () => {
 		}
 	});
 
-	it("prints backend project list through the memory command surface", () => {
+	it("prints project lists through the backend command surface", () => {
 		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 		try {
-			expect(commandMemoryProjects({ projectRoot: workDir })).toBe(0);
+			expect(commandBackendProjects({ projectRoot: workDir })).toBe(0);
 			const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
 
 			expect(output).toContain("CodebaseMemory projects: 11 (hidden work: 1)");
@@ -869,7 +879,7 @@ describe("CodebaseMemory client", () => {
 			expect(codebaseMemoryInspect(aliasRoot, "needle", 2)?.filePath).toBe(
 				"src/needle.ts",
 			);
-			expect(commandMemoryProjects({ projectRoot: aliasRoot })).toBe(0);
+			expect(commandBackendProjects({ projectRoot: aliasRoot })).toBe(0);
 			const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
 			expect(output).toContain("current: mock-project");
 		} finally {
@@ -878,10 +888,10 @@ describe("CodebaseMemory client", () => {
 		}
 	});
 
-	it("prints backend graph schema through the memory command surface", () => {
+	it("prints graph schema through the backend command surface", () => {
 		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 		try {
-			expect(commandMemorySchema({ projectRoot: workDir })).toBe(0);
+			expect(commandBackendSchema({ projectRoot: workDir })).toBe(0);
 			const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
 
 			expect(output).toContain(
@@ -895,11 +905,11 @@ describe("CodebaseMemory client", () => {
 		}
 	});
 
-	it("runs backend graph queries through the memory command surface", () => {
+	it("runs graph queries through the backend command surface", () => {
 		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 		try {
 			expect(
-				commandMemoryQuery(["MATCH", "(f:Function)", "RETURN", "f.name"], {
+				commandBackendQuery(["MATCH", "(f:Function)", "RETURN", "f.name"], {
 					projectRoot: workDir,
 					maxRows: 2,
 				}),
@@ -919,7 +929,7 @@ describe("CodebaseMemory client", () => {
 		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 		try {
 			expect(
-				commandMemoryQuery(["MATCH", "(n)", "RETURN", "labels(n)"], {
+				commandBackendQuery(["MATCH", "(n)", "RETURN", "labels(n)"], {
 					projectRoot: workDir,
 					maxRows: 1,
 				}),
@@ -938,7 +948,7 @@ describe("CodebaseMemory client", () => {
 		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 		try {
 			expect(
-				commandMemoryQuery(["MATCH", "(n)", "RETURN", "labels(n), n.name"], {
+				commandBackendQuery(["MATCH", "(n)", "RETURN", "labels(n), n.name"], {
 					projectRoot: workDir,
 					maxRows: 5,
 				}),
@@ -959,7 +969,7 @@ describe("CodebaseMemory client", () => {
 		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 		try {
 			expect(
-				commandMemoryQuery(["MATCH", "(f)", "DELETE", "f"], {
+				commandBackendQuery(["MATCH", "(f)", "DELETE", "f"], {
 					projectRoot: workDir,
 				}),
 			).toBe(2);
@@ -972,11 +982,11 @@ describe("CodebaseMemory client", () => {
 		}
 	});
 
-	it("prints backend change impact through the memory command surface", () => {
+	it("prints change impact through the backend command surface", () => {
 		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 		try {
 			expect(
-				commandMemoryChanges({
+				commandBackendChanges({
 					projectRoot: workDir,
 					since: "HEAD~1",
 					depth: 2,
@@ -997,7 +1007,7 @@ describe("CodebaseMemory client", () => {
 		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 		try {
 			expect(
-				commandMemoryChanges({
+				commandBackendChanges({
 					projectRoot: workDir,
 					depth: 2,
 				}),
@@ -1202,7 +1212,7 @@ function startSchemaCli(
 			"--import",
 			"tsx",
 			path.join(workspaceRoot, "src", "codemap", "cli.ts"),
-			"memory",
+			"backend",
 			"schema",
 			"--project-root",
 			workDir,

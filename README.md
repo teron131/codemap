@@ -7,7 +7,7 @@ Codemap does not own a persistent graph store or rely on Codebase Memory's sessi
 ## Product Contract
 
 - Default text is the main agent-facing representation: compact, ranked, and evidence-only.
-- Stable row surfaces (`signals`, structural matches, and call matches) offer compact normalized JSON for `jq`; composed orientation and inspection stay text-only instead of maintaining a second noisy contract. Raw backend JSON is reserved for `memory query --json` and `memory changes --json`.
+- Stable row surfaces (`signals`, structural matches, and call matches) offer compact normalized JSON for `jq`; composed orientation and inspection stay text-only instead of maintaining a second noisy contract. Raw backend JSON is reserved for `backend query --json` and `backend changes --json`.
 - `signals` selects evidence that implies what deserves review without printing advice or prompts.
 - `search calls` never changes into a backend caller/callee trace; every row names its source matching engine.
 - Backend failures and unknown payloads fail closed so local fallbacks are not suppressed.
@@ -32,7 +32,7 @@ npm install -g .
 | `search match` / `search rule` | ast-grep | Built-in JS/TS structural discovery; simple Python patterns require the ast-grep CLI. |
 | `inspect <target>` | Codebase Memory for symbols, current tree for paths and fallback | Focused in-to-out neighborhood inspection. |
 | `signals` | Codebase Memory function metrics plus current-tree definitions | Up to twenty useful rows in each nonempty default evidence bucket. |
-| `memory ...` | Raw Codebase Memory diagnostics | Projects, status, schema, Cypher queries, and change impact. |
+| `backend ...` | Raw Codebase Memory diagnostics | Projects, status, schema, Cypher queries, and change impact. |
 | `index` | Codebase Memory indexing | Explicit refresh timing and status. |
 
 ## Refactor Signals
@@ -65,7 +65,7 @@ Detailed sections remain explicit for narrower investigations: `relationships`, 
 
 ## Backend Boundary
 
-`src/codemap/codebase-memory` owns MCP transport, manual clean-index lifecycle, cross-process root serialization, payload validation, and backend result normalization. Its short-lived MCP children start outside the target repository so upstream session auto-indexing and watching do not race the explicit lifecycle. Search, inspect, signals, summary, and memory commands own their selection and presentation policy.
+`src/codemap/codebase-memory` owns MCP transport, manual clean-index lifecycle, cross-process root serialization, payload validation, and backend result normalization. Its short-lived MCP children start outside the target repository so upstream session auto-indexing and watching do not race the explicit lifecycle. Search, inspect, signals, summary, and backend commands own their selection and presentation policy.
 
 The implementation journey, settled constraints, and evidence required for future enhancements are recorded in [`docs/IDEAS.md`](docs/IDEAS.md).
 

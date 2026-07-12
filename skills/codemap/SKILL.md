@@ -117,11 +117,11 @@ Python `search calls` uses the CLI when installed and otherwise labels approxima
 
 ```sh
 codemap index --project-root <path>
-codemap memory status --project-root <path>
-codemap memory schema --project-root <path>
-codemap memory projects --project-root <path>
-codemap memory changes --since <ref> --depth <count> --project-root <path>
-codemap memory query --json --max-rows <count> --project-root <path> "<read-only Cypher>"
+codemap backend status --project-root <path>
+codemap backend schema --project-root <path>
+codemap backend projects --project-root <path>
+codemap backend changes --since <ref> --depth <count> --project-root <path>
+codemap backend query --json --max-rows <count> --project-root <path> "<read-only Cypher>"
 ```
 
 Use `index` to measure explicit refresh timing, `status` or `schema` to diagnose backend readiness, `changes` for backend changed-code impact, and raw `query --json` only as an escape hatch. Short-lived MCP children start outside the target repository so upstream watching cannot race the explicit lifecycle. A partial index may retain useful backend evidence; a missing backend degrades to current-tree evidence where a local answer exists.

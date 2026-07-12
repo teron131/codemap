@@ -12,16 +12,16 @@ import {
 import { resolveProjectRoot } from "../common.js";
 import { addProjectRootArgument, parseIntegerOption } from "./options.js";
 
-type MemoryOptions = {
+type BackendOptions = {
 	projectRoot?: string;
 };
 
-type MemoryQueryOptions = MemoryOptions & {
+type BackendQueryOptions = BackendOptions & {
 	maxRows?: number;
 	json?: boolean;
 };
 
-type MemoryChangesOptions = MemoryOptions & {
+type BackendChangesOptions = BackendOptions & {
 	scope?: string;
 	depth?: number;
 	baseBranch?: string;
@@ -34,16 +34,16 @@ type RootOptions = {
 };
 
 /** Registers Codebase Memory backend commands. */
-export function addMemoryParsers(program: Command): void {
-	const memory = program
-		.command("memory")
+export function addBackendParsers(program: Command): void {
+	const backend = program
+		.command("backend")
 		.description("Inspect the Codebase Memory backend used by Codemap.");
 
-	const memoryProjects = memory
+	const backendProjects = backend
 		.command("projects")
 		.description("Index this root, then list Codebase Memory projects.")
-		.action((options: MemoryOptions) => {
-			const exitCode = commandMemoryProjects(
+		.action((options: BackendOptions) => {
+			const exitCode = commandBackendProjects(
 				options,
 				program.opts<RootOptions>(),
 			);
@@ -51,13 +51,13 @@ export function addMemoryParsers(program: Command): void {
 				process.exitCode = exitCode;
 			}
 		});
-	addProjectRootArgument(memoryProjects);
+	addProjectRootArgument(backendProjects);
 
-	const memoryStatus = memory
+	const backendStatus = backend
 		.command("status")
 		.description("Index first, then print Codebase Memory backend status.")
-		.action((options: MemoryOptions) => {
-			const exitCode = commandMemoryStatus(
+		.action((options: BackendOptions) => {
+			const exitCode = commandBackendStatus(
 				options,
 				program.opts<RootOptions>(),
 			);
@@ -65,13 +65,13 @@ export function addMemoryParsers(program: Command): void {
 				process.exitCode = exitCode;
 			}
 		});
-	addProjectRootArgument(memoryStatus);
+	addProjectRootArgument(backendStatus);
 
-	const memorySchema = memory
+	const backendSchema = backend
 		.command("schema")
 		.description("Index first, then print Codebase Memory graph schema.")
-		.action((options: MemoryOptions) => {
-			const exitCode = commandMemorySchema(
+		.action((options: BackendOptions) => {
+			const exitCode = commandBackendSchema(
 				options,
 				program.opts<RootOptions>(),
 			);
@@ -79,9 +79,9 @@ export function addMemoryParsers(program: Command): void {
 				process.exitCode = exitCode;
 			}
 		});
-	addProjectRootArgument(memorySchema);
+	addProjectRootArgument(backendSchema);
 
-	const memoryQuery = memory
+	const backendQuery = backend
 		.command("query")
 		.description("Run a read-oriented Codebase Memory Cypher query.")
 		.argument("<query...>", "Cypher query text.")
@@ -91,8 +91,8 @@ export function addMemoryParsers(program: Command): void {
 			parseIntegerOption,
 		)
 		.option("--json", "Print raw JSON output.")
-		.action((query: string[], options: MemoryQueryOptions) => {
-			const exitCode = commandMemoryQuery(
+		.action((query: string[], options: BackendQueryOptions) => {
+			const exitCode = commandBackendQuery(
 				query,
 				options,
 				program.opts<RootOptions>(),
@@ -101,9 +101,9 @@ export function addMemoryParsers(program: Command): void {
 				process.exitCode = exitCode;
 			}
 		});
-	addProjectRootArgument(memoryQuery);
+	addProjectRootArgument(backendQuery);
 
-	const memoryChanges = memory
+	const backendChanges = backend
 		.command("changes")
 		.description("Run Codebase Memory changed-code impact analysis.")
 		.option("--scope <scope>", "Optional project scope for change analysis.")
@@ -111,8 +111,8 @@ export function addMemoryParsers(program: Command): void {
 		.option("--base-branch <branch>", "Git base branch.", "main")
 		.option("--since <ref>", "Git ref or date to compare from.")
 		.option("--json", "Print raw JSON output.")
-		.action((options: MemoryChangesOptions) => {
-			const exitCode = commandMemoryChanges(
+		.action((options: BackendChangesOptions) => {
+			const exitCode = commandBackendChanges(
 				options,
 				program.opts<RootOptions>(),
 			);
@@ -120,15 +120,15 @@ export function addMemoryParsers(program: Command): void {
 				process.exitCode = exitCode;
 			}
 		});
-	addProjectRootArgument(memoryChanges);
+	addProjectRootArgument(backendChanges);
 }
 
 /** Lists Codebase Memory projects after refreshing the current project root. */
-export function commandMemoryProjects(
-	options: MemoryOptions,
+export function commandBackendProjects(
+	options: BackendOptions,
 	rootOptions: RootOptions = {},
 ): number {
-	const root = resolveMemoryRoot(options, rootOptions);
+	const root = resolveBackendRoot(options, rootOptions);
 	if (printCodebaseMemoryProjects(root)) {
 		return 0;
 	}
@@ -139,11 +139,11 @@ export function commandMemoryProjects(
 }
 
 /** Prints Codebase Memory backend status for the project root. */
-export function commandMemoryStatus(
-	options: MemoryOptions,
+export function commandBackendStatus(
+	options: BackendOptions,
 	rootOptions: RootOptions = {},
 ): number {
-	const root = resolveMemoryRoot(options, rootOptions);
+	const root = resolveBackendRoot(options, rootOptions);
 	if (printCodebaseMemoryStatus(root)) {
 		return 0;
 	}
@@ -154,11 +154,11 @@ export function commandMemoryStatus(
 }
 
 /** Prints Codebase Memory graph schema for the project root. */
-export function commandMemorySchema(
-	options: MemoryOptions,
+export function commandBackendSchema(
+	options: BackendOptions,
 	rootOptions: RootOptions = {},
 ): number {
-	const root = resolveMemoryRoot(options, rootOptions);
+	const root = resolveBackendRoot(options, rootOptions);
 	if (printCodebaseMemorySchema(root)) {
 		return 0;
 	}
@@ -169,23 +169,23 @@ export function commandMemorySchema(
 }
 
 /** Runs a Codebase Memory Cypher query for the project root. */
-export function commandMemoryQuery(
+export function commandBackendQuery(
 	query: string[],
-	options: MemoryQueryOptions,
+	options: BackendQueryOptions,
 	rootOptions: RootOptions = {},
 ): number {
 	const queryText = query.join(" ").trim();
 	if (queryText.length === 0) {
-		console.log("Memory query requires Cypher text.");
+		console.log("Backend query requires Cypher text.");
 		return 2;
 	}
 	if (mutatesGraph(queryText)) {
 		console.log(
-			"Memory query accepts read-oriented Cypher only; refusing a mutating graph query.",
+			"Backend query accepts read-oriented Cypher only; refusing a mutating graph query.",
 		);
 		return 2;
 	}
-	const root = resolveMemoryRoot(options, rootOptions);
+	const root = resolveBackendRoot(options, rootOptions);
 	if (
 		printCodebaseMemoryQuery(root, queryText, {
 			jsonOutput: Boolean(options.json),
@@ -201,14 +201,14 @@ export function commandMemoryQuery(
 }
 
 /** Runs Codebase Memory changed-code impact analysis. */
-export function commandMemoryChanges(
-	options: MemoryChangesOptions,
+export function commandBackendChanges(
+	options: BackendChangesOptions,
 	rootOptions: RootOptions = {},
 ): number {
-	const root = resolveMemoryRoot(options, rootOptions);
+	const root = resolveBackendRoot(options, rootOptions);
 	if (
 		printCodebaseMemoryChanges(root, {
-			...memoryChangeOptions(options),
+			...backendChangeOptions(options),
 			jsonOutput: Boolean(options.json),
 		})
 	) {
@@ -228,8 +228,8 @@ function mutatesGraph(query: string): boolean {
 }
 
 /** Builds Codebase Memory change options without explicit undefined fields. */
-function memoryChangeOptions(
-	options: MemoryChangesOptions,
+function backendChangeOptions(
+	options: BackendChangesOptions,
 ): CodebaseMemoryChangeOptions {
 	return {
 		...(options.scope !== undefined ? { scope: options.scope } : {}),
@@ -241,9 +241,9 @@ function memoryChangeOptions(
 	};
 }
 
-/** Resolves command-local or global project-root options for memory commands. */
-function resolveMemoryRoot(
-	options: MemoryOptions,
+/** Resolves command-local or global project-root options for backend commands. */
+function resolveBackendRoot(
+	options: BackendOptions,
 	rootOptions: RootOptions,
 ): string {
 	return resolveProjectRoot(options.projectRoot ?? rootOptions.projectRoot);
