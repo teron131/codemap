@@ -21,88 +21,15 @@ import {
 import {
 	buildDocstringSignals,
 	buildDocstringsData,
-	buildFilePreviews,
 	DOCSTRING_SUFFIXES,
 } from "./docstrings/index.js";
-import type { DenseFileRow, SignalFocusEntry, SignalRow } from "./schema.js";
+import type { DenseFileRow, SignalRow } from "./schema.js";
 import { buildUsageSection } from "./usage.js";
-
-export const SUMMARY_SECTIONS = [
-	"filesystem",
-	"relationships",
-	"docstring-signals",
-	"likely-main",
-	"usage",
-	"function-lengths",
-] as const;
-
-export const ALL_SECTIONS = [
-	"filesystem",
-	"relationships",
-	"docstring-signals",
-	"likely-main",
-	"file-profiles",
-	"usage",
-	"function-lengths",
-	"docstrings",
-] as const;
 
 type Row = SignalRow;
 
-/** Expands signal section modes into concrete section names. */
-export function selectedSections(sectionMode: string | string[]): string[] {
-	const requestedModes = Array.isArray(sectionMode)
-		? sectionMode
-		: [sectionMode];
-	const sections: string[] = [];
-	for (const mode of requestedModes) {
-		const candidates =
-			mode === "summary"
-				? SUMMARY_SECTIONS
-				: mode === "all"
-					? ALL_SECTIONS
-					: [mode];
-		for (const section of candidates) {
-			if (!sections.includes(section)) {
-				sections.push(section);
-			}
-		}
-	}
-	return sections;
-}
-
-/** Summarizes selected files by directories, extensions, and root folders. */
-export function buildFilesystemSection(displayFiles: string[]): Row {
-	const dirPaths = new Set(
-		displayFiles.map((filePath) => {
-			const dirname = path.dirname(filePath);
-			return dirname === "." ? "." : dirname;
-		}),
-	);
-	const fileTypes = new Map<string, number>();
-	const rootHotspots = new Map<string, number>();
-	for (const filePath of displayFiles) {
-		const basename = path.basename(filePath);
-		const ext = basename.includes(".")
-			? (basename.split(".").at(-1) ?? "")
-			: "no_ext";
-		fileTypes.set(ext, (fileTypes.get(ext) ?? 0) + 1);
-		const root = filePath.includes("/")
-			? (filePath.split("/", 1)[0] ?? ".")
-			: ".";
-		rootHotspots.set(root, (rootHotspots.get(root) ?? 0) + 1);
-	}
-	return {
-		dir_count: dirPaths.size,
-		file_count: displayFiles.length,
-		file_types: sortedCounterRows(fileTypes, "ext"),
-		root_hotspots: sortedCounterRows(rootHotspots, "root"),
-		files: displayFiles,
-	};
-}
-
-/** Summarizes import, entrypoint, AGENTS, and reference relationship counts. */
-export function buildRelationshipsSection(
+/** Summarizes import, entrypoint, AGENTS, and source relationship counts. */
+function buildRelationshipsSection(
 	displayFiles: string[],
 	scannedFiles: FileMetrics[],
 	fileProfileRows: DenseFileRow[],
@@ -145,7 +72,7 @@ export function buildRelationshipsSection(
 }
 
 /** Builds the empty docstring signal payload shape. */
-export function buildEmptyDocstringSignals(): Row {
+function buildEmptyDocstringSignals(): Row {
 	return {
 		files_considered: 0,
 		python_files_considered: 0,
@@ -157,7 +84,7 @@ export function buildEmptyDocstringSignals(): Row {
 }
 
 /** Collects function spans for files matching a language suffix set. */
-export function functionSpans(
+function functionSpans(
 	scannedFiles: FileMetrics[],
 	suffixes: Set<string>,
 ): FunctionSpan[] {
@@ -171,7 +98,7 @@ export function functionSpans(
 }
 
 /** Separates TypeScript and Python function-length hotspots. */
-export function buildFunctionLengthsSection(scannedFiles: FileMetrics[]): Row {
+function buildFunctionLengthsSection(scannedFiles: FileMetrics[]): Row {
 	return {
 		typescript: functionLengthSection(
 			functionSpans(scannedFiles, TYPESCRIPT_SUFFIXES),
@@ -184,7 +111,7 @@ export function buildFunctionLengthsSection(scannedFiles: FileMetrics[]): Row {
 function signalFocusDocFilesFor(
 	targetPath: string,
 	displayRoot: string,
-	signalFocusEntries: SignalFocusEntry[],
+	signalFocusEntries: ReturnType<typeof buildSignalFocusEntries>,
 ): string[] {
 	if (isFile(targetPath) && DOCSTRING_SUFFIXES.has(path.extname(targetPath))) {
 		return [relativePath(targetPath, { displayRoot })];
@@ -200,7 +127,7 @@ function signalFocusDocFilesFor(
 }
 
 /** Builds the compact docstring signal section for signal focus files. */
-export function buildDocstringSignalSection(
+function buildDocstringSignalSection(
 	targetPath: string,
 	signalFocusDocFiles: string[],
 ): Row {
@@ -215,62 +142,10 @@ export function buildDocstringSignalSection(
 	});
 }
 
-/** Builds docstring preview text keyed by signal focus files. */
-export function docPreviewsByFile(
-	targetPath: string,
-	signalFocusDocFiles: string[],
-): Row {
-	if (signalFocusDocFiles.length === 0) {
-		return {};
-	}
-	return Object.fromEntries(
-		buildFilePreviews(targetPath, {
-			focusFiles: signalFocusDocFiles,
-			maxFiles: 0,
-		}).map((item) => [item.file, item.preview]),
-	);
-}
-
-/** Attaches short documentation previews to the signal payload. */
-export function attachDocPreviews(
-	signalFocusEntries: SignalFocusEntry[],
-	previewsByFile: Row,
-): void {
-	for (const entry of signalFocusEntries) {
-		const preview = previewsByFile[String(entry.file)];
-		if (preview !== undefined) {
-			entry.doc_preview = preview;
-		}
-	}
-}
-
-/** Builds metadata for a full signal export payload. */
-export function signalExportMeta(
-	targetPath: string,
-	displayRoot: string,
-	scannedFiles: FileMetrics[],
-	sectionMode: string | string[],
-	expanded: boolean,
-): Row {
-	return {
-		section_mode: sectionMode,
-		expanded,
-		module_path: targetPath,
-		module_target_kind: isDir(targetPath) ? "directory" : "file",
-		module_display_root_path: displayRoot,
-		module_abs: path.resolve(targetPath),
-		analyzed_file_count: scannedFiles.length,
-		notes: [],
-	};
-}
-
 /** Builds the selected signal sections for a target path. */
 export function buildSignalExport(
 	targetPath: string,
-	{
-		sectionMode,
-		expanded = false,
-	}: { sectionMode: string | string[]; expanded?: boolean },
+	{ sectionMode }: { sectionMode: string | string[] },
 ): Row {
 	const displayRoot = isDir(targetPath) ? targetPath : path.dirname(targetPath);
 	const allFiles = discoverFiles(targetPath);
@@ -293,28 +168,12 @@ export function buildSignalExport(
 			.filter((metrics) => metrics.entrypointHint)
 			.map((metrics) => metrics.relPath),
 	);
-	const signalFocusEntries = buildSignalFocusEntries(fileProfileRows, {
-		entrypoints,
-	});
-	const signalFocusDocFiles = signalFocusDocFilesFor(
-		targetPath,
-		displayRoot,
-		signalFocusEntries,
-	);
-	const selected = selectedSections(sectionMode);
-	const docstringSignals = selected.includes("docstring-signals")
-		? buildDocstringSignalSection(targetPath, signalFocusDocFiles)
-		: null;
-	attachDocPreviews(
-		signalFocusEntries,
-		docPreviewsByFile(targetPath, signalFocusDocFiles),
+	const selected = new Set(
+		Array.isArray(sectionMode) ? sectionMode : [sectionMode],
 	);
 
 	const sections: Row = {};
-	if (selected.includes("filesystem")) {
-		sections.filesystem = buildFilesystemSection(displayFiles);
-	}
-	if (selected.includes("relationships")) {
+	if (selected.has("relationships")) {
 		sections.relationships = buildRelationshipsSection(
 			displayFiles,
 			scannedFiles,
@@ -322,41 +181,28 @@ export function buildSignalExport(
 			entrypoints,
 		);
 	}
-	if (selected.includes("docstring-signals")) {
-		sections.docstring_signals = docstringSignals;
+	if (selected.has("docstring-signals")) {
+		const signalFocusEntries = buildSignalFocusEntries(fileProfileRows, {
+			entrypoints,
+		});
+		sections.docstring_signals = buildDocstringSignalSection(
+			targetPath,
+			signalFocusDocFilesFor(targetPath, displayRoot, signalFocusEntries),
+		);
 	}
-	if (selected.includes("likely-main")) {
-		sections.likely_main_entries = signalFocusEntries;
-	}
-	if (selected.includes("file-profiles")) {
+	if (selected.has("file-profiles")) {
 		sections.file_profiles = fileProfileRows;
 	}
-	if (selected.includes("usage")) {
+	if (selected.has("usage")) {
 		sections.usage_signals = buildUsageSection(allFiles, scannedFiles);
 	}
-	if (selected.includes("function-lengths")) {
+	if (selected.has("function-lengths")) {
 		sections.function_lengths = buildFunctionLengthsSection(scannedFiles);
 	}
-	if (selected.includes("docstrings")) {
+	if (selected.has("docstrings")) {
 		sections.docstrings = buildDocstringsData(targetPath);
 	}
-	return {
-		meta: signalExportMeta(
-			targetPath,
-			displayRoot,
-			scannedFiles,
-			sectionMode,
-			expanded,
-		),
-		sections,
-	};
-}
-
-/** Builds sorted count rows from a counter map. */
-function sortedCounterRows(counter: Map<string, number>, key: string): Row[] {
-	return [...counter.entries()]
-		.sort((left, right) => right[1] - left[1] || compareText(left[0], right[0]))
-		.map(([value, count]) => ({ [key]: value, count }));
+	return { sections };
 }
 
 /** Totals line counts from rows that expose a numeric length field. */

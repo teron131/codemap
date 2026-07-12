@@ -6,6 +6,7 @@ import {
 	discoverFiles,
 	relativePath,
 	sourceLineCount,
+	TYPESCRIPT_LANG_BY_SUFFIX,
 } from "../scanner/index.js";
 
 export type ScanEntry = {
@@ -26,9 +27,9 @@ export type ScanPayload = {
 };
 
 export const LANGUAGE_BY_SUFFIX: Record<string, string> = {
+	...TYPESCRIPT_LANG_BY_SUFFIX,
 	".c": "c",
 	".cc": "cpp",
-	".cjs": "javascript",
 	".conf": "config",
 	".cpp": "cpp",
 	".css": "css",
@@ -44,13 +45,10 @@ export const LANGUAGE_BY_SUFFIX: Record<string, string> = {
 	".hrl": "erlang-header",
 	".html": "html",
 	".java": "java",
-	".js": "javascript",
-	".jsx": "jsx",
 	".json": "json",
 	".jsonc": "jsonc",
 	".livemd": "markdown",
 	".md": "markdown",
-	".mjs": "javascript",
 	".mmd": "mermaid",
 	".prisma": "prisma",
 	".proto": "protobuf",
@@ -60,8 +58,6 @@ export const LANGUAGE_BY_SUFFIX: Record<string, string> = {
 	".sh": "shell",
 	".sql": "sql",
 	".toml": "toml",
-	".ts": "typescript",
-	".tsx": "tsx",
 	".yaml": "yaml",
 	".yml": "yaml",
 };

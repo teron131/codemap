@@ -13,7 +13,14 @@ export function renderSignalText(
 	section: string,
 ): string {
 	const lines = [signalTitle(section), ""];
-	if ("top" in payload) {
+	if (payload.freshness === "partial") {
+		lines.push("backend: partial index", "");
+	} else if (payload.freshness === "degraded") {
+		lines.push("backend: unavailable", "");
+	}
+	if (section === "top") {
+		appendTop(lines, payload);
+	} else if ("top" in payload) {
 		appendTop(lines, recordValue(payload.top));
 	}
 	if ("relationships" in payload) {
@@ -44,7 +51,7 @@ export function renderSignalText(
 }
 
 /** Formats a signal section title for text output. */
-export function signalTitle(section: string): string {
+function signalTitle(section: string): string {
 	if (section === "all") {
 		return "# Refactor Signals";
 	}
@@ -65,56 +72,111 @@ export function signalTitle(section: string): string {
 }
 
 /** Appends top refactor signal sections to text output. */
-export function appendTop(lines: string[], top: Record<string, unknown>): void {
-	const functions = recordValue(top.functions);
-	const variables = recordValue(top.variables);
-	const files = recordValue(top.files);
-	const longFunctions = arrayValue(functions.longFunctions);
-	const lowUseFunctions = arrayValue(functions.lowUseDefinitions);
-	const lowUseVariables = arrayValue(variables.leastUsedDefinitions);
-	const broadNamePools = arrayValue(variables.broadNamePools);
-	const denseFiles = arrayValue(files.denseFiles);
+function appendTop(lines: string[], top: Record<string, unknown>): void {
+	const functionPressure = arrayValue(top.functionPressure);
+	const smallFunctions = arrayValue(top.smallFunctions);
+	const longNames = arrayValue(top.longNames);
 	if (
-		longFunctions.length === 0 &&
-		lowUseFunctions.length === 0 &&
-		lowUseVariables.length === 0 &&
-		broadNamePools.length === 0 &&
-		denseFiles.length === 0
+		functionPressure.length === 0 &&
+		smallFunctions.length === 0 &&
+		longNames.length === 0
 	) {
-		lines.push("No local refactor signal rows.");
+		lines.push("No refactor signal rows.");
 		lines.push("");
 		return;
 	}
-	lines.push("## Functions");
-	appendDefinitionRows(lines, "Long Functions", longFunctions, {
-		heading: "###",
-		skipEmpty: true,
-	});
-	appendDefinitionRows(lines, "Low-Use Definitions", lowUseFunctions, {
-		heading: "###",
-		skipEmpty: true,
-	});
-	lines.push("");
-	lines.push("## Variables");
-	appendDefinitionRows(lines, "Low-Use Definitions", lowUseVariables, {
-		heading: "###",
-		skipEmpty: true,
-	});
-	appendNameRows(lines, "Broad Name Pools", broadNamePools, {
-		heading: "###",
-		skipEmpty: true,
-	});
-	lines.push("");
-	lines.push("## Files");
-	appendDenseFileRows(lines, denseFiles, {
-		heading: "###",
-		skipEmpty: true,
-	});
+	appendCompactSignalRows(
+		lines,
+		"Function Pressure",
+		functionPressure,
+		functionPressureFacts,
+	);
+	appendCompactSignalRows(
+		lines,
+		"Small Low-Use Functions",
+		smallFunctions,
+		smallFunctionFacts,
+	);
+	appendCompactSignalRows(lines, "Long Names", longNames, longNameFacts);
 	lines.push("");
 }
 
+/** Appends one compact evidence bucket with one line per source target. */
+function appendCompactSignalRows(
+	lines: string[],
+	title: string,
+	rows: Row[],
+	factsFor: (row: Row) => string[],
+): void {
+	if (rows.length === 0) {
+		return;
+	}
+	lines.push(`## ${title}`);
+	for (const row of rows) {
+		lines.push(`- ${signalLocation(row)}: ${factsFor(row).join(", ")}`);
+	}
+	lines.push("");
+}
+
+/** Formats backend complexity and loop evidence without advice text. */
+function functionPressureFacts(row: Row): string[] {
+	const facts: string[] = [];
+	if ("cognitive" in row) {
+		facts.push(`cognitive=${numberValue(row.cognitive)}`);
+	}
+	if ("cyclomatic" in row) {
+		facts.push(`cyclomatic=${numberValue(row.cyclomatic)}`);
+	}
+	facts.push(`lines=${numberValue(row.lines)}`);
+	appendPositiveFact(facts, row, "linearScanInLoop", "linear_scan_in_loop");
+	if ("mentions" in row) {
+		facts.push(`mentions=${numberValue(row.mentions)}`);
+	}
+	if (row.exported === true) {
+		facts.push("exported");
+	}
+	return facts;
+}
+
+/** Formats small-function size and lexical mention evidence. */
+function smallFunctionFacts(row: Row): string[] {
+	return [
+		`lines=${numberValue(row.lines)}`,
+		`mentions=${numberValue(row.mentions)}`,
+	];
+}
+
+/** Formats identifier length and lexical mention evidence. */
+function longNameFacts(row: Row): string[] {
+	return [
+		`characters=${numberValue(row.characters)}`,
+		`mentions=${numberValue(row.mentions)}`,
+	];
+}
+
+/** Formats a compact path, line, and symbol location. */
+function signalLocation(row: Row): string {
+	const path = String(row.path ?? "unknown");
+	const line = Number(row.line ?? 0);
+	const name = String(row.name ?? "unknown");
+	return `${path}${line > 0 ? `:${line}` : ""} ${name}`;
+}
+
+/** Appends one positive numeric fact when the backend reported it. */
+function appendPositiveFact(
+	facts: string[],
+	row: Row,
+	key: string,
+	label: string,
+): void {
+	const value = numberValue(row[key]);
+	if (value > 0) {
+		facts.push(`${label}=${value}`);
+	}
+}
+
 /** Appends relationship and entrypoint summaries to text output. */
-export function appendRelationships(
+function appendRelationships(
 	lines: string[],
 	relationships: Record<string, unknown>,
 ): void {
@@ -145,7 +207,7 @@ export function appendRelationships(
 }
 
 /** Appends usage bucket summaries to text output. */
-export function appendUsageDistribution(
+function appendUsageDistribution(
 	lines: string[],
 	usage: Record<string, unknown>,
 ): void {
@@ -166,7 +228,7 @@ export function appendUsageDistribution(
 }
 
 /** Appends function usage candidate rows to text signal output. */
-export function appendFunctionSignals(
+function appendFunctionSignals(
 	lines: string[],
 	payload: Record<string, unknown>,
 ): void {
@@ -183,19 +245,14 @@ export function appendFunctionSignals(
 	if (lowUseRows.length > 0) {
 		lines.push("");
 	}
-	appendNameRows(
-		lines,
-		"Broad Function Names",
-		languageRows(recordValue(payload.frequency)),
-	);
-	lines.push("");
 }
 
 /** Appends variable usage candidate rows to text signal output. */
-export function appendVariableSignals(
+function appendVariableSignals(
 	lines: string[],
 	payload: Record<string, unknown>,
 ): void {
+	appendLongNameRows(lines, arrayValue(payload.longNames));
 	const lowUseRows = languageRows(recordValue(payload.lowUseDefinitions));
 	appendDefinitionRows(
 		lines,
@@ -209,16 +266,24 @@ export function appendVariableSignals(
 	if (lowUseRows.length > 0) {
 		lines.push("");
 	}
-	appendNameRows(
-		lines,
-		"Broad Name Pools",
-		languageRows(recordValue(payload.frequency)),
-	);
+}
+
+/** Appends explicit long-name rows for detailed variable output. */
+function appendLongNameRows(lines: string[], rows: Row[]): void {
+	if (rows.length === 0) {
+		return;
+	}
+	lines.push("## Long Names");
+	for (const row of rows) {
+		lines.push(
+			`- ${row.identifier ?? row.name}: characters=${String(row.name ?? "").length}, mentions=${numberValue(row.count)}`,
+		);
+	}
 	lines.push("");
 }
 
 /** Appends long-function rows to text signal output. */
-export function appendLengths(
+function appendLengths(
 	lines: string[],
 	lengths: Record<string, unknown>,
 ): void {
@@ -243,7 +308,7 @@ export function appendLengths(
 }
 
 /** Appends file path rows to text signal output. */
-export function appendFiles(lines: string[], rows: Row[]): void {
+function appendFiles(lines: string[], rows: Row[]): void {
 	lines.push("## File Profiles");
 	for (const item of rows) {
 		lines.push(
@@ -254,7 +319,7 @@ export function appendFiles(lines: string[], rows: Row[]): void {
 }
 
 /** Appends compact docstring coverage and preview rows to signal output. */
-export function appendDocstringSignals(
+function appendDocstringSignals(
 	lines: string[],
 	payload: Record<string, unknown>,
 ): void {
@@ -281,7 +346,7 @@ export function appendDocstringSignals(
 }
 
 /** Appends full docstring report rows with compact previews. */
-export function appendDocstrings(
+function appendDocstrings(
 	lines: string[],
 	payload: Record<string, unknown>,
 ): void {
@@ -318,8 +383,8 @@ export function appendDocstrings(
 	lines.push("");
 }
 
-/** Appends definition rows with references and samples to text output. */
-export function appendDefinitionRows(
+/** Appends definition rows with lexical mentions to text output. */
+function appendDefinitionRows(
 	lines: string[],
 	title: string,
 	rows: Row[],
@@ -340,8 +405,8 @@ export function appendDefinitionRows(
 		const identifier = item.identifier || item.name;
 		const details =
 			"lines" in item
-				? [`${item.lines} lines`, refsText(item.count ?? 0)]
-				: [refsText(item.count ?? 0)];
+				? [`${item.lines} lines`, mentionsText(item.count ?? 0)]
+				: [mentionsText(item.count ?? 0)];
 		if ("line" in item) {
 			details.push(`line ${item.line}`);
 		}
@@ -352,33 +417,6 @@ export function appendDefinitionRows(
 			details.push("module");
 		}
 		lines.push(`- ${identifier}: ${details.join(", ")}`);
-	}
-}
-
-/** Appends dense-file rows to text signal output. */
-export function appendDenseFileRows(
-	lines: string[],
-	rows: Row[],
-	{
-		heading = "##",
-		skipEmpty = false,
-	}: { heading?: string; skipEmpty?: boolean } = {},
-): void {
-	if (rows.length === 0 && skipEmpty) {
-		return;
-	}
-	lines.push(`${heading} Dense Files`);
-	if (rows.length === 0) {
-		lines.push("- none");
-		return;
-	}
-	if (rows.some((item) => item.total_label === "lines")) {
-		lines.push(
-			"- note: line-ranked rows use lightweight fallback for ranking; top rows include bounded syntax details when available, and inspect gives the full local profile.",
-		);
-	}
-	for (const item of rows) {
-		lines.push(`- ${item.file}: ${denseFileCounters(item)}`);
 	}
 }
 
@@ -493,31 +531,8 @@ function sourceLineDetail(item: Row): string {
 	return lines > 0 ? `, lines=${lines}` : "";
 }
 
-/** Appends name-frequency rows to text signal output. */
-export function appendNameRows(
-	lines: string[],
-	title: string,
-	rows: Row[],
-	{
-		heading = "##",
-		skipEmpty = false,
-	}: { heading?: string; skipEmpty?: boolean } = {},
-): void {
-	if (rows.length === 0 && skipEmpty) {
-		return;
-	}
-	lines.push(`${heading} ${title}`);
-	if (rows.length === 0) {
-		lines.push("- none");
-		return;
-	}
-	for (const item of rows) {
-		lines.push(`- ${item.name}: ${refsText(item.count ?? 0)}`);
-	}
-}
-
 /** Appends file-count rows to text signal output. */
-export function appendFileCountRows(
+function appendFileCountRows(
 	lines: string[],
 	title: string,
 	rows: Row[],
@@ -531,10 +546,10 @@ export function appendFileCountRows(
 	}
 }
 
-/** Formats reference counts for signal text output. */
-export function refsText(value: unknown): string {
+/** Formats global lexical occurrence counts without calling them references. */
+function mentionsText(value: unknown): string {
 	const count = Number(value || 0);
-	const label = count === 1 ? "ref" : "refs";
+	const label = count === 1 ? "mention" : "mentions";
 	return `${count} ${label}`;
 }
 

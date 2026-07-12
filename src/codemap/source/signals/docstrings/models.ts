@@ -1,6 +1,11 @@
 /** Defines docstring report objects for files, classes, and functions. */
-export const PYTHON_SUFFIXES = new Set([".py"]);
-export const TYPESCRIPT_SUFFIXES = new Set([".ts", ".tsx", ".js", ".jsx"]);
+import {
+	PY_SUFFIXES,
+	TYPESCRIPT_SUFFIXES as SCANNER_TYPESCRIPT_SUFFIXES,
+} from "../../scanner/constants.js";
+
+export const PYTHON_SUFFIXES = PY_SUFFIXES;
+export const TYPESCRIPT_SUFFIXES = SCANNER_TYPESCRIPT_SUFFIXES;
 export const DOCSTRING_SUFFIXES = new Set([
 	...PYTHON_SUFFIXES,
 	...TYPESCRIPT_SUFFIXES,

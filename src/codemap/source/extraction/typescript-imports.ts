@@ -2,20 +2,14 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
+import { TYPESCRIPT_SUFFIXES } from "../scanner/constants.js";
 import type { FileMetrics } from "../scanner/metrics.js";
 
 export const TYPESCRIPT_RESOLUTION_SUFFIXES = [
 	"",
-	".ts",
-	".tsx",
-	".js",
-	".jsx",
-	".mjs",
-	"/index.ts",
-	"/index.tsx",
-	"/index.js",
-	"/index.jsx",
-] as const;
+	...TYPESCRIPT_SUFFIXES,
+	...[...TYPESCRIPT_SUFFIXES].map((suffix) => `/index${suffix}`),
+];
 
 export type TypeScriptPathAlias = [string, string];
 
@@ -143,7 +137,7 @@ export function typescriptPathAliases(root: string): TypeScriptPathAlias[] {
 /** Expands emitted JavaScript specifiers to possible source bases. */
 export function typescriptSourceBases(base: string): string[] {
 	const bases = [base];
-	if ([".js", ".jsx", ".mjs"].includes(path.extname(base))) {
+	if ([".js", ".jsx", ".mjs", ".cjs"].includes(path.extname(base))) {
 		bases.push(stripSuffix(base, path.extname(base)));
 	}
 	return bases;
@@ -177,7 +171,7 @@ function stripSuffix(value: string, suffix: string): string {
 		: value;
 }
 
-/** Normalizes TypeScript import paths to slash-separated artifact keys. */
+/** Normalizes TypeScript import paths to slash-separated project keys. */
 function toPosixPath(filePath: string): string {
 	return filePath.split(path.sep).join("/");
 }

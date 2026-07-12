@@ -34,6 +34,5 @@ export type GraphPayload = {
 	edges: GraphEdge[];
 	evidence: {
 		importMap: Record<string, unknown>;
-		codeSignals?: Record<string, unknown>;
 	};
 };

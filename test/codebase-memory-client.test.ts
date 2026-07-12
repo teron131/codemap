@@ -13,11 +13,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	callCodebaseMemoryTool,
 	codebaseMemoryInspect,
+	codebaseMemoryQueryRows,
 	codebaseMemoryReadyProject,
 } from "../src/codemap/codebase-memory/index.js";
 import {
 	printCodebaseMemoryArchitectureSummary,
-	printCodebaseMemoryCallTrace,
 	printCodebaseMemoryGraphSearch,
 	printCodebaseMemorySearch,
 	printCodebaseMemorySemanticSearch,
@@ -32,7 +32,6 @@ import {
 	commandMemoryQuery,
 	commandMemorySchema,
 	commandMemoryStatus,
-	commandSearchCalls,
 	commandSignals,
 } from "../src/codemap/commands/index.js";
 
@@ -61,6 +60,19 @@ afterEach(() => {
 });
 
 describe("CodebaseMemory client", () => {
+	it("normalizes query columns and rows into records", () => {
+		expect(
+			codebaseMemoryQueryRows({
+				columns: ["name", "count"],
+				rows: [["needle", "2"], { name: "other", count: 1 }],
+			}),
+		).toEqual([
+			{ name: "needle", count: "2" },
+			{ name: "other", count: 1 },
+		]);
+		expect(codebaseMemoryQueryRows({ message: "ok" })).toBeNull();
+	});
+
 	it("reads mocked CodebaseMemory tool payloads", () => {
 		const result = callCodebaseMemoryTool("list_projects", {});
 		if (!result.ok) {
@@ -81,44 +93,62 @@ describe("CodebaseMemory client", () => {
 
 		expect(project).toMatchObject({
 			name: "mock-project",
-			rootPath: workDir,
 			status: "ready",
 		});
 		expect(readIndexCalls()).toEqual([
 			{
 				mode: "full",
+				persistence: false,
 				repo_path: workDir,
 			},
 		]);
+		expect(readDeleteCalls()).toEqual([{ project: "mock-project" }]);
 	});
 
 	it("indexes before every backend readiness check", () => {
 		expect(codebaseMemoryReadyProject(workDir)).toMatchObject({
 			name: "mock-project",
-			rootPath: workDir,
 			status: "ready",
 		});
 		expect(codebaseMemoryReadyProject(workDir)).toMatchObject({
 			name: "mock-project",
-			rootPath: workDir,
 			status: "ready",
 		});
 		expect(readIndexCalls()).toEqual([
 			{
 				mode: "full",
+				persistence: false,
 				repo_path: workDir,
 			},
 			{
 				mode: "full",
+				persistence: false,
 				repo_path: workDir,
 			},
 		]);
 	});
 
-	it("does not match list_projects entries with empty roots", () => {
-		vi.stubEnv("CODEBASE_MEMORY_MOCK_ROOT", "");
+	it("rejects index responses without a project name", () => {
+		vi.stubEnv("CODEBASE_MEMORY_MOCK_NO_INDEX_PROJECT", "1");
 
 		expect(codebaseMemoryReadyProject(workDir)).toBeNull();
+	});
+
+	it("rejects missing, nonterminal, and unknown index statuses", () => {
+		for (const status of ["", "indexing", "queued", "mystery"]) {
+			vi.stubEnv("CODEBASE_MEMORY_MOCK_INDEX_STATUS", status);
+
+			expect(codebaseMemoryReadyProject(workDir)).toBeNull();
+		}
+	});
+
+	it("marks indexes with skipped files as partial", () => {
+		vi.stubEnv("CODEBASE_MEMORY_MOCK_SKIPPED_COUNT", "2");
+
+		expect(codebaseMemoryReadyProject(workDir)).toMatchObject({
+			name: "mock-project",
+			status: "partial",
+		});
 	});
 
 	it("treats decoded tool error payloads as failed tool calls", () => {
@@ -135,6 +165,38 @@ describe("CodebaseMemory client", () => {
 		});
 	});
 
+	it("prefers structured tool content over text fallbacks", () => {
+		vi.stubEnv("CODEBASE_MEMORY_MOCK_STRUCTURED_CONTENT", "1");
+
+		const result = callCodebaseMemoryTool("list_projects", {});
+		expect(result).toMatchObject({
+			ok: true,
+			value: {
+				projects: expect.arrayContaining([
+					expect.objectContaining({ name: "mock-project" }),
+				]),
+			},
+		});
+	});
+
+	it("rejects MCP results marked as tool errors", () => {
+		vi.stubEnv("CODEBASE_MEMORY_MOCK_IS_ERROR", "1");
+
+		expect(callCodebaseMemoryTool("search_code", {})).toEqual({
+			ok: false,
+			reason: "pattern is required",
+		});
+	});
+
+	it("rejects plain-text backend validation errors", () => {
+		vi.stubEnv("CODEBASE_MEMORY_MOCK_PLAIN_ERROR", "1");
+
+		expect(callCodebaseMemoryTool("search_code", {})).toEqual({
+			ok: false,
+			reason: "unknown tool: search_code",
+		});
+	});
+
 	it("lets backend rendering fall back when a CodebaseMemory tool returns an error payload", () => {
 		vi.stubEnv("CODEBASE_MEMORY_MOCK_ERROR_TOOL", "search_code");
 		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
@@ -148,6 +210,17 @@ describe("CodebaseMemory client", () => {
 
 	it("lets backend rendering fall back when CodebaseMemory search returns no matches", () => {
 		vi.stubEnv("CODEBASE_MEMORY_MOCK_EMPTY_SEARCH", "1");
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+		try {
+			expect(printCodebaseMemorySearch(workDir, "needle", 1)).toBe(false);
+			expect(logSpy).not.toHaveBeenCalled();
+		} finally {
+			logSpy.mockRestore();
+		}
+	});
+
+	it("lets backend rendering fall back on unknown search payloads", () => {
+		vi.stubEnv("CODEBASE_MEMORY_MOCK_UNKNOWN_SEARCH", "1");
 		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 		try {
 			expect(printCodebaseMemorySearch(workDir, "needle", 1)).toBe(false);
@@ -187,17 +260,12 @@ describe("CodebaseMemory client", () => {
 		}
 	});
 
-	it("prints an honest empty result when default filters hide all backend matches", () => {
+	it("falls back when default filters hide all backend matches", () => {
 		vi.stubEnv("CODEBASE_MEMORY_MOCK_TEST_ONLY", "1");
 		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 		try {
-			expect(printCodebaseMemorySearch(workDir, "needle", 2)).toBe(true);
-			const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
-
-			expect(output).toContain("results: 0");
-			expect(output).toContain("hidden tests: 1 (use --include-tests)");
-			expect(output).toContain("  none");
-			expect(output).not.toContain("testNeedle");
+			expect(printCodebaseMemorySearch(workDir, "needle", 2)).toBe(false);
+			expect(logSpy).not.toHaveBeenCalled();
 		} finally {
 			logSpy.mockRestore();
 		}
@@ -264,7 +332,8 @@ describe("CodebaseMemory client", () => {
 
 			expect(output).toContain("results: 1");
 			expect(output).toContain("hidden filtered: 1");
-			expect(output).toContain("- Runner (Class");
+			expect(output).toContain("- Runner (");
+			expect(output).toContain(", Class)");
 			expect(output).not.toContain("- __init__");
 		} finally {
 			logSpy.mockRestore();
@@ -329,7 +398,8 @@ describe("CodebaseMemory client", () => {
 			expect(printCodebaseMemoryGraphSearch(workDir, "needle", 1)).toBe(true);
 			const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
 
-			expect(output).toContain("- needle (Function");
+			expect(output).toContain("- needle (");
+			expect(output).toContain(", Function)");
 			expect(output).not.toContain("score=-19.058");
 			expect(output).not.toContain("rank=-19");
 		} finally {
@@ -424,6 +494,37 @@ describe("CodebaseMemory client", () => {
 		expect(output).not.toContain("top: get");
 	});
 
+	it("replaces repeated cluster labels with their top symbols", () => {
+		const output = renderCodebaseMemoryArchitectureSummary({
+			project: "clustered-project",
+			node_labels: [{ label: "Function", count: 10 }],
+			clusters: [
+				{ label: "src", members: 5, top_nodes: ["alpha", "beta"] },
+				{ label: "src", members: 4, top_nodes: ["gamma", "delta"] },
+			],
+		});
+
+		expect(output).toContain("- alpha, beta (5 nodes)");
+		expect(output).toContain("- gamma, delta (4 nodes)");
+		expect(output).not.toContain("- src");
+	});
+
+	it("omits generic utility hotspots and unreliable backend entry points", () => {
+		const output = renderCodebaseMemoryArchitectureSummary({
+			project: "utility-project",
+			node_labels: [{ label: "Function", count: 10 }],
+			hotspots: [
+				{ name: "recordValue", fan_in: 30 },
+				{ name: "runWorkflow", fan_in: 8 },
+			],
+			entry_points: [{ name: "syntaxMatches", file: "src/search.ts" }],
+		});
+
+		expect(output).not.toContain("- recordValue");
+		expect(output).toContain("- runWorkflow");
+		expect(output).not.toContain("## Entry Points");
+	});
+
 	it("prints compact semantic graph search rows from semantic_results", () => {
 		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 		try {
@@ -456,6 +557,30 @@ describe("CodebaseMemory client", () => {
 		}
 	});
 
+	it("falls back when default filters hide every semantic match", () => {
+		vi.stubEnv("CODEBASE_MEMORY_MOCK_TEST_ONLY", "1");
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+		try {
+			expect(printCodebaseMemorySemanticSearch(workDir, "needle", 2)).toBe(
+				false,
+			);
+			expect(logSpy).not.toHaveBeenCalled();
+		} finally {
+			logSpy.mockRestore();
+		}
+	});
+
+	it("lets summary fall back on unknown architecture payloads", () => {
+		vi.stubEnv("CODEBASE_MEMORY_MOCK_UNKNOWN_ARCHITECTURE", "1");
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+		try {
+			expect(printCodebaseMemoryArchitectureSummary(workDir)).toBe(false);
+			expect(logSpy).not.toHaveBeenCalled();
+		} finally {
+			logSpy.mockRestore();
+		}
+	});
+
 	it("treats plain-text CodebaseMemory validation failures as failed tool calls", () => {
 		expect(
 			callCodebaseMemoryTool("search_graph", {
@@ -469,77 +594,33 @@ describe("CodebaseMemory client", () => {
 		});
 	});
 
-	it("lets call trace rendering fall back when CodebaseMemory trace search returns no paths", () => {
-		vi.stubEnv("CODEBASE_MEMORY_MOCK_EMPTY_TRACE", "1");
-		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-		try {
-			expect(printCodebaseMemoryCallTrace(workDir, "needle")).toBe(false);
-			expect(logSpy).not.toHaveBeenCalled();
-		} finally {
-			logSpy.mockRestore();
-		}
-	});
-
-	it("prints compact backend call traces", () => {
-		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-		try {
-			expect(printCodebaseMemoryCallTrace(workDir, "needle")).toBe(true);
-			const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
-
-			expect(output).toContain("CodebaseMemory call trace:");
-			expect(output).toContain("function: needle");
-			expect(output).toContain("Callers: 1");
-			expect(output).toContain("- callerOne (hop 1, high)");
-			expect(output).not.toContain("- needle");
-			expect(output).not.toContain('"callers"');
-		} finally {
-			logSpy.mockRestore();
-		}
-	});
-
-	it("limits backend call traces and hides generic rows by default", () => {
-		vi.stubEnv("CODEBASE_MEMORY_MOCK_GENERIC_TRACE", "1");
-		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-		try {
-			expect(
-				commandSearchCalls({
-					projectRoot: workDir,
-					name: "needle",
-					limit: 1,
-				}),
-			).toBe(0);
-			const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
-
-			expect(output).toContain("Callees: 1 (hidden generic: 2)");
-			expect(output).toContain("- calleeOne (hop 1, medium)");
-			expect(output).not.toContain("- append");
-			expect(output).not.toContain("- get");
-		} finally {
-			logSpy.mockRestore();
-		}
-	});
-
 	it("normalizes CodebaseMemory inspect payloads behind the query adapter", () => {
 		expect(codebaseMemoryInspect(workDir, "needle", 2)).toMatchObject({
 			name: "needle",
-			qualifiedName: "mock-project.src.needle",
 			filePath: "src/needle.ts",
 			startLine: 4,
 			endLine: 8,
-			matchRank: 1,
-			matchScore: 0.87,
 			signalFacts: ["complexity=2", "cognitive=3", "lines=5"],
-			graphFacts: ["label=Function", "language=TypeScript"],
 			signature: "function needle(): string",
 			source: "export function needle() {\n  return 'needle';\n}",
-			callers: ["callerOne (hop 1, high)"],
-			callees: ["calleeOne (hop 1, medium)"],
-			related: ["callerOne", "calleeOne"],
-			graphNeighbors: ["CALLS: mock-project.src.calleeOne"],
+			callers: ["callerOne"],
+			callees: ["calleeOne"],
 		});
 	});
 
-	it("renders enriched CodebaseMemory inspect output with graph rank and neighbors", () => {
+	it("lets inspect fall back on unknown snippet payloads", () => {
+		vi.stubEnv("CODEBASE_MEMORY_MOCK_UNKNOWN_SNIPPET", "1");
+
+		expect(codebaseMemoryInspect(workDir, "needle", 2)).toBeNull();
+	});
+
+	it("rejects ambiguous exact backend symbol matches", () => {
+		vi.stubEnv("CODEBASE_MEMORY_MOCK_AMBIGUOUS_INSPECT", "1");
+
+		expect(codebaseMemoryInspect(workDir, "needle", 2)).toBeNull();
+	});
+
+	it("renders compact CodebaseMemory inspect output without graph internals", () => {
 		const result = codebaseMemoryInspect(workDir, "needle", 2);
 
 		if (result === null) {
@@ -547,10 +628,12 @@ describe("CodebaseMemory client", () => {
 		}
 		const output = renderCodebaseMemoryInspect(result, { limit: 2 });
 
-		expect(output).toContain("Match: rank=1, score=0.87");
-		expect(output).toContain("label=Function");
-		expect(output).toContain("## Graph Neighborhood");
-		expect(output).toContain("- CALLS: mock-project.src.calleeOne");
+		expect(output).toContain("Source: src/needle.ts:4-8");
+		expect(output).toContain("Signals: complexity=2, cognitive=3, lines=5");
+		expect(output).toContain("## Calls");
+		expect(output).not.toContain("Qualified:");
+		expect(output).not.toContain("Match:");
+		expect(output).not.toContain("Graph Neighborhood");
 	});
 
 	it("renders bare return types as proper arrow signatures", () => {
@@ -581,23 +664,7 @@ describe("CodebaseMemory client", () => {
 		expect(output).not.toContain(", )");
 	});
 
-	it("suppresses negative backend rank values in inspect summaries", () => {
-		vi.stubEnv("CODEBASE_MEMORY_MOCK_SCORE_LIKE_RANK", "1");
-		const result = codebaseMemoryInspect(workDir, "needle", 2);
-
-		if (result === null) {
-			throw new Error("expected backend inspect result");
-		}
-		const output = renderCodebaseMemoryInspect(result, { limit: 2 });
-
-		expect(result.matchRank).toBeNull();
-		expect(result.matchScore).toBeNull();
-		expect(output).toContain("Match: label=Function");
-		expect(output).not.toContain("score=-19.058");
-		expect(output).not.toContain("rank=-19");
-	});
-
-	it("combines backend inspect and current-tree evidence by default", () => {
+	it("keeps successful backend inspection concise by default", () => {
 		mkdirSync(path.join(workDir, "src"), { recursive: true });
 		writeFileSync(
 			path.join(workDir, "src", "needle.ts"),
@@ -617,10 +684,10 @@ describe("CodebaseMemory client", () => {
 			expect(commandInspect("needle", { projectRoot: workDir })).toBe(0);
 			const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
 
-			expect(output).toContain("Backend: Codebase Memory");
-			expect(output).toContain("## Current Tree Evidence");
-			expect(output).toContain("### needle in src/needle.ts:1");
-			expect(output).toContain("calls: helper in src/needle.ts:5");
+			expect(output).toContain("# Inspect: needle");
+			expect(output).toContain("Source: src/needle.ts:4-8");
+			expect(output).not.toContain("## Current Tree Evidence");
+			expect(output).not.toContain("calls: helper in src/needle.ts:5");
 		} finally {
 			logSpy.mockRestore();
 		}
@@ -647,11 +714,8 @@ describe("CodebaseMemory client", () => {
 	});
 
 	it("returns ready project metadata after the required index pass", () => {
-		vi.stubEnv("CODEBASE_MEMORY_MOCK_STATUS", "indexing");
-
 		expect(codebaseMemoryReadyProject(workDir)).toMatchObject({
 			name: "mock-project",
-			rootPath: workDir,
 			status: "ready",
 		});
 		expect(readIndexCalls()).toHaveLength(1);
@@ -839,7 +903,7 @@ describe("CodebaseMemory client", () => {
 		}
 	});
 
-	it("adds backend graph context to signal output when available", () => {
+	it("adds bounded backend function pressure without graph decoration", () => {
 		mkdirSync(path.join(workDir, "src"), { recursive: true });
 		writeFileSync(
 			path.join(workDir, "src", "app.ts"),
@@ -851,11 +915,81 @@ describe("CodebaseMemory client", () => {
 			expect(commandSignals("top", { projectRoot: workDir })).toBe(0);
 			const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
 
-			expect(output).toContain("## Backend Graph");
-			expect(output).toContain("- backend: Codebase Memory");
-			expect(output).toContain("- project: mock-project");
+			expect(output).toContain("## Function Pressure");
+			expect(output).toContain("src/app.ts:1 app");
+			expect(output).toContain("cognitive=20");
+			expect(output).not.toContain("exported");
+			expect(output).not.toContain("## Backend Graph");
 			expect(output).toContain("# Refactor Signals");
+			expect(output.split("\n").length).toBeLessThanOrEqual(20);
 			expect(readIndexCalls()).toHaveLength(1);
+		} finally {
+			logSpy.mockRestore();
+		}
+	});
+
+	it("keeps local function pressure when backend query shape is unknown", () => {
+		vi.stubEnv("CODEBASE_MEMORY_MOCK_UNKNOWN_QUERY", "1");
+		mkdirSync(path.join(workDir, "src"), { recursive: true });
+		writeFileSync(
+			path.join(workDir, "src", "app.ts"),
+			[
+				"function localPressure() {",
+				...Array.from(
+					{ length: 18 },
+					(_, index) => `  const value${index} = ${index};`,
+				),
+				"  return value17;",
+				"}",
+			].join("\n"),
+			"utf8",
+		);
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+		try {
+			expect(commandSignals("top", { projectRoot: workDir })).toBe(0);
+			const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+
+			expect(output).toContain("backend: unavailable");
+			expect(output).toContain("src/app.ts:1 localPressure");
+			expect(output).toContain("lines=21, mentions=1");
+		} finally {
+			logSpy.mockRestore();
+		}
+	});
+
+	it("caps partial backend and local pressure after merging", () => {
+		vi.stubEnv("CODEBASE_MEMORY_MOCK_SKIPPED_COUNT", "1");
+		vi.stubEnv("CODEBASE_MEMORY_MOCK_FOUR_PRESSURE", "1");
+		mkdirSync(path.join(workDir, "src"), { recursive: true });
+		for (let index = 0; index < 4; index += 1) {
+			writeFileSync(
+				path.join(workDir, "src", `backend${index}.ts`),
+				`export function backend${index}() { return ${index}; }\n`,
+				"utf8",
+			);
+		}
+		writeFileSync(
+			path.join(workDir, "src", "local.ts"),
+			[
+				"function localPressure() {",
+				...Array.from(
+					{ length: 18 },
+					(_, index) => `  const value${index} = ${index};`,
+				),
+				"  return value17;",
+				"}",
+			].join("\n"),
+			"utf8",
+		);
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+		try {
+			expect(commandSignals("top", { json: true, projectRoot: workDir })).toBe(
+				0,
+			);
+			const payload = JSON.parse(String(logSpy.mock.calls[0]?.[0] ?? "{}"));
+
+			expect(payload.freshness).toBe("partial");
+			expect(payload.functionPressure).toHaveLength(4);
 		} finally {
 			logSpy.mockRestore();
 		}
@@ -865,6 +999,18 @@ describe("CodebaseMemory client", () => {
 /** Reads mock index_repository call records written by the MCP test server. */
 function readIndexCalls(): unknown[] {
 	const logPath = path.join(workDir, "index-calls.jsonl");
+	if (!existsSync(logPath)) {
+		return [];
+	}
+	return readFileSync(logPath, "utf8")
+		.split(/\r?\n/)
+		.filter(Boolean)
+		.map((line) => JSON.parse(line));
+}
+
+/** Reads mock delete_project call records written by the MCP test server. */
+function readDeleteCalls(): unknown[] {
+	const logPath = path.join(workDir, "delete-calls.jsonl");
 	if (!existsSync(logPath)) {
 		return [];
 	}
@@ -890,16 +1036,14 @@ const toolName = toolCall?.params?.name;
 const toolArgs = toolCall?.params?.arguments ?? {};
 const root = process.env.CODEBASE_MEMORY_MOCK_ROOT ?? ${JSON.stringify(workDir)};
 const indexLogPath = ${JSON.stringify(path.join(workDir, "index-calls.jsonl"))};
-const indexed = fs.existsSync(indexLogPath);
-const status =
-  indexed && process.env.CODEBASE_MEMORY_MOCK_INDEX_FAIL !== "1"
-    ? "ready"
-    : process.env.CODEBASE_MEMORY_MOCK_STATUS ?? "ready";
-
+const deleteLogPath = ${JSON.stringify(path.join(workDir, "delete-calls.jsonl"))};
 const payloads = {
   index_repository: {
-    project: "mock-project",
-    status: process.env.CODEBASE_MEMORY_MOCK_INDEX_FAIL === "1" ? "failed" : "ready",
+	project: process.env.CODEBASE_MEMORY_MOCK_NO_INDEX_PROJECT === "1" ? null : "mock-project",
+	nodes: 12,
+	edges: 34,
+	skipped_count: Number(process.env.CODEBASE_MEMORY_MOCK_SKIPPED_COUNT ?? 0),
+    status: process.env.CODEBASE_MEMORY_MOCK_INDEX_FAIL === "1" ? "failed" : process.env.CODEBASE_MEMORY_MOCK_INDEX_STATUS === "" ? undefined : process.env.CODEBASE_MEMORY_MOCK_INDEX_STATUS ?? "ready",
   },
   list_projects: {
     projects: [
@@ -923,11 +1067,9 @@ const payloads = {
       })),
     ],
   },
-  index_status: {
+  delete_project: {
     project: "mock-project",
-    nodes: 12,
-    edges: 34,
-    status,
+    status: "deleted",
   },
   get_graph_schema: {
     node_labels: [
@@ -944,7 +1086,9 @@ const payloads = {
     ],
   },
   get_architecture:
-    process.env.CODEBASE_MEMORY_MOCK_SPARSE_ARCHITECTURE === "1"
+    process.env.CODEBASE_MEMORY_MOCK_UNKNOWN_ARCHITECTURE === "1"
+      ? { message: "ok" }
+      : process.env.CODEBASE_MEMORY_MOCK_SPARSE_ARCHITECTURE === "1"
       ? {
           project: "mock-project",
           total_nodes: 24,
@@ -1026,7 +1170,9 @@ const payloads = {
           ],
         },
   search_code:
-    process.env.CODEBASE_MEMORY_MOCK_EMPTY_SEARCH === "1"
+	process.env.CODEBASE_MEMORY_MOCK_UNKNOWN_SEARCH === "1"
+	  ? { status: "ambiguous", suggestions: ["mock-project.src.needle"] }
+	  : process.env.CODEBASE_MEMORY_MOCK_EMPTY_SEARCH === "1"
       ? {
           results: [],
           raw_matches: [],
@@ -1081,9 +1227,15 @@ const payloads = {
           semantic_results: [
             {
               name: "semanticNeedle",
-              qualified_name: "mock-project.src.semanticNeedle",
-              label: "Function",
-              file_path: ${JSON.stringify(path.join(workDir, "src", "semantic-needle.ts"))},
+              qualified_name:
+                process.env.CODEBASE_MEMORY_MOCK_TEST_ONLY === "1"
+                  ? "mock-project.tests.semanticNeedle"
+                  : "mock-project.src.semanticNeedle",
+			  label: "Function",
+              file_path:
+                process.env.CODEBASE_MEMORY_MOCK_TEST_ONLY === "1"
+                  ? ${JSON.stringify(path.join(workDir, "tests", "semantic-needle.test.ts"))}
+                  : ${JSON.stringify(path.join(workDir, "src", "semantic-needle.ts"))},
               score: process.env.CODEBASE_MEMORY_MOCK_LOW_SEMANTIC === "1" ? 0 : 0.987,
             },
           ],
@@ -1126,6 +1278,18 @@ const payloads = {
               label: "Function",
               language: "TypeScript",
             },
+			...(process.env.CODEBASE_MEMORY_MOCK_AMBIGUOUS_INSPECT === "1"
+			  ? [
+			      {
+			        name: "needle",
+			        qualified_name: "mock-project.other.needle",
+			        file_path: ${JSON.stringify(path.join(workDir, "src", "other.ts"))},
+			        start_line: 1,
+			        end_line: 3,
+			        label: "Function",
+			      },
+			    ]
+			  : []),
           ],
           connected_nodes: [
             {
@@ -1136,7 +1300,10 @@ const payloads = {
           semantic_results: [],
           total_results: 1,
         },
-  get_code_snippet: {
+  get_code_snippet:
+    process.env.CODEBASE_MEMORY_MOCK_UNKNOWN_SNIPPET === "1"
+      ? { message: "ok" }
+      : {
     name: "needle",
     qualified_name: "mock-project.src.needle",
     file_path: ${JSON.stringify(path.join(workDir, "src", "needle.ts"))},
@@ -1151,9 +1318,9 @@ const payloads = {
         : "function needle()",
     return_type: process.env.CODEBASE_MEMORY_MOCK_BARE_RETURN_TYPE === "1" ? "string" : ": string",
     source: "export function needle() {\\n  return 'needle';\\n}",
-    caller_names: ["callerOne"],
-    callee_names: ["calleeOne"],
-  },
+		  caller_names: ["callerOne"],
+		  callee_names: ["calleeOne"],
+		},
   trace_path:
     process.env.CODEBASE_MEMORY_MOCK_EMPTY_TRACE === "1"
       ? {
@@ -1216,7 +1383,40 @@ const payloads = {
           total_paths: 1,
         },
   query_graph:
-    process.env.CODEBASE_MEMORY_MOCK_JSON_STRING_QUERY === "1"
+	process.env.CODEBASE_MEMORY_MOCK_UNKNOWN_QUERY === "1"
+	  ? { message: "ok" }
+	  : toolArgs.query?.includes("f.cognitive") &&
+	toolArgs.max_rows === undefined &&
+	!toolArgs.query?.includes("ORDER BY") &&
+	!toolArgs.query?.includes("LIMIT")
+	  ? {
+	      columns: [
+	        "name",
+	        "file_path",
+	        "start_line",
+	        "lines",
+	        "complexity",
+	        "cognitive",
+	        "linear_scan_in_loop",
+	        "is_exported",
+	        "is_test",
+	      ],
+	      rows: process.env.CODEBASE_MEMORY_MOCK_FOUR_PRESSURE === "1"
+	        ? Array.from({ length: 4 }, (_, index) => [
+	            "backend" + index,
+	            "src/backend" + index + ".ts",
+	            1,
+	            1,
+	            11 + index,
+	            20 + index,
+	            0,
+	            true,
+	            false,
+	          ])
+	        : [["app", "src/app.ts", 1, 3, 11, 20, 0, true, false]],
+	      total: 1,
+	    }
+	  : process.env.CODEBASE_MEMORY_MOCK_JSON_STRING_QUERY === "1"
       ? {
           total: 1,
           rows: [["[\\"Variable\\"]"]],
@@ -1259,10 +1459,36 @@ const payloads = {
 if (toolName === "index_repository") {
   fs.appendFileSync(indexLogPath, JSON.stringify(toolCall?.params?.arguments ?? {}) + "\\n");
 }
+if (toolName === "delete_project") {
+  fs.appendFileSync(deleteLogPath, JSON.stringify(toolCall?.params?.arguments ?? {}) + "\\n");
+}
 const payload =
   process.env.CODEBASE_MEMORY_MOCK_ERROR_TOOL === toolName
     ? { error: "project not found or not indexed" }
     : payloads[toolName] ?? {};
+
+const toolResult =
+  process.env.CODEBASE_MEMORY_MOCK_IS_ERROR === "1"
+    ? {
+        isError: true,
+        content: [{ type: "text", text: "pattern is required" }],
+      }
+    : process.env.CODEBASE_MEMORY_MOCK_STRUCTURED_CONTENT === "1"
+      ? {
+          structuredContent: payload,
+          content: [{ type: "text", text: "non-json fallback" }],
+        }
+      : {
+          content: [
+            {
+              type: "text",
+              text:
+                process.env.CODEBASE_MEMORY_MOCK_PLAIN_ERROR === "1"
+                  ? "unknown tool: search_code"
+                  : JSON.stringify(payload),
+            },
+          ],
+        };
 
 console.log(JSON.stringify({
   jsonrpc: "2.0",
@@ -1276,14 +1502,7 @@ console.log(JSON.stringify({
 console.log(JSON.stringify({
   jsonrpc: "2.0",
   id: 2,
-  result: {
-    content: [
-      {
-        type: "text",
-        text: JSON.stringify(payload),
-      },
-    ],
-  },
+  result: toolResult,
 }));
 `;
 }

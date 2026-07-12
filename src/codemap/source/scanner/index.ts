@@ -42,7 +42,6 @@ export {
 	sourceLineCount,
 } from "./metrics.js";
 export {
-	collectPythonImportsAndVariables,
 	collectPythonModuleVariables,
 	collectPythonTopLevelDefinitions,
 	isPythonEntrypoint,
@@ -56,12 +55,10 @@ export {
 	addTypescriptFunction,
 	addTypescriptImport,
 	addTypescriptReexport,
-	collectTypescriptExportNames,
 	descendant,
 	directChild,
 	isTypescriptModuleLevelVariable,
 	scanTypescriptFile,
-	scanTypescriptWithAstGrep,
 	spanFor,
 	startLineFor,
 	stringValue,

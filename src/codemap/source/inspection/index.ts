@@ -14,7 +14,7 @@ export {
 	appendBoundaryRows,
 	appendFileProfile,
 	appendFileProfileRow,
-	appendReferenceRows,
+	appendMentionRows,
 	appendSymbolProfile,
 	directoryFileRows,
 	type FileInspectMetrics,

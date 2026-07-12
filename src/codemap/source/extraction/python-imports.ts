@@ -190,7 +190,7 @@ function stripSuffix(value: string, suffix: string): string {
 		: value;
 }
 
-/** Normalizes Python module paths to slash-separated artifact keys. */
+/** Normalizes Python module paths to slash-separated project keys. */
 function toPosixPath(filePath: string): string {
 	return filePath.split(path.sep).join("/");
 }

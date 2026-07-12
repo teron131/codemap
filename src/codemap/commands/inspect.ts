@@ -4,7 +4,6 @@ import path from "node:path";
 import type { Command } from "commander";
 
 import {
-	type CodebaseMemoryInspectResult,
 	codebaseMemoryInspect,
 	renderCodebaseMemoryInspect,
 } from "../codebase-memory/index.js";
@@ -97,12 +96,7 @@ export function commandInspect(
 	if (!options.local) {
 		const backendInspection = codebaseMemoryInspect(root, target, limit);
 		if (backendInspection !== null) {
-			console.log(
-				renderEnrichedBackendInspection(root, target, backendInspection, {
-					includeLocal: !options.backend,
-					limit,
-				}),
-			);
+			console.log(renderCodebaseMemoryInspect(backendInspection, { limit }));
 			return 0;
 		}
 	}
@@ -121,63 +115,6 @@ export function commandInspect(
 	}
 	console.log(inspection);
 	return 0;
-}
-
-/** Renders backend inspection with optional current-tree evidence appended. */
-function renderEnrichedBackendInspection(
-	root: string,
-	target: string,
-	backendInspection: CodebaseMemoryInspectResult,
-	{
-		includeLocal,
-		limit,
-	}: {
-		includeLocal: boolean;
-		limit: number;
-	},
-): string {
-	const backendOutput = renderCodebaseMemoryInspect(backendInspection, {
-		limit,
-	});
-	if (!includeLocal) {
-		return backendOutput;
-	}
-	const localOutput = firstCurrentTreeInspection(
-		root,
-		[target, backendInspection.filePath],
-		{ limit },
-	);
-	if (localOutput === null) {
-		return backendOutput;
-	}
-	return [
-		backendOutput,
-		"## Current Tree Evidence",
-		"",
-		demoteInspectionHeadings(localOutput),
-	]
-		.join("\n")
-		.trim();
-}
-
-/** Renders the first current-tree inspection that resolves from candidate targets. */
-function firstCurrentTreeInspection(
-	root: string,
-	targets: Array<string | null>,
-	{ limit }: { limit: number },
-): string | null {
-	const seen = new Set<string>();
-	for (const candidate of targets) {
-		if (candidate === null || seen.has(candidate)) {
-			continue;
-		}
-		seen.add(candidate);
-		const inspection = renderCurrentTreeInspection(root, candidate, { limit });
-		if (inspection !== null) {
-			return inspection;
-		}
-	}
-	return null;
 }
 
 /** Runs the current-tree inspect workflow without printing command fallback text. */
@@ -223,22 +160,6 @@ function renderCurrentTreeInspection(
 		return null;
 	}
 	return inspection;
-}
-
-/** Demotes nested Markdown headings before appending local evidence under backend output. */
-function demoteInspectionHeadings(output: string): string {
-	return output
-		.split("\n")
-		.map((line) => {
-			if (line.startsWith("## ")) {
-				return `### ${line.slice(3)}`;
-			}
-			if (line.startsWith("# ")) {
-				return `### ${line.slice(2)}`;
-			}
-			return line;
-		})
-		.join("\n");
 }
 
 /** Classifies a target that directly names a filesystem path. */

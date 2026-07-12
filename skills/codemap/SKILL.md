@@ -1,58 +1,31 @@
 ---
 name: codemap
-description: Use when Codex needs current-tree source navigation in a local codebase: repo orientation, code search, focused file/symbol inspection, refactor signals, ast-grep structural search, syntax rewrites, or Codebase Memory-backed graph search.
+description: Use when Codex needs Python or TypeScript/JavaScript repo orientation, source search, focused inspection, compact refactor signals, ast-grep structural search, or Codebase Memory graph evidence.
 ---
 
 # Codemap
 
-Codemap is the source navigation and refactor-scoping tool. Use it to decide what to read next, locate code, inspect one target's neighborhood, gather refactor evidence, and run guarded ast-grep operations. Codebase Memory MCP is the persistent graph backend where it has useful primitives; Codemap synchronously indexes before backend-backed queries and uses current-tree fallbacks for local gaps.
+Codemap is the source navigation and refactor-scoping tool. It clears the matching operational cache entry and indexes Codebase Memory once before graph-backed commands, keeps repository persistence disabled, and uses `rg`, ast-grep, and current-tree scanning for exact or syntax-specific evidence.
 
-## Use Cases
-
-### Orient In An Unknown Repo
-
-Start with a compact source overview:
+## Orient
 
 ```sh
 codemap summary --project-root <path>
 ```
 
-Use this when you need the repo shape before choosing files. It gives likely entries, repo intent clues, major folders, relationship hubs, and source-shape warnings. Treat the startup/session summary as orientation only; for substantial work, continue with `search`, `inspect`, `signals`, and focused reads.
+Use `summary` for a compact architecture overview, then continue with `search`, `inspect`, and `signals` before substantial changes.
 
-### Find A Concept, Symbol, Or File
-
-Use default search first:
+## Search
 
 ```sh
 codemap search --project-root <path> "<words>"
+codemap search --graph --project-root <path> "<concept>"
+codemap search --semantic --project-root <path> "<concept>"
 ```
 
-Default search is the **any -> in** path: start with any clue from the user, README, error text, symbol name, or phrase, then find where it lands in the codebase. It combines Codemap's shared ast-grep layer for identifier-like structural matches with fixed-string `rg` for words, phrases, filenames, and text. When the query clearly names a file or symbol, search also adds a focused target card with relationship evidence.
+Default search resolves path-shaped queries from the current tree first, then asks Codebase Memory for ranked code matches and falls back to local ast-grep plus fixed-string `rg`. Use graph search for relationship context and semantic search for vocabulary mismatch.
 
-### Inspect One Known Target
-
-Use inspect after summary, signals, or search gives you a file, directory, function, class, variable, or symbol:
-
-```sh
-codemap inspect --project-root <path> <path-or-symbol>
-```
-
-Inspect is the **in -> out** path: start from one known target, then expand outward to its relationship neighborhood. It shows target-specific profiles: directory summaries, file profiles, function/class profiles, variable definitions, imports, importers, contained symbols, calls, long functions, source metrics, and local pressure hints. Prefer file or directory targets first when a symbol may be ambiguous.
-
-### Choose Refactor Targets
-
-Use signals for neutral evidence, not automatic lint findings:
-
-```sh
-codemap signals --project-root <path> top
-codemap signals --json --project-root <path> top | jq '.top.functions.longFunctions[:10]'
-```
-
-Text output is quick triage. `signals --json` is the deeper durable surface for `jq`, scripts, and agent pipelines. Use signals to notice long functions with references, least-used definitions, broad name pools, dense files, relationship hubs, and files that deserve `inspect`. Broad name pools are naming-pressure evidence, not an automatic rename queue. Signals help choose what to read or change next; they are not lint findings.
-
-### Find Structural Patterns
-
-Use search wrappers for read-only structural discovery when the target is a call site, ast-grep pattern, or project-specific YAML rule:
+Use structural search when the syntax itself is the target:
 
 ```sh
 codemap search calls --project-root <path> <function-or-method> [paths...]
@@ -60,41 +33,57 @@ codemap search match --project-root <path> --lang <lang> --pattern "<pattern>" [
 codemap search rule --project-root <path> --rule <rule.yml> [paths...]
 ```
 
-`search calls` finds call sites: invocations like `print(...)`, `logger.info(...)`, or `console.log(...)`. It is the read-only sibling of `syntax replace-call`.
+`search calls` caps output at 20 by default. JavaScript/TypeScript rows are ast-grep matches. Python uses the ast-grep CLI when installed and otherwise prints an explicit `[regex]` approximation; verify regex rows against source before editing. Use raw ast-grep for rewrite previews, fixes, complex Python rules, interactive rule authoring, or engine behavior Codemap does not expose.
 
-### Preview Or Apply Syntax Edits
-
-Use syntax when the task is an AST operation, rewrite preview, debug flow, or guarded source edit:
+## Inspect
 
 ```sh
-codemap syntax replace-call --project-root <path> <old-call> <new-call> [paths...]
-codemap syntax replace --project-root <path> --lang <lang> --pattern "<pattern>" --rewrite "<rewrite>" [paths...]
-codemap syntax rename --project-root <path> <old-name> <new-name> [paths...]
-codemap syntax debug --project-root <path> --lang <lang> --pattern "<pattern>"
+codemap inspect --project-root <path> <path-or-symbol>
 ```
 
-Use `search rule --rule <rule.yml>` for read-only rule matches. Use `syntax rule --rule <rule.yml> --apply --yes` only for YAML rules with safe fixes. Codemap runs YAML rules through its shared ast-grep layer; it does not manage ast-grep rule projects.
+Inspect is the in-to-out path from one known target. Paths use current-tree evidence. Unambiguous symbols use the fresh backend snippet and call trace; ambiguous or unavailable backend matches fall back locally. Use `--local` when current-tree-only detail is the goal.
 
-### Use Codebase Memory Backend Search
-
-Use backend semantic or graph search when persistent graph evidence is useful:
+## Refactor Signals
 
 ```sh
-codemap search --semantic --project-root <path> "<words>"
-codemap semantic status --project-root <path>
+codemap signals --project-root <path>
+codemap signals --json --project-root <path> | jq '{functionPressure, smallFunctions, longNames}'
 ```
 
-Backend search is for persistent graph facts, snippets, traces, architecture summaries, and semantic graph matches. Codemap asks Codebase Memory MCP to index the project before backend-backed commands so stale graph data is not served knowingly. If the backend is unavailable or returns no useful answer, Codemap falls back to current-tree evidence where a local answer still makes sense.
+Default signals are bounded to twelve rows and contain evidence rather than recommendations:
+
+- `functionPressure`: backend complexity and concrete scan-in-loop metrics.
+- `smallFunctions`: private functions no longer than eight lines with few lexical mentions.
+- `longNames`: long camelCase or snake_case variable-like identifiers; ALL_CAPS constants and PascalCase owners are excluded.
+
+Interpret function-pressure fields as follows:
+
+- `cognitive`: unitless control-flow understandability score; nesting and branching raise it. Compare it within the same analyzer rather than treating it as a universal grade.
+- `cyclomatic`: approximate count of independent control-flow paths; higher values imply more branch combinations.
+- `lines`: physical source lines spanned by the function; size evidence, not a quality verdict.
+- `linear_scan_in_loop`: number of detected scan sites such as `find`, `filter`, `some`, or equivalent traversal inside loops; this is repeated-work evidence, not a runtime iteration count or proof of a performance defect.
+
+The selection and ordering carry Codemap’s opinion. Lexical mentions are leads rather than compiler-grade references, so verify dead-code or rename conclusions with search and focused reads.
+
+Use explicit detailed sections only when the compact view points there: `relationships`, `files`, `lengths`, `functions`, `variables`, `usage`, `docstring-signals`, or `docstrings`.
+
+## Backend Diagnostics
+
+```sh
+codemap memory status --project-root <path>
+codemap memory schema --project-root <path>
+codemap memory query --json --project-root <path> "<read-only Cypher>"
+codemap index --project-root <path>
+```
+
+Backend commands clear the requested root's prior operational cache entry, then index it with `persistence: false`. `memory query --json` is the raw escape hatch; normal feature output should remain compact and normalized.
 
 ## Reference Routing
 
-Read only the reference needed for the task:
-
-- `references/current-tree.md`: summary, search, inspect, likely-entry target cards, signals, relationship context, and artifact-free current-code workflows.
-- `references/search.md`: default source search, relationship-context search, Codebase Memory backend search, regex, ast-grep patterns, and syntax handoff.
-- `references/syntax.md`: ast-grep pattern workflow, YAML rules, rewrite previews, and syntax codemods.
-- `references/python.md`: Python import, symbol, docstring, entrypoint, and package-map behavior.
+- `references/current-tree.md`: summary, inspect, compact signals, detailed signal sections, and backend boundary.
+- `references/search.md`: default, graph, semantic, call-site, pattern, rule, and raw-regex search.
+- `references/python.md`: Python imports, symbols, call search, inspection, and signal caveats.
 
 ## Boundaries
 
-Codemap gives syntax-level source facts and relationship leads, not compiler-grade facts. Do not expect type inference, framework-specific magic, dataflow proofs, dynamic import resolution, or complete call graphs. Verify important claims with focused reads, `rg`, ast-grep, and tests before changing code. Run raw ast-grep only for engine flags, interactive rule authoring, full debug dumps, or behavior Codemap does not expose.
+Codemap provides syntax-level facts and indexed relationship leads, not compiler-grade reachability, complete framework semantics, or dataflow proof. Verify consequential claims with focused reads, `rg`, ast-grep, and tests.

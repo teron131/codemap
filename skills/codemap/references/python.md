@@ -20,16 +20,18 @@ Start with `summary` to find repo inventory, intent clues, entrypoints, and hubs
 
 Use default `search` for concepts like `python imports`, `render inspection`, `entrypoint discovery`, or specific function/class names.
 
-Use `search match` when the query is a Python syntax pattern:
+Default search includes built-in Python definition matching plus exact `rg` text fallback. `search calls` uses the ast-grep CLI when installed; without it, rows are explicitly labeled `[regex]` and should be treated as approximate because comments and strings can match.
+
+A simple Python `search match` requires an installed ast-grep CLI:
 
 ```sh
 codemap search match --project-root <path> --lang python --pattern "def $NAME($$$ARGS): $$$BODY" <paths...>
 ```
 
-Use `search rule` for read-only saved ast-grep rules with kind, regex, relational, or reusable constraints. Use `syntax rule --apply --yes` only when applying a safe fix.
+Run raw ast-grep for Python kind, regex, relational, reusable, rewrite, or fix rules; Codemap’s built-in NAPI language set does not include Python.
 
 Use `search --graph` only when the search result itself needs derived relationship context.
 
-Use `inspect` on the path returned by search when you need the focused neighborhood. The target card shows incoming/outgoing imports, contained symbols, calls, long functions, source metrics, and file profile hints.
+Use `inspect` on the path returned by search when you need incoming/outgoing imports, contained symbols, calls, long functions, source metrics, and file profile hints.
 
-Use `signals` when looking for compact refactor evidence or high-signal files, but do not treat it as a lint report. Use `signals top` for triage, `signals functions` for long functions and broad function names, `signals variables` for least-used definitions and broad name pools, and `signals files` when you need dense file profile rows directly. Use `signals --json` when another script or agent needs stable rows.
+Use default `signals` for at most twelve function-pressure, small-function, and long-name rows. The mention count is lexical rather than compiler-resolved; verify apparent dead code with `search`, source reads, and tests. Use explicit `signals functions`, `signals variables`, or `signals files` only when the compact evidence points there.

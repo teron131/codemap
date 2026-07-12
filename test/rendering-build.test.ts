@@ -1,9 +1,9 @@
-/** Checks rendering view ranking behavior. */
+/** Checks current-tree summary entry ranking behavior. */
 import { describe, expect, it } from "vitest";
 
 import {
 	buildLikelyEntries,
-	buildViews,
+	buildPathRankedLikelyEntries,
 } from "../src/codemap/rendering/index.js";
 import type {
 	GraphNode,
@@ -31,43 +31,19 @@ describe("rendering view building", () => {
 	});
 
 	it("prefers core large-repo fallback entries over alphabetical extension entries", () => {
-		const graph: GraphPayload = {
-			stats: {
-				files: 9,
-				nodes: 9,
-				edges: 0,
-				nodeTypes: { file: 9 },
-				edgeTypes: {},
-				languages: { typescript: 9 },
-				categories: { code: 9 },
-			},
-			nodes: [
-				node("extensions/acpx/index.ts"),
-				node("extensions/active-memory/index.ts"),
-				node("extensions/admin-http-rpc/index.ts"),
-				node("src/index.ts"),
-				node("src/cli/acp-cli.ts"),
-				node("src/cli/run-main.test.ts"),
-				node("src/cli/run-main.ts"),
-				node("src/gateway/server.ts"),
-				node("src/tools/index.ts"),
-				node("ui/src/main.ts"),
-				node("test/helpers/index.ts"),
-			],
-			edges: [],
-			evidence: {
-				importMap: {
-					mode: "lightweight-summary",
-					reason: "skipped detailed graph above 5000 files",
-				},
-			},
-		};
-
-		const views = buildViews(graph);
-		const architecture = views.architecture as Record<string, unknown>;
-		const entries = architecture.likelyEntries as Array<
-			Record<string, unknown>
-		>;
+		const entries = buildPathRankedLikelyEntries([
+			node("extensions/acpx/index.ts"),
+			node("extensions/active-memory/index.ts"),
+			node("extensions/admin-http-rpc/index.ts"),
+			node("src/index.ts"),
+			node("src/cli/acp-cli.ts"),
+			node("src/cli/run-main.test.ts"),
+			node("src/cli/run-main.ts"),
+			node("src/gateway/server.ts"),
+			node("src/tools/index.ts"),
+			node("ui/src/main.ts"),
+			node("test/helpers/index.ts"),
+		]);
 		expect(entries.map((entry) => entry.title).slice(0, 5)).toEqual([
 			"src/index.ts",
 			"src/cli/run-main.ts",

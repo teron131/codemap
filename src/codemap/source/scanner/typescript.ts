@@ -150,7 +150,7 @@ export function isTypescriptModuleLevelVariable(node: SgNode): boolean {
 }
 
 /** Collects TypeScript exported names from export syntax nodes. */
-export function collectTypescriptExportNames(
+function collectTypescriptExportNames(
 	metrics: FileMetrics,
 	node: SgNode,
 ): void {
@@ -192,7 +192,7 @@ export function collectTypescriptExportNames(
 }
 
 /** Scans TypeScript-family source with ast-grep syntax nodes. */
-export function scanTypescriptWithAstGrep({
+function scanTypescriptWithAstGrep({
 	source,
 	filePath,
 	relPath,

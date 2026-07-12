@@ -22,9 +22,8 @@ export function currentTreeInspectGraph(
 	const emitPaths = inspectEmitPaths(
 		root,
 		rawTarget,
-		scan as unknown as Record<string, unknown>,
+		scan,
 		importMap,
-		pythonTreesByPath,
 		fileMetricsByPath,
 	);
 	let structureFiles = scan.files;
@@ -35,18 +34,8 @@ export function currentTreeInspectGraph(
 		fileMetricsByPath,
 		pythonTreesByPath,
 	});
-	const graph = buildGraphPayload(root, scan, structure, importResult, {
-		includeSignals: false,
-		emitPaths,
-	});
-	return [
-		graph,
-		metricsForFiles(
-			root,
-			structureFiles as unknown as Array<Record<string, unknown>>,
-			fileMetricsByPath,
-		),
-	];
+	const graph = buildGraphPayload(scan, structure, importResult, { emitPaths });
+	return [graph, metricsForFiles(root, structureFiles, fileMetricsByPath)];
 }
 
 /** Builds import incoming and outgoing rows for inspection. */

@@ -1,4 +1,4 @@
-/** Re-exports artifact rendering helpers and view builders. */
+/** Re-exports current-tree summary rendering helpers. */
 export {
 	buildIntentView,
 	buildInventoryView,
@@ -7,24 +7,7 @@ export {
 	relationshipCountsFromGraph,
 	topCountItems,
 } from "./architecture.js";
-export {
-	buildLayers,
-	buildViews,
-	FILE_NODE_TYPES,
-	STRUCTURE_HASH_DESCRIPTION,
-	topGroup,
-} from "./build.js";
-export {
-	htmlList,
-	htmlTable,
-	metricGridHtml,
-	REPORT_STYLE,
-	refreshPanelItems,
-	relationshipsAndUpdateHtml,
-	renderHtmlReport,
-	splitTableSectionHtml,
-	tableSectionHtml,
-} from "./html-report.js";
+export { buildSummaryText } from "./build.js";
 export {
 	buildLikelyEntries,
 	buildPathRankedLikelyEntries,
@@ -32,12 +15,5 @@ export {
 export {
 	formatCountItems,
 	intentSummaryLines,
-	renderAgentBrief,
-	renderHotspotsText,
 	renderSummaryText,
 } from "./markdown.js";
-export {
-	buildOverviewView,
-	compactRefreshPlan,
-	samplePaths,
-} from "./overview.js";

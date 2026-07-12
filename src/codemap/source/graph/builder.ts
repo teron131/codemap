@@ -1,6 +1,7 @@
 /** Builds graph nodes and edges from scan, import, and structure evidence. */
 import path from "node:path";
 
+import { ENTRYPOINT_BASENAMES } from "../scanner/index.js";
 import type { GraphEdge, GraphNode } from "./schema.js";
 
 export const SIGNIFICANT_FUNCTION_LINES = 10;
@@ -52,25 +53,7 @@ export function classifyTags(scanEntry: ScanLikeEntry): string[] {
 	) {
 		tags.add("infrastructure");
 	}
-	if (
-		new Set([
-			"__main__.py",
-			"app.js",
-			"app.jsx",
-			"app.py",
-			"app.ts",
-			"app.tsx",
-			"index.js",
-			"index.jsx",
-			"index.ts",
-			"index.tsx",
-			"main.js",
-			"main.jsx",
-			"main.py",
-			"main.ts",
-			"main.tsx",
-		]).has(nameLower)
-	) {
+	if (ENTRYPOINT_BASENAMES.has(nameLower)) {
 		tags.add("entry-candidate");
 	}
 	return [...tags].filter((tag) => tag && tag !== "unknown").sort();

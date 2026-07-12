@@ -1,33 +1,18 @@
-# Codemap Architecture
+# Codemap
 
-Codemap is a Codebase Memory-backed source inspection CLI. It uses Codebase Memory MCP as the default intelligence path for graph search, semantic search, traces, snippets, architecture, and status, then uses `rg`, ast-grep, source scanning, lightweight relationship evidence, and refactor signals for local fallback and syntax-specific gaps. It does not own a persistent graph store; Codebase Memory MCP is the persistent graph backend.
+Codemap is an opinionated, token-conscious wrapper around Codebase Memory MCP, `rg`, and ast-grep for Python and TypeScript/JavaScript codebases. Codebase Memory supplies indexed graph intelligence, `rg` remains the exact-text baseline, and ast-grep owns built-in JavaScript/TypeScript structural search.
 
-## Design Intent
+Codemap does not own a persistent graph store. Every graph-backed command clears this root's operational Codebase Memory cache entry, indexes once with `persistence: false`, uses that fresh snapshot for the command, and falls back to current-tree evidence where a local answer exists.
 
-Codemap is an agent-facing source navigation and refactor-scoping tool. It should stay small, direct, and Codebase Memory first for high-level intelligence.
+## Product Contract
 
-- Backend-backed commands synchronously ask Codebase Memory MCP to index the project before every query.
-- Current-tree commands inspect live files and do not write Codemap-owned graph storage.
-- `src/codemap/ast-grep` is the shared ast-grep boundary; `rg` stays the subprocess boundary for text search and file discovery.
-- `search` is broad discovery; `inspect <target>` is the explicit path for one known file, symbol, or neighborhood.
-- Codebase Memory MCP is the backend for persistent graph search, semantic graph search, snippets, traces, architecture summaries, backend-informed signals, schema/project inspection, graph queries, changed-code impact, and backend status.
-- Backend search output suppresses likely test rows by default; pass `--include-tests` when test hits are the point.
-- Semantic graph search hides below-floor score rows and falls back to current-tree search instead of printing low-signal matches.
-- `signals` are backend-informed local refactor evidence, not lint findings.
-
-## Output Policy
-
-Codemap output is optimized for agent reading, not raw backend completeness.
-
-- Prefer compact, ranked rows over full JSON dumps; expose raw JSON only on explicit JSON-oriented command paths.
-- Hide generic helpers, low-score semantic rows, duplicate query rows, and likely test matches unless they are useful for the requested mode.
-- Print visible result counts and short hidden-row notes so output stays honest without spending tokens on discarded noise.
-- Apply graph filters consistently across Codebase Memory output and current-tree fallback: label, name, qualified name, file glob, relationship, degree, entrypoint, and test inclusion.
-- Label degraded current-tree paths explicitly. Large-repo fallbacks may skip expensive graph construction, so their navigation context is source/path evidence rather than import-centrality evidence.
+- Default text is the main agent-facing representation: compact, ranked, and evidence-only.
+- Stable row surfaces (`signals`, structural matches, and call matches) offer compact normalized JSON for `jq`; composed orientation and inspection stay text-only instead of maintaining a second noisy contract. Raw backend JSON is reserved for `memory query --json` and `memory changes --json`.
+- `signals` selects evidence that implies what deserves review without printing advice or prompts.
+- `search calls` never changes into a backend caller/callee trace; every row names its source matching engine.
+- Backend failures and unknown payloads fail closed so local fallbacks are not suppressed.
 
 ## Install
-
-Use `pnpm` for repo dependencies and builds, then use `npm` for the global CLI install:
 
 ```sh
 pnpm install
@@ -35,72 +20,62 @@ pnpm run build
 npm install -g .
 ```
 
-For agent use, enable the Codemap skill in the matching agent guidance so agents know when to reach for `codemap` before broad refactor or architecture work.
+## Core Commands
 
-## Command Surface
+| Command | Primary evidence | Purpose |
+| --- | --- | --- |
+| `summary` | Codebase Memory architecture, then current-tree fallback | Compact repository orientation. |
+| `search <text>` | Current-tree paths, then Codebase Memory ranked search, then ast-grep plus `rg` fallback | Broad path, concept, symbol, and text discovery. |
+| `search --graph <text>` | Codebase Memory graph search, then current-tree graph fallback | Relationship-aware discovery. |
+| `search --semantic <text>` | Codebase Memory semantic graph search, then current-tree fallback | Vocabulary-bridging discovery. |
+| `search calls <name>` | ast-grep, or labeled Python regex fallback | Call-shaped source matches, capped at 20 by default. |
+| `search match` / `search rule` | ast-grep | Built-in JS/TS structural discovery; simple Python patterns require the ast-grep CLI. |
+| `inspect <target>` | Codebase Memory for symbols, current tree for paths and fallback | Focused in-to-out neighborhood inspection. |
+| `signals` | Codebase Memory function metrics plus current-tree definitions | At most four function-pressure, four small low-use, and four long-name rows. |
+| `memory ...` | Raw Codebase Memory diagnostics | Projects, status, schema, Cypher queries, and change impact. |
+| `index` | Codebase Memory indexing | Explicit refresh timing and status. |
 
-| Area | Commands | Reads | Writes / guard | Purpose |
-| --- | --- | --- | --- | --- |
-| Backend wrappers | `summary`, `search <text>`, `search --graph <text>`, `search --semantic <text>`, `inspect <symbol>`, `search calls <name>`, `memory projects`, `memory status`, `memory schema`, `memory query <cypher>`, `memory changes`, `index` | Codebase Memory MCP after synchronous indexing, with local fallback where useful | Backend index only | Discovery, focused source neighborhoods, traces, architecture, snippets, schema/project inspection, graph queries, changed-code impact, status, and explicit refresh timing. |
-| Current tree | `signals [section]`, path/file `inspect <target>` | Codebase Memory status plus current tree | Backend index only for signal context | Refactor evidence and direct file or directory inspection. |
-| Structural search | `search match`, `search rule`, scoped `search calls` | Current tree plus pattern, rule, language, or path input | None | Explicit read-only ast-grep matches under the search surface. |
+## Refactor Signals
 
-## Runtime Model
+Readable output is the default:
 
-```mermaid
-sequenceDiagram
-    participant CLI
-    participant Backend as Codebase Memory MCP
-    participant Search as ast-grep + rg
-    participant Source as source evidence
-
-    CLI->>Backend: index_repository before backend query
-    Backend-->>CLI: ready project
-    CLI->>Backend: search/summary/inspect/status
-    alt backend answer
-        Backend-->>CLI: graph results, snippets, traces, architecture
-    else unavailable or no answer
-        CLI->>Search: current-tree search
-        Search-->>CLI: source matches
-        CLI->>Source: scan, graph, signals, inspect
-        Source-->>CLI: evidence, likely entries, profiles
-    end
+```sh
+codemap signals --project-root <path>
 ```
 
-## Module Ownership
+The compact JSON surface contains the same facts:
 
-```mermaid
-flowchart TD
-    CLI["commands.cli"] --> Current["current-tree commands"]
-    CLI --> Backend["codebase-memory backend"]
-
-    subgraph CurrentLane["Current tree"]
-        SearchInspect["summary / search / inspect / signals"]
-        Source["source evidence"]
-        Rg["rg text"]
-        AstGrep["ast-grep adapter"]
-        SourceParts["scanner / extraction / graph / signals / inspection"]
-
-        SearchInspect --> Rg
-        SearchInspect --> AstGrep
-        SearchInspect --> Source
-        Source --> SourceParts
-    end
-
-    subgraph BackendLane["Persistent backend"]
-        CBM["Codebase Memory MCP"]
-        GraphTools["search_graph / search_code / trace_path / get_code_snippet / get_architecture / query_graph / detect_changes"]
-
-        CBM --> GraphTools
-    end
-
-    Backend --> CBM
+```sh
+codemap signals --json --project-root <path> | jq '{functionPressure, smallFunctions, longNames}'
 ```
 
-## Architecture Notes
+The three default buckets are deliberately factual:
 
-- Codemap-owned persistent artifacts and separate local semantic indexes are intentionally absent.
-- Source evidence lives in `src/codemap/source`: scanner, extraction, graph, signals, inspection.
-- ast-grep usage is centralized in `src/codemap/ast-grep`; `rg` stays a subprocess boundary.
-- Search lanes are direct code boundaries: `src/codemap/search/source`, `src/codemap/search/structural`, and `src/codemap/search/graph`.
-- `src/codemap/codebase-memory` owns the persistent backend adapter, unconditional indexing trigger, graph and semantic graph search, trace/query/change wrappers, and compact renderer shortcuts.
+- `functionPressure`: cognitive complexity, cyclomatic complexity, source lines, and concrete linear scans inside loops when the backend reports them.
+- `smallFunctions`: private functions no longer than eight lines with few lexical mentions.
+- `longNames`: camelCase or snake_case variable-like identifiers at least thirty characters long with lexical mention counts; conventional constants and PascalCase owners are excluded.
+
+Function-pressure fields use compact standard names: `cognitive` is a unitless control-flow understandability score that rises with nesting and branching; `cyclomatic` approximates independent control-flow paths; `lines` is the physical function span; and `linear_scan_in_loop` counts detected scan sites such as `find`, `filter`, or `some` inside loops. Higher values are stronger review pressure, not correctness failures. A scan site may operate on a bounded collection, so it is not proof of a performance problem.
+
+Lexical mentions are not graph references and are labeled accordingly. The rows are review leads, not deletion or rename instructions.
+
+Detailed sections remain explicit for narrower investigations: `relationships`, `files`, `lengths`, `functions`, `variables`, `usage`, `docstring-signals`, and `docstrings`.
+
+## Backend Boundary
+
+```mermaid
+flowchart LR
+    CLI["Codemap command"] --> RESET["delete matching cache entry"]
+    RESET --> INDEX["index_repository persistence=false"]
+    INDEX --> CBM["Codebase Memory query"]
+    CBM --> NORMALIZE["feature-owned compact result"]
+    LOCAL["rg + ast-grep + current tree"] --> NORMALIZE
+    NORMALIZE --> TEXT["readable text"]
+    NORMALIZE --> JSON["normalized JSON"]
+```
+
+`src/codemap/codebase-memory` owns MCP transport, indexing, payload validation, and backend result normalization. Search, inspect, signals, summary, and memory commands own their selection and presentation policy.
+
+## Limits
+
+Codemap provides syntax-level and indexed relationship evidence, not compiler-grade reachability, framework-complete data flow, or proof that a symbol is dead. Verify consequential findings with focused reads, exact search, and the repository’s tests.

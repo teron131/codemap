@@ -10,10 +10,10 @@ import {
 import { DETAILED_ANALYSIS_FILE_LIMIT, resolveProjectRoot } from "../common.js";
 import {
 	type GraphMatchOptions,
+	pathMatches,
 	renderGraphMatchLines,
 	type SourceFallbackGroup,
 	type SourceMatch,
-	searchTargetCard,
 	sourceFallbackMatches,
 	sourceMatches,
 } from "../search/index.js";
@@ -124,12 +124,27 @@ export async function commandSearch(
 		);
 		return 2;
 	}
+	if (options.graph && options.semantic) {
+		console.log("Choose only one search lane: --graph or --semantic.");
+		return 2;
+	}
+	if (!options.graph && hasGraphOnlyFilters(options)) {
+		console.log("Graph filters require --graph.");
+		return 2;
+	}
 	const searchText = searchArgs.join(" ");
 	const limit = searchLimit(options.limit);
 	const root = resolveProjectRoot(
 		options.projectRoot ?? rootOptions.projectRoot,
 	);
 	console.log(`Search: ${searchText}`);
+	if (!options.graph && !options.semantic) {
+		const directPaths = pathMatches(root, searchText, { limit });
+		if (directPaths.length > 0) {
+			printSourceMatches(directPaths);
+			return 0;
+		}
+	}
 	if (
 		options.semantic &&
 		printCodebaseMemorySemanticSearch(
@@ -152,6 +167,7 @@ export async function commandSearch(
 	}
 	if (
 		!options.graph &&
+		!options.semantic &&
 		printCodebaseMemorySearch(
 			root,
 			searchText,
@@ -162,7 +178,7 @@ export async function commandSearch(
 		return 0;
 	}
 	if (options.graph) {
-		const graph = currentTreeGraph(root, { includeSignals: false });
+		const graph = currentTreeGraph(root);
 		console.log(
 			"\nGraph fallback: Codebase Memory graph search returned no answer; used current-tree relationship graph.",
 		);
@@ -200,11 +216,6 @@ export async function commandSearch(
 		} else {
 			printSourceMatches(matches, { note: searchNote });
 		}
-		const card = searchTargetCard(root, searchText, matches, { limit });
-		if (card !== null) {
-			console.log("");
-			console.log(card);
-		}
 	}
 	if (options.semantic) {
 		console.log("\nSemantic graph matches:");
@@ -213,6 +224,21 @@ export async function commandSearch(
 		);
 	}
 	return 0;
+}
+
+/** Detects filters whose meaning exists only in graph search. */
+function hasGraphOnlyFilters(options: SearchOptions): boolean {
+	return [
+		options.label,
+		options.namePattern,
+		options.qnPattern,
+		options.filePattern,
+		options.relationship,
+		options.minDegree,
+		options.maxDegree,
+		options.excludeEntryPoints,
+		options.offset,
+	].some((value) => value !== undefined && value !== false);
 }
 
 /** Prints source search matches in CLI text format. */
@@ -228,6 +254,10 @@ export function printSourceMatches(
 		console.log("  none");
 	}
 	for (const item of matches) {
+		if (item.engine === "path") {
+			console.log(`  - ${item.filePath} [file]`);
+			continue;
+		}
 		console.log(
 			`  - ${item.engine} ${item.filePath}:${item.line}:${item.column} [${item.kind}]`,
 		);
@@ -236,7 +266,7 @@ export function printSourceMatches(
 }
 
 /** Prints partial source matches for a no-hit phrase query. */
-export function printSourceFallbackMatches(
+function printSourceFallbackMatches(
 	groups: SourceFallbackGroup[],
 	{ note = "" }: { note?: string } = {},
 ): void {

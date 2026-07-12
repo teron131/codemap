@@ -10,7 +10,7 @@ export {
 	isLowUsageRefactorCandidate,
 	isLowUsageVariableRefactorCandidate,
 	isPascalCaseName,
-	LOW_USAGE_MAX_REFERENCES,
+	LOW_USAGE_MAX_MENTIONS,
 	topHubs,
 	topInheritanceHubs,
 	usageBucket,
@@ -18,47 +18,11 @@ export {
 	usageRows,
 	variableUsageRows,
 } from "./analysis.js";
-export {
-	ALL_SECTIONS,
-	attachDocPreviews,
-	buildDocstringSignalSection,
-	buildEmptyDocstringSignals,
-	buildFilesystemSection,
-	buildFunctionLengthsSection,
-	buildRelationshipsSection,
-	buildSignalExport,
-	docPreviewsByFile,
-	functionSpans,
-	SUMMARY_SECTIONS,
-	selectedSections,
-	signalExportMeta,
-} from "./build.js";
-export {
-	languageMetricItems,
-	lowUsageCandidateRows,
-	runSignalsExport,
-	SIGNAL_EXPORT_SECTIONS,
-	signalMetrics,
-	sortedUsageRows,
-	USAGE_TABLE_LIMIT,
-} from "./export.js";
+export { buildSignalExport } from "./build.js";
+export { runSignalsExport } from "./export.js";
 export {
 	buildSignalPayload,
-	fileScopedRows,
-	functionPayload,
-	functionPressureRows,
-	highFrequencyRows,
-	isStructuralFileRow,
-	languageRows,
-	limitedLengthSection,
-	limitedRows,
-	lowUseRows,
-	referenceCountRows,
-	rowFile,
-	STRUCTURAL_SUFFIXES,
 	selectPayloadSection,
-	topPayload,
-	variablePayload,
 } from "./payload.js";
 export {
 	isGeneratedSignalPath,
@@ -66,27 +30,8 @@ export {
 	SIGNAL_OUTPUT_ROW_LIMIT,
 	SIGNAL_SECTION_CHOICES,
 	SIGNAL_TOP_ROW_LIMIT,
-	type SignalSection,
 } from "./policy.js";
-export {
-	appendDefinitionRows,
-	appendDenseFileRows,
-	appendDocstringSignals,
-	appendDocstrings,
-	appendFileCountRows,
-	appendFiles,
-	appendFunctionSignals,
-	appendLengths,
-	appendNameRows,
-	appendRelationships,
-	appendTop,
-	appendUsageDistribution,
-	appendVariableSignals,
-	denseFileCounters,
-	refsText,
-	renderSignalText,
-	signalTitle,
-} from "./render.js";
+export { renderSignalText } from "./render.js";
 export type {
 	DefinitionRow,
 	DenseFileRow,

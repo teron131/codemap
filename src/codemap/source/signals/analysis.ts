@@ -13,7 +13,7 @@ import type {
 } from "./schema.js";
 
 export const IDENTIFIER_RE = /\b[A-Za-z_][A-Za-z0-9_]*\b/g;
-export const LOW_USAGE_MAX_REFERENCES = 5;
+export const LOW_USAGE_MAX_MENTIONS = 5;
 
 type OccurrenceCounts = Map<string, number> | Record<string, unknown>;
 
@@ -147,7 +147,7 @@ export function buildSignalFocusEntries(
 	return entries;
 }
 
-/** Counts usage rows by reference-count bucket. */
+/** Counts usage rows by lexical-mention bucket. */
 export function usageDistribution(
 	rows: DefinitionRow[],
 ): Record<string, number> {
@@ -164,7 +164,7 @@ export function usageDistribution(
 	};
 }
 
-/** Maps a reference count to a usage distribution bucket. */
+/** Maps a lexical-mention count to a usage distribution bucket. */
 export function usageBucket(count: number): string {
 	if (count <= 1) {
 		return "0_1";
@@ -232,7 +232,7 @@ export function isAllCapsName(name: string): boolean {
 	);
 }
 
-/** Builds low-reference rows for function definitions. */
+/** Builds low-mention rows for function definitions. */
 export function functionUsageRows(
 	scannedFiles: FileMetrics[],
 	suffixes: Set<string>,
@@ -253,6 +253,7 @@ export function functionUsageRows(
 				identifier: span.identifier,
 				file: metrics.relPath,
 				count,
+				line: span.startLine,
 				lines: span.span,
 				exported: exportedNames.has(name),
 				refactorCandidate: isLowUsageRefactorCandidate(name, count, {
@@ -270,7 +271,7 @@ export function functionUsageRows(
 	return rows;
 }
 
-/** Builds low-reference rows for variable definitions. */
+/** Builds low-mention rows for variable definitions. */
 export function variableUsageRows(
 	scannedFiles: FileMetrics[],
 	suffixes: Set<string>,
@@ -322,7 +323,7 @@ export function isLowUsageRefactorCandidate(
 	count: number,
 	{ exported, language }: { exported: boolean; language: string },
 ): boolean {
-	if (count > LOW_USAGE_MAX_REFERENCES) {
+	if (count > LOW_USAGE_MAX_MENTIONS) {
 		return false;
 	}
 	if (exported) {
@@ -347,7 +348,7 @@ export function isLowUsageVariableRefactorCandidate(
 		language,
 	}: { exported: boolean; moduleLevel: boolean; language: string },
 ): boolean {
-	if (count > LOW_USAGE_MAX_REFERENCES) {
+	if (count > LOW_USAGE_MAX_MENTIONS) {
 		return false;
 	}
 	if (exported || !moduleLevel) {
@@ -449,7 +450,7 @@ export function topInheritanceHubs(
 	return rows.slice(0, limit);
 }
 
-/** Reads a reference count for one identifier name. */
+/** Reads a lexical-mention count for one identifier name. */
 function occurrenceCount(occurrences: OccurrenceCounts, name: string): number {
 	if (occurrences instanceof Map) {
 		return occurrences.get(name) ?? 0;

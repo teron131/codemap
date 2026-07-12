@@ -6,7 +6,6 @@ import {
 	runScan,
 	runStructure,
 } from "../extraction/index.js";
-import { runSignalsExport } from "../signals/index.js";
 import type { StructureEntry } from "./builder.js";
 import { buildNodesAndEdges } from "./builder.js";
 import type {
@@ -63,10 +62,7 @@ export function relatedEdges(
 /** Builds the graph payload directly from the current project tree. */
 export function currentTreeGraph(
 	root: string,
-	{
-		includeSignals = true,
-		emitPaths = null,
-	}: { includeSignals?: boolean; emitPaths?: Set<string> | null } = {},
+	{ emitPaths = null }: { emitPaths?: Set<string> | null } = {},
 ): GraphPayload {
 	const scan = runScan(root);
 	const importResult = runImportMap(root, scan.files);
@@ -79,38 +75,25 @@ export function currentTreeGraph(
 		fileMetricsByPath: importResult._typescriptMetrics,
 		pythonTreesByPath: importResult._pythonTrees,
 	});
-	return buildGraphPayload(root, scan, structure, importResult, {
-		includeSignals,
-		emitPaths,
-	});
+	return buildGraphPayload(scan, structure, importResult, { emitPaths });
 }
 
 /** Builds the canonical graph payload from scan, import, and structure data. */
 export function buildGraphPayload(
-	root: string,
 	scan: ScanPayload,
 	structure: StructurePayload,
 	importResult: Pick<ImportMapPayload, "importMap" | "stats">,
-	{
-		includeSignals = true,
-		emitPaths = null,
-	}: { includeSignals?: boolean; emitPaths?: Set<string> | null } = {},
+	{ emitPaths = null }: { emitPaths?: Set<string> | null } = {},
 ): GraphPayload {
 	const importMap = importResult.importMap;
 	const [nodes, edges] = buildNodesAndEdges(scan, structure, importMap, {
 		emitPaths,
 	});
-	const evidence: GraphPayload["evidence"] = {
-		importMap: importResult.stats,
-	};
-	if (includeSignals) {
-		evidence.codeSignals = runSignalsExport(root);
-	}
 	return {
 		stats: graphStats(nodes, edges, scan),
 		nodes,
 		edges,
-		evidence,
+		evidence: { importMap: importResult.stats },
 	};
 }
 

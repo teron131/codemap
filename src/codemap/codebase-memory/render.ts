@@ -7,13 +7,10 @@ import {
 	type CodebaseMemoryIndexResult,
 	type CodebaseMemoryInspectResult,
 	type CodebaseMemoryStatusResult,
-	type CodebaseMemoryTraceOptions,
 	codebaseMemoryArchitectureSummary,
-	codebaseMemoryCallTrace,
 	codebaseMemoryChanges,
 	codebaseMemoryGraphSearch,
 	codebaseMemoryIndex,
-	codebaseMemoryInspect,
 	codebaseMemoryProjects,
 	codebaseMemoryQuery,
 	codebaseMemorySchema,
@@ -49,16 +46,22 @@ const GENERIC_BACKEND_NAMES = new Set([
 	"items",
 	"json",
 	"keys",
+	"limitedRows",
 	"open",
 	"read",
 	"read_text",
+	"recordValue",
 	"run",
 	"set",
 	"send",
+	"stringField",
 	"update",
 	"values",
 	"write",
 	"write_text",
+	"arrayValue",
+	"numberField",
+	"numberValue",
 ]);
 
 /** Prints graph-augmented CodebaseMemory source search results when available. */
@@ -74,6 +77,12 @@ export function printCodebaseMemorySearch(
 		backendFetchLimit(limit, options),
 	);
 	if (result === null) {
+		return false;
+	}
+	if (
+		searchRowSelection(recordValue(result).results, options).visibleRows
+			.length === 0
+	) {
 		return false;
 	}
 	console.log("\nCodebaseMemory code matches:");
@@ -127,47 +136,16 @@ export function printCodebaseMemorySemanticSearch(
 	if (result === null) {
 		return false;
 	}
+	if (
+		searchRowSelection(recordValue(result).semantic_results, options)
+			.visibleRows.length === 0
+	) {
+		return false;
+	}
 	console.log("\nCodebaseMemory semantic matches:");
 	console.log(
 		renderCodebaseMemorySemanticSearch(result, { limit, ...options }),
 	);
-	return true;
-}
-
-/** Prints a CodebaseMemory snippet for a symbol inspection target when available. */
-export function printCodebaseMemoryInspect(
-	root: string,
-	target: string,
-	limit: number,
-): boolean {
-	const result = codebaseMemoryInspect(root, target, limit);
-	if (result === null) {
-		return false;
-	}
-	console.log(renderCodebaseMemoryInspect(result, { limit }));
-	return true;
-}
-
-/** Prints CodebaseMemory caller/callee traces for search calls when available. */
-export function printCodebaseMemoryCallTrace(
-	root: string,
-	name: string,
-	{
-		jsonOutput = false,
-		limit = 8,
-		...options
-	}: CodebaseMemoryTraceOptions & { jsonOutput?: boolean; limit?: number } = {},
-): boolean {
-	const result = codebaseMemoryCallTrace(root, name, options);
-	if (result === null) {
-		return false;
-	}
-	if (jsonOutput) {
-		console.log(JSON.stringify(result, null, 2));
-	} else {
-		console.log("CodebaseMemory call trace:");
-		console.log(renderCodebaseMemoryTrace(result, { limit }));
-	}
 	return true;
 }
 
@@ -260,10 +238,15 @@ function renderCodebaseMemoryCodeSearch(
 	{ includeTests = false, limit }: BackendRenderOptions & { limit: number },
 ): string {
 	const record = recordValue(value);
-	const allRows = arrayValue(record.results);
-	const filteredRows = searchRows(allRows, { includeTests });
+	const {
+		allRows,
+		testFilteredRows,
+		visibleRows: filteredRows,
+	} = searchRowSelection(record.results, { includeTests });
 	const rows = filteredRows.slice(0, limit);
-	const hiddenRows = includeTests ? 0 : allRows.length - filteredRows.length;
+	const hiddenRows = includeTests
+		? 0
+		: allRows.length - testFilteredRows.length;
 	const visibleRows = filteredRows.length;
 	const grepTotal = numberField(record.total_grep_matches);
 	const lines = [`results: ${rows.length}`];
@@ -344,9 +327,11 @@ function graphSearchRows(
 	testFilteredRows: unknown[];
 	filteredRows: unknown[];
 } {
-	const allRows = arrayValue(recordValue(value).results);
-	const testFilteredRows = searchRows(allRows, options);
-	const filteredRows = testFilteredRows.filter((row) =>
+	const { allRows, testFilteredRows, visibleRows } = searchRowSelection(
+		recordValue(value).results,
+		options,
+	);
+	const filteredRows = visibleRows.filter((row) =>
 		graphSearchRowMatches(row, options),
 	);
 	return { allRows, testFilteredRows, filteredRows };
@@ -360,12 +345,7 @@ function graphSearchRowMatches(
 	const row = recordValue(value);
 	const nested = recordValue(row.node);
 	const label = stringField(row.label) ?? stringField(nested.label);
-	const name =
-		stringField(row.name) ??
-		stringField(row.node) ??
-		stringField(nested.name) ??
-		stringField(row.qualified_name) ??
-		stringField(nested.qualified_name);
+	const name = searchRowName(value);
 	const qualifiedName =
 		stringField(row.qualified_name) ?? stringField(nested.qualified_name);
 	const filePath =
@@ -487,28 +467,46 @@ function graphSearchRowIsEntryPoint(
 	return textFields.some((item) => item.toLowerCase().startsWith("entry"));
 }
 
-/** Returns backend search rows after applying output-only filters. */
-function searchRows(value: unknown, options: BackendRenderOptions): unknown[] {
-	return arrayValue(value).filter(
+/** Selects policy-visible, renderable backend search rows. */
+function searchRowSelection(
+	value: unknown,
+	options: BackendRenderOptions,
+): {
+	allRows: unknown[];
+	testFilteredRows: unknown[];
+	visibleRows: unknown[];
+} {
+	const allRows = arrayValue(value);
+	const testFilteredRows = allRows.filter(
 		(item) => options.includeTests === true || !testLikeSearchRow(item),
 	);
+	const visibleRows = testFilteredRows.filter(
+		(item) => searchRowName(item) !== null,
+	);
+	return { allRows, testFilteredRows, visibleRows };
 }
 
-/** Renders one backend search row with stable score and location fields. */
-function renderSearchRow(value: unknown): string[] {
+/** Reads the display identity shared by backend search row shapes. */
+function searchRowName(value: unknown): string | null {
 	const row = recordValue(value);
 	const nested = recordValue(row.node);
-	const name =
+	return (
 		stringField(row.name) ??
 		stringField(row.node) ??
 		stringField(nested.name) ??
 		stringField(row.qualified_name) ??
-		stringField(nested.qualified_name);
+		stringField(nested.qualified_name)
+	);
+}
+
+/** Renders one backend search row without internal graph identifiers. */
+function renderSearchRow(value: unknown): string[] {
+	const row = recordValue(value);
+	const nested = recordValue(row.node);
+	const name = searchRowName(value);
 	if (name === null) {
 		return [];
 	}
-	const qualifiedName =
-		stringField(row.qualified_name) ?? stringField(nested.qualified_name);
 	const filePath =
 		stringField(row.file) ??
 		stringField(row.file_path) ??
@@ -521,29 +519,22 @@ function renderSearchRow(value: unknown): string[] {
 		nonNegativeNumberField(row.score) ??
 		nonNegativeNonOrdinalRank(row.rank);
 	const label = stringField(row.label) ?? stringField(nested.label);
-	const degrees = degreeFacts(row);
 	const detail = [
-		label,
 		filePath !== null
 			? `${filePath}${startLine !== null ? `:${startLine}` : ""}${endLine !== null && endLine !== startLine ? `-${endLine}` : ""}`
 			: null,
+		label,
 		score !== null ? `score=${formatScore(score)}` : null,
-		...degrees,
 	].filter((item) => item !== null);
-	const lines = [
-		`- ${name}${detail.length > 0 ? ` (${detail.join(", ")})` : ""}`,
-	];
-	if (qualifiedName !== null && qualifiedName !== name) {
-		lines.push(`  ${qualifiedName}`);
-	}
+	let line = `- ${name}${detail.length > 0 ? ` (${detail.join(", ")})` : ""}`;
 	const context = stringField(row.context);
 	if (context !== null) {
 		const contextLine = context.trim().split(/\r?\n/).find(Boolean);
 		if (contextLine !== undefined) {
-			lines.push(`  ${contextLine.trim()}`);
+			line += ` — ${contextLine.trim()}`;
 		}
 	}
-	return lines;
+	return [line];
 }
 
 /** Detects likely test rows in common Codebase Memory search payload shapes. */
@@ -575,18 +566,6 @@ function backendFetchLimit(
 	return includeTests ? limit : Math.max(limit * 3, limit);
 }
 
-/** Renders graph degree facts when Codebase Memory includes them. */
-function degreeFacts(row: Record<string, unknown>): string[] {
-	return [
-		numberField(row.in_degree) !== null
-			? `in=${numberField(row.in_degree)}`
-			: null,
-		numberField(row.out_degree) !== null
-			? `out=${numberField(row.out_degree)}`
-			: null,
-	].filter((item) => item !== null);
-}
-
 /** Renders CodebaseMemory architecture output as compact source orientation. */
 export function renderCodebaseMemoryArchitectureSummary(
 	value: unknown,
@@ -607,7 +586,6 @@ export function renderCodebaseMemoryArchitectureSummary(
 	appendSparseSymbolNote(lines, record.node_labels);
 	appendHotspots(lines, record.hotspots);
 	appendClusters(lines, record.clusters);
-	appendEntryPoints(lines, record.entry_points);
 	return lines.join("\n");
 }
 
@@ -641,7 +619,7 @@ function appendHotspots(lines: string[], value: unknown): void {
 			const name = stringField(row.name) ?? stringField(row.qualified_name);
 			return name !== null && !genericBackendName(name);
 		})
-		.slice(0, 6)
+		.slice(0, 4)
 		.map((item) => {
 			const row = recordValue(item);
 			const name = stringField(row.name) ?? stringField(row.qualified_name);
@@ -671,12 +649,20 @@ function appendHotspots(lines: string[], value: unknown): void {
 
 /** Adds compact backend cluster summaries without member dumps. */
 function appendClusters(lines: string[], value: unknown): void {
-	const clusters = arrayValue(value)
-		.slice(0, 5)
+	const records = arrayValue(value).slice(0, 4).map(recordValue);
+	const labelCounts = new Map<string, number>();
+	for (const row of records) {
+		const label = stringField(row.label);
+		if (label !== null) {
+			labelCounts.set(label, (labelCounts.get(label) ?? 0) + 1);
+		}
+	}
+	const clusters = records
 		.map((item) => {
 			const row = recordValue(item);
+			const rawLabel = stringField(row.label);
 			const label =
-				stringField(row.label) ?? `cluster ${numberField(row.id) ?? "?"}`;
+				rawLabel !== null && labelCounts.get(rawLabel) === 1 ? rawLabel : null;
 			const members = numberField(row.members);
 			const cohesion = numberField(row.cohesion);
 			const topNodes = uniqueStrings(
@@ -690,10 +676,16 @@ function appendClusters(lines: string[], value: unknown): void {
 			const facts = [
 				members !== null ? `${members} nodes` : null,
 				cohesion !== null ? `cohesion=${formatScore(cohesion)}` : null,
-				topNodes.length > 0 ? `top: ${topNodes.join(", ")}` : null,
+				label !== null && topNodes.length > 0
+					? `top: ${topNodes.join(", ")}`
+					: null,
 			].filter((fact) => fact !== null);
-			return `- ${label}${facts.length > 0 ? ` (${facts.join("; ")})` : ""}`;
-		});
+			const title = label ?? topNodes.join(", ");
+			return title
+				? `- ${title}${facts.length > 0 ? ` (${facts.join("; ")})` : ""}`
+				: null;
+		})
+		.filter((item) => item !== null);
 	if (clusters.length === 0) {
 		return;
 	}
@@ -720,28 +712,6 @@ function appendSparseSymbolNote(lines: string[], nodeLabels: unknown): void {
 	lines.push(
 		"note: no function/class/method nodes; summary is file-level only.",
 	);
-}
-
-/** Adds likely backend entry points when the architecture payload includes them. */
-function appendEntryPoints(lines: string[], value: unknown): void {
-	const entries = arrayValue(value)
-		.slice(0, 6)
-		.map((item) => {
-			const row = recordValue(item);
-			const name = stringField(row.name) ?? stringField(row.qualified_name);
-			if (name === null) {
-				return null;
-			}
-			const file = stringField(row.file);
-			return `- ${name}${file !== null ? `, ${file}` : ""}`;
-		})
-		.filter((item) => item !== null);
-	if (entries.length === 0) {
-		return;
-	}
-	lines.push("");
-	lines.push("## Entry Points");
-	lines.push(...entries);
 }
 
 /** Renders a backend named count row. */
@@ -788,7 +758,7 @@ function uniqueStrings(values: string[]): string[] {
 }
 
 /** Renders CodebaseMemory status lines. */
-export function renderCodebaseMemoryStatus(
+function renderCodebaseMemoryStatus(
 	result: CodebaseMemoryStatusResult,
 ): string {
 	const lines = [
@@ -806,9 +776,7 @@ export function renderCodebaseMemoryStatus(
 }
 
 /** Renders an explicit CodebaseMemory refresh result with elapsed time. */
-export function renderCodebaseMemoryIndex(
-	result: CodebaseMemoryIndexResult,
-): string {
+function renderCodebaseMemoryIndex(result: CodebaseMemoryIndexResult): string {
 	return [
 		"CodebaseMemory refresh complete",
 		`elapsed: ${formatElapsedMs(result.elapsedMs)}`,
@@ -822,10 +790,15 @@ function renderCodebaseMemorySemanticSearch(
 	{ includeTests = false, limit }: BackendRenderOptions & { limit: number },
 ): string {
 	const record = recordValue(value);
-	const allRows = arrayValue(record.semantic_results);
-	const filteredRows = searchRows(allRows, { includeTests });
+	const {
+		allRows,
+		testFilteredRows,
+		visibleRows: filteredRows,
+	} = searchRowSelection(record.semantic_results, { includeTests });
 	const rows = filteredRows.slice(0, limit);
-	const hiddenRows = includeTests ? 0 : allRows.length - filteredRows.length;
+	const hiddenRows = includeTests
+		? 0
+		: allRows.length - testFilteredRows.length;
 	const visibleRows = filteredRows.length;
 	const lines = [
 		`mode: ${stringField(record.search_mode) ?? "semantic"}`,
@@ -839,26 +812,7 @@ function renderCodebaseMemorySemanticSearch(
 		return lines.join("\n");
 	}
 	for (const item of rows) {
-		const row = recordValue(item);
-		const name = stringField(row.name) ?? stringField(row.qualified_name);
-		if (name === null) {
-			continue;
-		}
-		const label = stringField(row.label);
-		const filePath = stringField(row.file_path);
-		const score = numberField(row.score);
-		const detail = [
-			label,
-			filePath,
-			score !== null ? `score=${formatScore(score)}` : null,
-		].filter((item) => item !== null);
-		lines.push(
-			`- ${name}${detail.length > 0 ? ` (${detail.join(", ")})` : ""}`,
-		);
-		const qualifiedName = stringField(row.qualified_name);
-		if (qualifiedName !== null && qualifiedName !== name) {
-			lines.push(`  ${qualifiedName}`);
-		}
+		lines.push(...renderSearchRow(item));
 	}
 	if (record.has_more) {
 		lines.push("- ...");
@@ -866,117 +820,6 @@ function renderCodebaseMemorySemanticSearch(
 		lines.push("- ...");
 	}
 	return lines.join("\n");
-}
-
-/** Renders CodebaseMemory trace_path output without exposing raw JSON by default. */
-function renderCodebaseMemoryTrace(
-	value: unknown,
-	{ limit }: { limit: number },
-): string {
-	const record = recordValue(value);
-	const functionName =
-		stringField(record.function) ??
-		stringField(record.function_name) ??
-		"unknown";
-	const excluded = excludedTraceNames([functionName]);
-	const lines = [
-		`function: ${functionName}`,
-		`mode: ${stringField(record.mode) ?? "calls"}`,
-		`direction: ${stringField(record.direction) ?? "both"}`,
-	];
-	appendTraceSection(lines, "Callers", record.callers, excluded, { limit });
-	appendTraceSection(lines, "Callees", record.callees, excluded, { limit });
-	appendTraceSection(lines, "Paths", tracePaths(record), excluded, { limit });
-	if (lines.length === 3) {
-		lines.push("  none");
-	}
-	return lines.join("\n");
-}
-
-/** Adds a trace section when rows exist. */
-function appendTraceSection(
-	lines: string[],
-	title: string,
-	value: unknown,
-	excluded: Set<string>,
-	{ limit }: { limit: number },
-): void {
-	const allRows = uniqueTextRows(
-		arrayValue(value)
-			.map((item) => traceRow(item, excluded))
-			.filter((item) => item !== null),
-	);
-	const specificRows = allRows.filter((row) => !genericTraceRow(row));
-	const rows = specificRows.slice(0, limit);
-	const hiddenGeneric = allRows.length - specificRows.length;
-	if (rows.length === 0) {
-		return;
-	}
-	lines.push(
-		`${title}: ${rows.length}${hiddenGeneric > 0 ? ` (hidden generic: ${hiddenGeneric})` : ""}`,
-	);
-	for (const row of rows) {
-		lines.push(`- ${row}`);
-	}
-	if (specificRows.length > rows.length) {
-		lines.push("- ...");
-	}
-}
-
-/** Deduplicates printed text rows while preserving first-seen order. */
-function uniqueTextRows(rows: string[]): string[] {
-	const seen = new Set<string>();
-	const unique: string[] = [];
-	for (const row of rows) {
-		const key = row.replace(/\s+\(.*/, "");
-		if (seen.has(key)) {
-			continue;
-		}
-		seen.add(key);
-		unique.push(row);
-	}
-	return unique;
-}
-
-/** Reads path-like trace rows from common backend shapes. */
-function tracePaths(record: Record<string, unknown>): unknown[] {
-	return [
-		...arrayValue(record.paths),
-		...arrayValue(record.call_paths),
-		...arrayValue(record.traces),
-		...arrayValue(record.results),
-	];
-}
-
-/** Renders one caller, callee, or path row. */
-function traceRow(value: unknown, excluded: Set<string>): string | null {
-	const record = recordValue(value);
-	const name =
-		stringField(record.name) ??
-		stringField(record.qualified_name) ??
-		edgeText(record);
-	if (name === null) {
-		return null;
-	}
-	const qualifiedName = stringField(record.qualified_name);
-	if (
-		excluded.has(name) ||
-		(qualifiedName !== null && excluded.has(qualifiedName))
-	) {
-		return null;
-	}
-	const hop = numberField(record.hop);
-	const risk = stringField(record.risk);
-	const facts = [
-		hop !== null ? `hop ${hop}` : null,
-		risk !== null ? risk.toLowerCase() : null,
-	].filter((item) => item !== null);
-	return facts.length > 0 ? `${name} (${facts.join(", ")})` : name;
-}
-
-/** Detects generic low-level trace rows that rarely help source navigation. */
-function genericTraceRow(value: string): boolean {
-	return genericBackendName(value);
 }
 
 /** Detects generic backend names that should not dominate summary slots. */
@@ -987,29 +830,6 @@ function genericBackendName(value: string): boolean {
 			.split(".")
 			.pop() ?? value;
 	return GENERIC_BACKEND_NAMES.has(name);
-}
-
-/** Builds an exact-name exclusion set for target/self trace rows. */
-function excludedTraceNames(names: string[]): Set<string> {
-	const excluded = new Set<string>();
-	for (const name of names) {
-		excluded.add(name);
-		const short = name.split(".").pop();
-		if (short !== undefined && short.length > 0) {
-			excluded.add(short);
-		}
-	}
-	return excluded;
-}
-
-/** Formats a from/to edge row when trace output uses path records. */
-function edgeText(record: Record<string, unknown>): string | null {
-	const from = stringField(record.from) ?? stringField(record.source);
-	const to = stringField(record.to) ?? stringField(record.target);
-	if (from === null || to === null) {
-		return null;
-	}
-	return `${from} -> ${to}`;
 }
 
 /** Renders CodebaseMemory projects from list_projects with the active root first. */
@@ -1248,42 +1068,16 @@ export function renderCodebaseMemoryInspect(
 	result: CodebaseMemoryInspectResult,
 	{ limit }: { limit: number },
 ): string {
-	const lines = [
-		`# Inspect: ${result.name}`,
-		"",
-		"Backend: Codebase Memory",
-		`Qualified: ${result.qualifiedName}`,
-	];
+	const lines = [`# Inspect: ${result.name}`, ""];
 	if (result.filePath !== null) {
 		lines.push(
 			`Source: ${result.filePath}${result.startLine !== null ? `:${result.startLine}` : ""}${result.endLine !== null && result.endLine !== result.startLine ? `-${result.endLine}` : ""}`,
 		);
 	}
-	appendCodebaseMemoryMatchLines(lines, result);
 	appendCodebaseMemorySignalLines(lines, result.signalFacts);
 	appendCodebaseMemoryCode(lines, result, { limit });
 	appendCodebaseMemoryTrace(lines, result, { limit });
-	appendCodebaseMemoryGraphNeighbors(lines, result.graphNeighbors, { limit });
-	appendCodebaseMemoryRelated(lines, result.related, { limit });
 	return lines.join("\n").trim();
-}
-
-/** Adds backend graph match rank and node metadata. */
-function appendCodebaseMemoryMatchLines(
-	lines: string[],
-	result: CodebaseMemoryInspectResult,
-): void {
-	const matchFacts = [
-		result.matchRank !== null ? `rank=${result.matchRank}` : null,
-		result.matchScore !== null
-			? `score=${formatScore(result.matchScore)}`
-			: null,
-		...result.graphFacts,
-	].filter((item) => item !== null);
-	if (matchFacts.length === 0) {
-		return;
-	}
-	lines.push(`Match: ${matchFacts.join(", ")}`);
 }
 
 /** Adds compact complexity and graph degree facts from a snippet payload. */
@@ -1349,43 +1143,6 @@ function appendCodebaseMemoryTrace(
 		for (const item of callees) {
 			lines.push(`- ${item}`);
 		}
-	}
-}
-
-/** Adds graph-neighborhood rows supplied by Codebase Memory search. */
-function appendCodebaseMemoryGraphNeighbors(
-	lines: string[],
-	neighbors: string[],
-	{ limit }: { limit: number },
-): void {
-	const shown = neighbors.slice(0, limit);
-	if (shown.length === 0) {
-		return;
-	}
-	lines.push("");
-	lines.push("## Graph Neighborhood");
-	for (const item of shown) {
-		lines.push(`- ${item}`);
-	}
-	if (neighbors.length > shown.length) {
-		lines.push("- ...");
-	}
-}
-
-/** Adds a short next-read list from trace and snippet neighbors. */
-function appendCodebaseMemoryRelated(
-	lines: string[],
-	related: string[],
-	{ limit }: { limit: number },
-): void {
-	const shown = related.slice(0, limit);
-	if (shown.length === 0) {
-		return;
-	}
-	lines.push("");
-	lines.push("## Next Reads");
-	for (const item of shown) {
-		lines.push(`- ${item}`);
 	}
 }
 

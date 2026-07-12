@@ -1,7 +1,6 @@
 /** Re-exports the shared ast-grep adapter and rendering surface. */
 export type { SyntaxMatch } from "./adapter.js";
 export {
-	AST_GREP_IGNORED_DIR_NAMES,
 	astGrepRoot,
 	contextLines,
 	LANGUAGE_ALIASES,
