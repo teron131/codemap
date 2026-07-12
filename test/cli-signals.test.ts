@@ -300,16 +300,25 @@ describe("signals CLI", () => {
 		});
 	});
 
-	it("keeps the aggregate top signal payload small", () => {
+	it("caps useful top buckets only at the overflow boundary", () => {
 		const functionBlocks = Array.from({ length: 24 }, (_, idx) =>
 			[
-				`export function candidate${idx}(value: string) {`,
+				`function candidate${idx}(value: string) {`,
 				"  const next = value.trim();",
 				"  return next;",
 				"}",
 			].join("\n"),
 		).join("\n\n");
-		writeFileSync(path.join(workDir, "src", "app.ts"), functionBlocks, "utf8");
+		const variableRows = Array.from(
+			{ length: 24 },
+			(_, idx) =>
+				`const candidateVariableIdentifierWithReviewPressure${idx} = ${idx};`,
+		).join("\n");
+		writeFileSync(
+			path.join(workDir, "src", "app.ts"),
+			`${functionBlocks}\n\n${variableRows}`,
+			"utf8",
+		);
 		mkdirSync(path.join(workDir, "src", "load"), { recursive: true });
 		writeFileSync(
 			path.join(workDir, "src", "load", "import_map.ts"),
@@ -339,13 +348,27 @@ describe("signals CLI", () => {
 		expect(result.status).toBe(0);
 		expect(result.stderr).toBe("");
 		const payload = JSON.parse(result.stdout);
-		expect(payload).toEqual({
+		expect(payload).toMatchObject({
 			freshness: "degraded",
 			functionPressure: [],
-			smallFunctions: [],
-			longNames: [],
 		});
-		expect(result.stdout.length).toBeLessThan(500);
+		expect(payload.smallFunctions).toHaveLength(20);
+		expect(payload.longNames).toHaveLength(20);
+		expect(
+			new Set(
+				payload.smallFunctions.map((row: Record<string, unknown>) => row.name),
+			).size,
+		).toBe(20);
+		expect(
+			new Set(payload.longNames.map((row: Record<string, unknown>) => row.name))
+				.size,
+		).toBe(20);
+		const output = renderSignalText(payload, "top");
+		expect(output).toContain(payload.smallFunctions[0].name);
+		expect(output).toContain(payload.smallFunctions[19].name);
+		expect(output).toContain(payload.longNames[0].name);
+		expect(output).toContain(payload.longNames[19].name);
+		expect(output).not.toContain("should");
 	});
 
 	it("keeps test-only long names out unless tests are included", () => {

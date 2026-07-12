@@ -13,7 +13,7 @@ export const SIGNAL_SECTION_CHOICES = [
 ] as const;
 
 export const SIGNAL_OUTPUT_ROW_LIMIT = 50;
-export const SIGNAL_TOP_ROW_LIMIT = 4;
+export const SIGNAL_TOP_ROW_LIMIT = 20;
 
 const TEST_DIR_NAMES = new Set([
 	"__specs__",

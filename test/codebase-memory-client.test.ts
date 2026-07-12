@@ -1084,9 +1084,9 @@ describe("CodebaseMemory client", () => {
 
 	it("caps partial backend and local pressure after merging", () => {
 		vi.stubEnv("CODEBASE_MEMORY_MOCK_SKIPPED_COUNT", "1");
-		vi.stubEnv("CODEBASE_MEMORY_MOCK_FOUR_PRESSURE", "1");
+		vi.stubEnv("CODEBASE_MEMORY_MOCK_TWENTY_PRESSURE", "1");
 		mkdirSync(path.join(workDir, "src"), { recursive: true });
-		for (let index = 0; index < 4; index += 1) {
+		for (let index = 0; index < 20; index += 1) {
 			writeFileSync(
 				path.join(workDir, "src", `backend${index}.ts`),
 				`export function backend${index}() { return ${index}; }\n`,
@@ -1114,7 +1114,12 @@ describe("CodebaseMemory client", () => {
 			const payload = JSON.parse(String(logSpy.mock.calls[0]?.[0] ?? "{}"));
 
 			expect(payload.freshness).toBe("partial");
-			expect(payload.functionPressure).toHaveLength(4);
+			expect(payload.functionPressure).toHaveLength(20);
+			expect(
+				payload.functionPressure.some(
+					(row: Record<string, unknown>) => row.name === "localPressure",
+				),
+			).toBe(false);
 		} finally {
 			logSpy.mockRestore();
 		}
@@ -1650,8 +1655,8 @@ const payloads = {
 	process.env.CODEBASE_MEMORY_MOCK_UNKNOWN_QUERY === "1"
 	  ? { message: "ok" }
 	  : toolArgs.query?.includes("f.cognitive") &&
-	toolArgs.max_rows === undefined &&
-	!toolArgs.query?.includes("ORDER BY") &&
+	toolArgs.max_rows === 100 &&
+	toolArgs.query?.includes("ORDER BY") &&
 	!toolArgs.query?.includes("LIMIT")
 	  ? {
 	      columns: [
@@ -1665,8 +1670,8 @@ const payloads = {
 	        "is_exported",
 	        "is_test",
 	      ],
-	      rows: process.env.CODEBASE_MEMORY_MOCK_FOUR_PRESSURE === "1"
-	        ? Array.from({ length: 4 }, (_, index) => [
+	      rows: process.env.CODEBASE_MEMORY_MOCK_TWENTY_PRESSURE === "1"
+	        ? Array.from({ length: 20 }, (_, index) => [
 	            "backend" + index,
 	            "src/backend" + index + ".ts",
 	            1,
