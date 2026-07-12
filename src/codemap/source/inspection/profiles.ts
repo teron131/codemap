@@ -2,9 +2,13 @@
 import { existsSync, statSync } from "node:fs";
 import path from "node:path";
 
+import { DETAILED_ANALYSIS_FILE_LIMIT } from "../../common.js";
+import { type ScanEntry, structureForFile } from "../extraction/index.js";
 import type { GraphPayload } from "../graph/index.js";
+import { type FileMetrics, scanFile } from "../scanner/index.js";
 import { denseFileCounters } from "../signals/render.js";
 import { importBoundaryRows } from "./graph.js";
+import { metricsForFiles } from "./metrics.js";
 
 export type MetricRow = Record<string, unknown>;
 
@@ -14,6 +18,121 @@ export type FileInspectMetrics = {
 	lowUsageVariables: MetricRow[];
 	fileProfiles: MetricRow[];
 };
+
+export type LikelyEntryContext = {
+	role?: unknown;
+	reason?: unknown;
+	description?: unknown;
+};
+
+/** Renders one file directly from scanner evidence when full graphing is too broad. */
+export function renderLightweightFileInspection(
+	root: string,
+	target: string,
+	files: ScanEntry[],
+	{
+		limit,
+		likelyEntries,
+	}: { limit: number; likelyEntries: Record<string, LikelyEntryContext> },
+): string | null {
+	const relTarget = relativeTargetPath(root, target);
+	const scanEntry = files.find((entry) => entry.path === relTarget);
+	if (scanEntry === undefined) {
+		return null;
+	}
+	const filePath = path.join(root, relTarget);
+	const metrics = scanFile(filePath, { displayRoot: root });
+	const structure = structureForFile(root, scanEntry, {
+		metricsByPath: { [relTarget]: metrics },
+	});
+	const functionCount =
+		structure?.functions.length ?? metrics.functionSpans.length;
+	const classCount = structure?.classes.length ?? 0;
+	const lines = [
+		`# ${relTarget}`,
+		"",
+		`${relTarget}: ${scanEntry.fileCategory} file in ${scanEntry.language}; ${scanEntry.sizeLines} lines; ${functionCount} functions, ${classCount} classes.`,
+		`Fallback: detailed graph skipped above ${DETAILED_ANALYSIS_FILE_LIMIT} files; incoming imports not computed.`,
+	];
+	appendLikelyEntryContext(lines, likelyEntries[relTarget]);
+	appendFileImportSpecs(lines, metrics, { limit });
+	appendFileContains(lines, relTarget, structure, { limit });
+	const fileMetrics = metricsForFiles(root, [scanEntry], {
+		[relTarget]: metrics,
+	});
+	appendFileProfile(lines, fileMetricsForPath(fileMetrics, relTarget), {
+		limit,
+	});
+	return lines.join("\n").trim();
+}
+
+/** Renders one directory directly from scan rows when full graphing is too broad. */
+export function renderLightweightDirectoryInspection(
+	root: string,
+	target: string,
+	files: ScanEntry[],
+	{ limit }: { limit: number },
+): string {
+	const relTarget = relativeTargetPath(root, target);
+	const rows =
+		relTarget === "."
+			? files
+			: files.filter((entry) => entry.path.startsWith(`${relTarget}/`));
+	const title = relTarget === "." ? "." : relTarget.replace(/\/+$/, "");
+	const lines = [
+		`# ${title}/`,
+		"",
+		`Directory profile: ${rows.length} scanned files.`,
+		`Fallback: detailed graph skipped above ${DETAILED_ANALYSIS_FILE_LIMIT} files.`,
+	];
+	const denseRows = rows
+		.slice()
+		.sort(
+			(left, right) =>
+				right.sizeLines - left.sizeLines || compareText(left.path, right.path),
+		)
+		.slice(0, limit);
+	if (denseRows.length > 0) {
+		lines.push("");
+		lines.push("## Largest Files");
+		for (const item of denseRows) {
+			lines.push(
+				`- ${item.path}: ${item.sizeLines} lines, ${item.language}, ${item.fileCategory}`,
+			);
+		}
+		if (rows.length > denseRows.length) {
+			lines.push("- ...");
+		}
+	}
+	return lines.join("\n").trim();
+}
+
+/** Appends likely-entry navigation context for inspected files. */
+export function appendLikelyEntryContext(
+	lines: string[],
+	context: LikelyEntryContext | undefined,
+): void {
+	if (context === undefined) {
+		return;
+	}
+	const role = String(context.role ?? "").trim();
+	const reason = String(context.reason ?? "").trim();
+	const description = String(context.description ?? "").trim();
+	if (!role && !reason && !description) {
+		return;
+	}
+	lines.push("");
+	lines.push("## Navigation Context");
+	if (role) {
+		lines.push(`- role: ${role}`);
+	}
+	if (reason) {
+		lines.push(`- why: ${reason}`);
+	}
+	if (description) {
+		lines.push(`- evidence: ${description}`);
+	}
+}
 
 /** Flattens Python and TypeScript metric rows for one inspection profile. */
 function languageMetricItems(section: MetricRow): MetricRow[] {
@@ -285,6 +404,78 @@ export function appendBoundaryRows(
 	for (const row of rows) {
 		lines.push(`- ${row}`);
 	}
+}
+
+/** Appends raw imports seen in one lightweight file inspection. */
+function appendFileImportSpecs(
+	lines: string[],
+	metrics: FileMetrics,
+	{ limit }: { limit: number },
+): void {
+	const imports = uniqueTextRows([
+		...metrics.pyImportTargets,
+		...metrics.typescriptImportTargets,
+		...metrics.typescriptReexportTargets.map((target) => `re-export ${target}`),
+	]);
+	if (imports.length === 0) {
+		return;
+	}
+	lines.push("");
+	lines.push("## Imports From File");
+	for (const item of imports.slice(0, limit)) {
+		lines.push(`- ${item}`);
+	}
+	appendLimitMarker(lines, imports.length, limit);
+}
+
+/** Appends file-local functions and classes to one lightweight profile. */
+function appendFileContains(
+	lines: string[],
+	relPath: string,
+	structure: ReturnType<typeof structureForFile>,
+	{ limit }: { limit: number },
+): void {
+	if (structure === null) {
+		return;
+	}
+	const contains = [
+		...structure.functions.map(
+			(item) => `${item.name} in ${relPath}:${item.startLine}`,
+		),
+		...structure.classes.map(
+			(item) => `${item.name} class in ${relPath}:${item.startLine}`,
+		),
+	];
+	if (contains.length === 0) {
+		return;
+	}
+	lines.push("");
+	lines.push("## Contains");
+	for (const item of contains.slice(0, limit)) {
+		lines.push(`- ${item}`);
+	}
+	appendLimitMarker(lines, contains.length, limit);
+}
+
+/** Formats an inspected path relative to the display root. */
+function relativeTargetPath(root: string, target: string): string {
+	const resolved = path.resolve(root, target);
+	const relative = path.relative(root, resolved).split(path.sep).join("/");
+	return relative || ".";
+}
+
+/** Deduplicates text rows while keeping first-seen order. */
+function uniqueTextRows(rows: string[]): string[] {
+	const seen = new Set<string>();
+	const unique: string[] = [];
+	for (const row of rows) {
+		if (seen.has(row)) {
+			continue;
+		}
+		seen.add(row);
+		unique.push(row);
+	}
+	return unique;
 }
 
 /** Marks list sections that were shortened by the display limit. */

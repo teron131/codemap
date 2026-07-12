@@ -1,9 +1,8 @@
 /** Defines CLI behavior for explicit structural search subcommands. */
 import type { Command } from "commander";
 import {
-	matchJson,
-	printSyntaxMatches,
 	resolveProjectFile,
+	type SyntaxMatch,
 	syntaxMatches,
 	targetLanguages,
 } from "../ast-grep/index.js";
@@ -225,6 +224,39 @@ export function commandSearchRule(options: SearchRuleOptions): number {
 		console.log("No matches");
 	}
 	return matches.length > 0 ? 0 : 1;
+}
+
+/** Prints structural-search matches as text or JSON. */
+function printSyntaxMatches(
+	matches: SyntaxMatch[],
+	{ jsonOutput }: { jsonOutput: boolean },
+): void {
+	if (jsonOutput) {
+		console.log(JSON.stringify(matches.map((match) => matchJson(match))));
+		return;
+	}
+	for (const match of matches) {
+		const lines = match.text.trimEnd().split(/\r?\n/);
+		const text = lines.length > 1 ? `${lines[0] ?? ""} ...` : (lines[0] ?? "");
+		const engine = match.engine === "regex" ? " [regex]" : "";
+		console.log(
+			`${match.filePath}:${match.line}:${match.column}${engine}: ${text}`,
+		);
+	}
+}
+
+/** Serializes one structural-search match for JSON output. */
+function matchJson(match: SyntaxMatch): Record<string, unknown> {
+	return {
+		text: match.text,
+		range: {
+			start: { line: match.line - 1, column: match.column - 1 },
+			end: { line: match.endLine - 1, column: match.endColumn - 1 },
+		},
+		file: match.filePath,
+		lines: match.lines,
+		engine: match.engine,
+	};
 }
 
 /** Resolves command-local or global project-root options. */

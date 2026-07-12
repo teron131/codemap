@@ -18,8 +18,7 @@ export {
 	usageRows,
 	variableUsageRows,
 } from "./analysis.js";
-export { buildSignalExport } from "./build.js";
-export { runSignalsExport } from "./export.js";
+export { buildSignalExport, runSignalsExport } from "./build.js";
 export {
 	buildSignalPayload,
 	selectPayloadSection,
