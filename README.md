@@ -67,6 +67,8 @@ Detailed sections remain explicit for narrower investigations: `relationships`, 
 
 `src/codemap/codebase-memory` owns MCP transport, manual clean-index lifecycle, cross-process root serialization, payload validation, and backend result normalization. Its short-lived MCP children start outside the target repository so upstream session auto-indexing and watching do not race the explicit lifecycle. Search, inspect, signals, summary, and memory commands own their selection and presentation policy.
 
+The implementation journey, settled constraints, and evidence required for future enhancements are recorded in [`docs/IDEAS.md`](docs/IDEAS.md).
+
 ## Limits
 
 Codemap provides syntax-level and indexed relationship evidence, not compiler-grade reachability, framework-complete data flow, or proof that a symbol is dead. Verify consequential findings with focused reads, exact search, and the repository’s tests.
