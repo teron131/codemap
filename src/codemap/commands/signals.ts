@@ -44,11 +44,21 @@ type RootOptions = {
 	projectRoot?: string;
 };
 
+const FUNCTION_PRESSURE_POLICY = {
+	cognitiveThreshold: 15,
+	cyclomaticThreshold: 10,
+	linearScanThreshold: 1,
+	linearScanWeight: 50,
+	cognitiveWeight: 10,
+	cyclomaticWeight: 2,
+} as const;
+
 const BACKEND_FUNCTION_PRESSURE_QUERY = [
 	"MATCH (f)",
 	"WHERE (f:Function OR f:Method)",
-	"AND (f.cognitive >= 15 OR f.complexity >= 10 OR f.linear_scan_in_loop >= 1)",
+	`AND (f.cognitive >= ${FUNCTION_PRESSURE_POLICY.cognitiveThreshold} OR f.complexity >= ${FUNCTION_PRESSURE_POLICY.cyclomaticThreshold} OR f.linear_scan_in_loop >= ${FUNCTION_PRESSURE_POLICY.linearScanThreshold})`,
 	"RETURN f.name AS name, f.file_path AS file_path, f.start_line AS start_line, f.lines AS lines, f.complexity AS complexity, f.cognitive AS cognitive, f.linear_scan_in_loop AS linear_scan_in_loop, f.is_test AS is_test",
+	`ORDER BY (CASE WHEN coalesce(f.linear_scan_in_loop, 0) >= ${FUNCTION_PRESSURE_POLICY.linearScanThreshold} THEN ${FUNCTION_PRESSURE_POLICY.linearScanWeight} ELSE 0 END) + coalesce(f.cognitive, 0) * ${FUNCTION_PRESSURE_POLICY.cognitiveWeight} + coalesce(f.complexity, 0) * ${FUNCTION_PRESSURE_POLICY.cyclomaticWeight} DESC, coalesce(f.lines, 0) DESC, f.file_path, f.name`,
 ].join(" ");
 
 const BACKEND_FUNCTION_PRESSURE_COLUMNS = [
@@ -61,6 +71,7 @@ const BACKEND_FUNCTION_PRESSURE_COLUMNS = [
 	"linear_scan_in_loop",
 	"is_test",
 ];
+const BACKEND_FUNCTION_PRESSURE_QUERY_LIMIT = SIGNAL_TOP_ROW_LIMIT * 5;
 
 /** Registers refactor signal commands and output modes. */
 export function addSignalsParser(program: Command): void {
@@ -202,7 +213,7 @@ function backendFunctionPressure(
 	const result = codebaseMemoryQueryWithProject(
 		root,
 		BACKEND_FUNCTION_PRESSURE_QUERY,
-		undefined,
+		BACKEND_FUNCTION_PRESSURE_QUERY_LIMIT,
 	);
 	if (result === null) {
 		return { freshness: "degraded", rows: [] };
@@ -249,7 +260,11 @@ function functionPressureRow(
 	const cognitive = numericField(row.cognitive);
 	const cyclomatic = numericField(row.complexity);
 	const linearScanInLoop = numericField(row.linear_scan_in_loop);
-	if (cognitive < 15 && cyclomatic < 10 && linearScanInLoop < 1) {
+	if (
+		cognitive < FUNCTION_PRESSURE_POLICY.cognitiveThreshold &&
+		cyclomatic < FUNCTION_PRESSURE_POLICY.cyclomaticThreshold &&
+		linearScanInLoop < FUNCTION_PRESSURE_POLICY.linearScanThreshold
+	) {
 		return null;
 	}
 	return {
@@ -279,9 +294,12 @@ function compareFunctionPressure(
 /** Ranks coarse scan presence below measured cognitive and cyclomatic pressure. */
 function functionPressureScore(row: Record<string, unknown>): number {
 	return (
-		(numericField(row.linearScanInLoop) > 0 ? 50 : 0) +
-		numericField(row.cognitive) * 10 +
-		numericField(row.cyclomatic) * 2
+		(numericField(row.linearScanInLoop) >=
+		FUNCTION_PRESSURE_POLICY.linearScanThreshold
+			? FUNCTION_PRESSURE_POLICY.linearScanWeight
+			: 0) +
+		numericField(row.cognitive) * FUNCTION_PRESSURE_POLICY.cognitiveWeight +
+		numericField(row.cyclomatic) * FUNCTION_PRESSURE_POLICY.cyclomaticWeight
 	);
 }
 

@@ -34,4 +34,4 @@ Use `search --graph` only when the search result itself needs derived relationsh
 
 Use `inspect` on the path returned by search when you need incoming/outgoing imports, contained symbols, calls, long functions, source metrics, and file profile hints.
 
-Use default `signals` for at most twelve function-pressure, small-function, and long-name rows. The mention count is lexical rather than compiler-resolved; verify apparent dead code with `search`, source reads, and tests. Use explicit `signals functions`, `signals variables`, or `signals files` only when the compact evidence points there.
+Use default `signals` for up to twenty useful rows in each function-pressure, small-function, and long-name bucket. The mention count is lexical rather than compiler-resolved; verify apparent dead code with `search`, source reads, and tests. Use explicit `signals functions`, `signals variables`, or `signals files` only when the compact evidence points there.

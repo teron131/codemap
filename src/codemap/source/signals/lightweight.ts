@@ -7,7 +7,6 @@ import {
 	isGeneratedSignalPath,
 	isTestPath,
 	SIGNAL_OUTPUT_ROW_LIMIT,
-	SIGNAL_TOP_ROW_LIMIT,
 } from "./policy.js";
 import type {
 	DenseFileRow,
@@ -34,7 +33,8 @@ const LIGHTWEIGHT_SIGNAL_LANGUAGES = new Set([
 	"tsx",
 	"typescript",
 ]);
-const LIGHTWEIGHT_SIGNAL_ENRICHMENT_LIMIT = SIGNAL_TOP_ROW_LIMIT;
+/** Limits syntax parsing independently from the larger display overflow cap. */
+const LIGHTWEIGHT_SIGNAL_ENRICHMENT_LIMIT = 4;
 /** Builds a compact signal payload when full analysis is absent. */
 export function buildLightweightSignalPayload(
 	files: LightweightSignalFile[],

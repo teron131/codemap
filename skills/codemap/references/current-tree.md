@@ -27,7 +27,7 @@ codemap signals --project-root <path>
 codemap signals --json --project-root <path> | jq '{functionPressure, smallFunctions, longNames}'
 ```
 
-The default result is bounded to four rows per bucket:
+The default result keeps up to twenty useful rows per nonempty bucket, with the cap serving only as overflow protection:
 
 - `functionPressure`: Codebase Memory cognitive/cyclomatic complexity and concrete linear scans inside loops.
 - `smallFunctions`: private functions up to eight lines with few lexical mentions.
