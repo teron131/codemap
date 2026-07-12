@@ -9,10 +9,6 @@ import {
 	functionLengthSection,
 	functionUsageRows,
 } from "../src/codemap/source/signals/analysis.js";
-import {
-	highFrequencyRows,
-	isUsefulNamePoolTerm,
-} from "../src/codemap/source/signals/payload.js";
 
 describe("signal analysis", () => {
 	it("deduplicates repeated function spans by keeping the widest row", () => {
@@ -45,40 +41,11 @@ describe("signal analysis", () => {
 				identifier: "src/app.py::target",
 				file: "src/app.py",
 				count: 9,
+				line: 18,
 				lines: 40,
 				exported: false,
 				refactorCandidate: false,
 			},
-		]);
-	});
-
-	it("keeps broad name pools focused on semantic project names", () => {
-		expect(isUsefulNamePoolTerm("None")).toBe(false);
-		expect(isUsefulNamePoolTerm("in")).toBe(false);
-		expect(isUsefulNamePoolTerm("string")).toBe(false);
-		expect(isUsefulNamePoolTerm("monkeypatch")).toBe(false);
-		expect(isUsefulNamePoolTerm("_import_attribute")).toBe(false);
-		expect(isUsefulNamePoolTerm("DEPRECATED_LOOKUP")).toBe(false);
-		expect(isUsefulNamePoolTerm("ValueError")).toBe(false);
-		expect(isUsefulNamePoolTerm("a")).toBe(false);
-		expect(isUsefulNamePoolTerm("agent")).toBe(true);
-		expect(isUsefulNamePoolTerm("message")).toBe(true);
-
-		expect(
-			highFrequencyRows(
-				[
-					{ name: "string", count: 90 },
-					{ name: "agent", count: 40 },
-					{ name: "None", count: 80 },
-					{ name: "tmp_path", count: 95 },
-					{ name: "message", count: 35 },
-					{ name: "a", count: 70 },
-				],
-				10,
-			),
-		).toEqual([
-			{ name: "agent", count: 40 },
-			{ name: "message", count: 35 },
 		]);
 	});
 

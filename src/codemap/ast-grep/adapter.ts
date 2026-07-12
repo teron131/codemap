@@ -6,6 +6,7 @@ import { Lang, type NapiConfig, parse, type SgNode } from "@ast-grep/napi";
 import { parse as parseYaml } from "yaml";
 
 import { expandUser } from "../common.js";
+import { IGNORED_DIR_NAMES } from "../source/scanner/constants.js";
 
 export const LANGUAGE_ALIASES: Record<string, string> = {
 	javascript: "javascript",
@@ -19,39 +20,15 @@ export const LANGUAGE_ALIASES: Record<string, string> = {
 };
 
 export const SYNTAX_SUFFIXES_BY_LANGUAGE: Record<string, Set<string>> = {
-	javascript: new Set([".js", ".jsx", ".mjs"]),
+	javascript: new Set([".cjs", ".js", ".jsx", ".mjs"]),
 	jsx: new Set([".jsx"]),
 	python: new Set([".py"]),
 	tsx: new Set([".tsx"]),
-	typescript: new Set([".ts", ".tsx"]),
+	typescript: new Set([".cts", ".mts", ".ts", ".tsx"]),
 };
 
-export const AST_GREP_IGNORED_DIR_NAMES = new Set([
-	".cache",
-	".context-graph",
-	".git",
-	".mypy_cache",
-	".next",
-	".pytest_cache",
-	".ruff_cache",
-	".turbo",
-	".venv",
-	"__pycache__",
-	"_build",
-	"_generated",
-	"_next",
-	"build",
-	"coverage",
-	"deps",
-	"dist",
-	"node_modules",
-	"out",
-	"target",
-	"venv",
-	"vendor",
-]);
-
 export type SyntaxMatch = {
+	engine: "ast-grep" | "regex";
 	filePath: string;
 	text: string;
 	line: number;
@@ -62,9 +39,9 @@ export type SyntaxMatch = {
 };
 
 const INFERRED_SYNTAX_LANGUAGES = [
-	{ language: "typescript", suffixes: new Set([".ts"]) },
+	{ language: "typescript", suffixes: new Set([".cts", ".mts", ".ts"]) },
 	{ language: "tsx", suffixes: new Set([".tsx"]) },
-	{ language: "javascript", suffixes: new Set([".js", ".mjs"]) },
+	{ language: "javascript", suffixes: new Set([".cjs", ".js", ".mjs"]) },
 	{ language: "jsx", suffixes: new Set([".jsx"]) },
 	{ language: "python", suffixes: new Set([".py"]) },
 ];
@@ -142,6 +119,7 @@ export function ruleMatches(
 				}
 				const nodeRange = node.range();
 				matches.push({
+					engine: "ast-grep",
 					filePath: relPath,
 					text: node.text(),
 					line: nodeRange.start.line + 1,
@@ -256,18 +234,26 @@ export function shouldScanAstGrepFile(filePath: string, root: string): boolean {
 	} else {
 		relParts = filePath.split(path.sep).filter(Boolean);
 	}
-	return !relParts
-		.slice(0, -1)
-		.some((part) => AST_GREP_IGNORED_DIR_NAMES.has(part));
+	return !relParts.slice(0, -1).some((part) => IGNORED_DIR_NAMES.has(part));
 }
 
 /** Resolves a project-relative file and rejects paths outside the root. */
 export function resolveProjectFile(root: string, rawPath: string): string {
+	const projectRoot = path.resolve(root);
 	const expanded = expandUser(rawPath);
 	const candidate = path.isAbsolute(expanded)
 		? expanded
-		: path.join(root, expanded);
-	return path.resolve(candidate);
+		: path.join(projectRoot, expanded);
+	const resolved = path.resolve(candidate);
+	const relative = path.relative(projectRoot, resolved);
+	if (
+		relative === ".." ||
+		relative.startsWith(`..${path.sep}`) ||
+		path.isAbsolute(relative)
+	) {
+		throw new Error(`path is outside project root: ${rawPath}`);
+	}
+	return resolved;
 }
 
 /** Builds context text around a syntax match range. */
@@ -328,6 +314,7 @@ function cliJsonMatches(root: string, stdout: string): SyntaxMatch[] {
 		const start = recordValue(range.start);
 		const end = recordValue(range.end);
 		return {
+			engine: "ast-grep",
 			filePath: cliRelPath(root, String(item.file ?? "")),
 			text: String(item.text ?? ""),
 			line: numberValue(start.line) + 1,
@@ -403,7 +390,7 @@ function recursiveFiles(directory: string): string[] {
 		}
 		const entryPath = path.join(directory, entry.name);
 		if (entry.isDirectory()) {
-			if (AST_GREP_IGNORED_DIR_NAMES.has(entry.name)) {
+			if (IGNORED_DIR_NAMES.has(entry.name)) {
 				continue;
 			}
 			files.push(...recursiveFiles(entryPath));

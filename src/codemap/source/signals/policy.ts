@@ -12,10 +12,8 @@ export const SIGNAL_SECTION_CHOICES = [
 	"docstrings",
 ] as const;
 
-export type SignalSection = (typeof SIGNAL_SECTION_CHOICES)[number];
-
-export const SIGNAL_OUTPUT_ROW_LIMIT = 1_000;
-export const SIGNAL_TOP_ROW_LIMIT = 20;
+export const SIGNAL_OUTPUT_ROW_LIMIT = 50;
+export const SIGNAL_TOP_ROW_LIMIT = 4;
 
 const TEST_DIR_NAMES = new Set([
 	"__specs__",

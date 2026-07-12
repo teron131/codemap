@@ -10,6 +10,7 @@ describe("ast-grep text rendering", () => {
 			printSyntaxMatches(
 				[
 					{
+						engine: "ast-grep",
 						filePath: "src/app.ts",
 						line: 10,
 						column: 3,

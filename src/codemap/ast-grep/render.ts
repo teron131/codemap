@@ -7,13 +7,16 @@ export function printSyntaxMatches(
 	{ jsonOutput }: { jsonOutput: boolean },
 ): void {
 	if (jsonOutput) {
-		console.log(pythonJsonDumps(matches.map((match) => matchJson(match))));
+		console.log(JSON.stringify(matches.map((match) => matchJson(match))));
 		return;
 	}
 	for (const match of matches) {
 		const lines = match.text.trimEnd().split(/\r?\n/);
 		const text = lines.length > 1 ? `${lines[0] ?? ""} ...` : (lines[0] ?? "");
-		console.log(`${match.filePath}:${match.line}:${match.column}: ${text}`);
+		const engine = match.engine === "regex" ? " [regex]" : "";
+		console.log(
+			`${match.filePath}:${match.line}:${match.column}${engine}: ${text}`,
+		);
 	}
 }
 
@@ -27,19 +30,6 @@ export function matchJson(match: SyntaxMatch): Record<string, unknown> {
 		},
 		file: match.filePath,
 		lines: match.lines,
-		language: "ast-grep",
+		engine: match.engine,
 	};
-}
-
-/** Formats JS values as Python literals for ast-grep snippets. */
-function pythonJsonDumps(value: unknown): string {
-	if (Array.isArray(value)) {
-		return `[${value.map((item) => pythonJsonDumps(item)).join(", ")}]`;
-	}
-	if (value !== null && typeof value === "object") {
-		return `{${Object.entries(value as Record<string, unknown>)
-			.map(([key, item]) => `${JSON.stringify(key)}: ${pythonJsonDumps(item)}`)
-			.join(", ")}}`;
-	}
-	return JSON.stringify(value);
 }

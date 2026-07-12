@@ -13,7 +13,6 @@ import {
 	usageRows,
 	variableUsageRows,
 } from "./analysis.js";
-import { isTestPath } from "./policy.js";
 import type {
 	DefinitionRow,
 	NameFrequencyRow,
@@ -26,7 +25,6 @@ type Row = SignalRow;
 type UsageLanguageRows = {
 	functionRows: NameFrequencyRow[];
 	variableRows: NameFrequencyRow[];
-	sourceVariableRows: NameFrequencyRow[];
 	functionCandidates: DefinitionRow[];
 	variableCandidates: DefinitionRow[];
 };
@@ -71,15 +69,9 @@ export function buildUsageSection(
 			python_variables: usageDistribution(python.variableRows),
 		},
 		tables: {
-			typescript_functions: typescript.functionRows,
 			typescript_function_candidates: typescript.functionCandidates,
-			typescript_variables: typescript.variableRows,
 			typescript_variable_candidates: typescript.variableCandidates,
-			source_typescript_variables: typescript.sourceVariableRows,
-			python_functions: python.functionRows,
 			python_function_candidates: python.functionCandidates,
-			python_variables: python.variableRows,
-			source_python_variables: python.sourceVariableRows,
 			python_variable_candidates: python.variableCandidates,
 		},
 	};
@@ -93,12 +85,7 @@ function buildLanguageUsageRows(
 	language: SignalLanguage,
 ): UsageLanguageRows {
 	const files = filesBySuffix(allFiles, suffixes);
-	const sourceFiles = sourceFilesFor(scannedFiles, allFiles, suffixes);
 	const occurrences = countIdentifierOccurrences(files);
-	const sourceOccurrences = countIdentifierOccurrences(sourceFiles);
-	const sourceScannedFiles = scannedFiles.filter(
-		(metrics) => !isTestPath(metrics.relPath),
-	);
 	const functionRows = usageRows(
 		metricNames(scannedFiles, suffixes, "functionNames"),
 		occurrences,
@@ -107,14 +94,9 @@ function buildLanguageUsageRows(
 		metricNames(scannedFiles, suffixes, "variableNames"),
 		occurrences,
 	);
-	const sourceVariableRows = usageRows(
-		metricNames(sourceScannedFiles, suffixes, "variableNames"),
-		sourceOccurrences,
-	);
 	return {
 		functionRows,
 		variableRows,
-		sourceVariableRows,
 		functionCandidates: functionUsageRows(scannedFiles, suffixes, occurrences, {
 			language,
 		}),
@@ -127,22 +109,4 @@ function buildLanguageUsageRows(
 /** Selects files with a suffix handled by one language scanner. */
 function filesBySuffix(allFiles: string[], suffixes: Set<string>): string[] {
 	return allFiles.filter((filePath) => suffixes.has(path.extname(filePath)));
-}
-
-/** Selects files that match metrics included in source-only rows. */
-function sourceFilesFor(
-	scannedFiles: FileMetrics[],
-	allFiles: string[],
-	suffixes: Set<string>,
-): string[] {
-	const files: string[] = [];
-	for (const [idx, metrics] of scannedFiles.entries()) {
-		if (suffixes.has(metrics.suffix) && !isTestPath(metrics.relPath)) {
-			const filePath = allFiles[idx];
-			if (filePath) {
-				files.push(filePath);
-			}
-		}
-	}
-	return files;
 }

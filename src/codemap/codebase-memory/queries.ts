@@ -4,6 +4,7 @@ import { performance } from "node:perf_hooks";
 
 import {
 	arrayValue,
+	type CodebaseMemoryReadyProject,
 	callCodebaseMemoryTool,
 	codebaseMemoryReadyProject,
 	recordValue,
@@ -11,20 +12,14 @@ import {
 
 export type CodebaseMemoryInspectResult = {
 	name: string;
-	qualifiedName: string;
 	filePath: string | null;
 	startLine: number | null;
 	endLine: number | null;
-	matchRank: number | null;
-	matchScore: number | null;
 	signalFacts: string[];
-	graphFacts: string[];
 	signature: string | null;
 	source: string | null;
 	callers: string[];
 	callees: string[];
-	related: string[];
-	graphNeighbors: string[];
 };
 
 export type CodebaseMemoryStatusResult = {
@@ -52,15 +47,6 @@ export type CodebaseMemoryGraphSearchOptions = {
 	offset?: number;
 };
 
-export type CodebaseMemoryTraceOptions = {
-	mode?: "calls" | "data_flow" | "cross_service";
-	direction?: "inbound" | "outbound" | "both";
-	depth?: number;
-	parameterName?: string;
-	includeTests?: boolean;
-	riskLabels?: boolean;
-};
-
 export type CodebaseMemoryChangeOptions = {
 	scope?: string;
 	depth?: number;
@@ -68,7 +54,13 @@ export type CodebaseMemoryChangeOptions = {
 	since?: string;
 };
 
+type CodebaseMemoryProjectQueryResult = {
+	freshness: CodebaseMemoryReadyProject["status"];
+	value: unknown;
+};
+
 const MIN_SEMANTIC_SCORE = 0.2;
+const JSON_FORMAT = { format: "json" } as const;
 
 /** Reads graph-augmented CodebaseMemory source search results when available. */
 export function codebaseMemorySearch(
@@ -85,17 +77,12 @@ export function codebaseMemorySearch(
 		pattern: searchText,
 		limit,
 		context: 1,
+		...JSON_FORMAT,
 	});
 	if (!result.ok) {
 		return null;
 	}
-	if (
-		!hasSearchAnswer(
-			result.value,
-			["results", "raw_matches"],
-			["total_results"],
-		)
-	) {
+	if (!hasSearchAnswer(result.value, ["results", "raw_matches"])) {
 		return null;
 	}
 	return result.value;
@@ -118,16 +105,17 @@ export function codebaseMemoryGraphSearch(
 		...graphSearchArgs(options),
 		limit,
 		include_connected: true,
+		...JSON_FORMAT,
 	});
 	if (!result.ok) {
 		return null;
 	}
 	if (
-		!hasSearchAnswer(
-			result.value,
-			["results", "semantic_results", "raw_matches"],
-			["total_results", "total"],
-		)
+		!hasSearchAnswer(result.value, [
+			"results",
+			"semantic_results",
+			"raw_matches",
+		])
 	) {
 		return null;
 	}
@@ -149,12 +137,13 @@ export function codebaseMemorySemanticSearch(
 		semantic_query: semanticTerms(searchText),
 		limit,
 		include_connected: true,
+		...JSON_FORMAT,
 	});
 	if (!result.ok) {
 		return null;
 	}
 	const payload = semanticSearchPayload(result.value);
-	if (!hasSearchAnswer(payload, ["semantic_results"], ["semantic_total"])) {
+	if (!hasSearchAnswer(payload, ["semantic_results"])) {
 		return null;
 	}
 	return payload;
@@ -178,11 +167,12 @@ export function codebaseMemoryInspect(
 		query: target,
 		limit,
 		include_connected: true,
+		...JSON_FORMAT,
 	});
 	if (!searchResult.ok) {
 		return null;
 	}
-	const match = firstGraphMatch(searchResult.value);
+	const match = firstGraphMatch(searchResult.value, target);
 	const qualifiedName = stringField(match.qualified_name);
 	if (qualifiedName === null) {
 		return null;
@@ -191,8 +181,9 @@ export function codebaseMemoryInspect(
 		project: project.name,
 		qualified_name: qualifiedName,
 		include_neighbors: true,
+		...JSON_FORMAT,
 	});
-	if (!snippetResult.ok) {
+	if (!snippetResult.ok || !hasSnippetAnswer(snippetResult.value)) {
 		return null;
 	}
 	const traceResult = callCodebaseMemoryTool("trace_path", {
@@ -201,55 +192,21 @@ export function codebaseMemoryInspect(
 		mode: "calls",
 		direction: "both",
 		depth: 2,
-		risk_labels: true,
+		risk_labels: false,
+		...JSON_FORMAT,
 	});
 	return inspectResultFromPayloads(
 		target,
 		root,
 		match,
-		searchResult.value,
 		snippetResult.value,
 		traceResult.ok ? traceResult.value : null,
 	);
 }
 
-/** Reads CodebaseMemory caller/callee traces when available. */
-export function codebaseMemoryCallTrace(
-	root: string,
-	name: string,
-	options: CodebaseMemoryTraceOptions = {},
-): unknown | null {
-	const project = codebaseMemoryReadyProject(root);
-	if (project === null) {
-		return null;
-	}
-	const result = callCodebaseMemoryTool("trace_path", {
-		project: project.name,
-		function_name: name,
-		mode: options.mode ?? "calls",
-		direction: options.direction ?? "both",
-		depth: options.depth ?? 2,
-		...(options.parameterName !== undefined
-			? { parameter_name: options.parameterName }
-			: {}),
-		...(options.includeTests !== undefined
-			? { include_tests: options.includeTests }
-			: {}),
-		risk_labels: options.riskLabels ?? false,
-	});
-	if (!result.ok) {
-		return null;
-	}
-	if (
-		!hasSearchAnswer(
-			result.value,
-			["paths", "call_paths", "traces", "results", "callers", "callees"],
-			["total_paths", "path_count", "total_results", "total"],
-		)
-	) {
-		return null;
-	}
-	return result.value;
+/** Requires source-owned snippet data before backend inspect can replace local output. */
+function hasSnippetAnswer(value: unknown): boolean {
+	return stringField(recordValue(value).source) !== null;
 }
 
 /** Lists indexed CodebaseMemory projects after refreshing the current root. */
@@ -270,6 +227,7 @@ export function codebaseMemorySchema(root: string): unknown | null {
 	}
 	const result = callCodebaseMemoryTool("get_graph_schema", {
 		project: project.name,
+		...JSON_FORMAT,
 	});
 	return result.ok ? result.value : null;
 }
@@ -280,6 +238,15 @@ export function codebaseMemoryQuery(
 	query: string,
 	maxRows: number | undefined,
 ): unknown | null {
+	return codebaseMemoryQueryWithProject(root, query, maxRows)?.value ?? null;
+}
+
+/** Executes a graph query and retains the indexed project freshness metadata. */
+export function codebaseMemoryQueryWithProject(
+	root: string,
+	query: string,
+	maxRows: number | undefined,
+): CodebaseMemoryProjectQueryResult | null {
 	const project = codebaseMemoryReadyProject(root);
 	if (project === null) {
 		return null;
@@ -288,8 +255,36 @@ export function codebaseMemoryQuery(
 		project: project.name,
 		query,
 		...(maxRows !== undefined ? { max_rows: maxRows } : {}),
+		...JSON_FORMAT,
 	});
-	return result.ok ? result.value : null;
+	return result.ok ? { freshness: project.status, value: result.value } : null;
+}
+
+/** Normalizes query_graph column/row payloads into named records. */
+export function codebaseMemoryQueryRows(
+	value: unknown,
+	requiredColumns: string[] = [],
+): Record<string, unknown>[] | null {
+	const payload = recordValue(value);
+	if (!Array.isArray(payload.columns) || !Array.isArray(payload.rows)) {
+		return null;
+	}
+	const columns = arrayValue(payload.columns).filter(
+		(column): column is string => typeof column === "string",
+	);
+	if (requiredColumns.some((column) => !columns.includes(column))) {
+		return null;
+	}
+	return arrayValue(payload.rows)
+		.map((row) => {
+			if (Array.isArray(row) && columns.length > 0) {
+				return Object.fromEntries(
+					columns.map((column, index) => [column, row[index]]),
+				);
+			}
+			return recordValue(row);
+		})
+		.filter((row) => Object.keys(row).length > 0);
 }
 
 /** Reads CodebaseMemory's changed-code impact summary for the current project. */
@@ -309,6 +304,7 @@ export function codebaseMemoryChanges(
 			? { base_branch: options.baseBranch }
 			: {}),
 		...(options.since !== undefined ? { since: options.since } : {}),
+		...JSON_FORMAT,
 	});
 	return result.ok ? result.value : null;
 }
@@ -324,11 +320,27 @@ export function codebaseMemoryArchitectureSummary(
 	const result = callCodebaseMemoryTool("get_architecture", {
 		project: project.name,
 		aspects: ["all"],
+		...JSON_FORMAT,
 	});
 	if (!result.ok) {
 		return null;
 	}
-	return result.value;
+	return hasArchitectureAnswer(result.value) ? result.value : null;
+}
+
+/** Rejects successful-but-unknown architecture payloads so summary can fall back. */
+function hasArchitectureAnswer(value: unknown): boolean {
+	const record = recordValue(value);
+	if (stringField(record.project) === null) {
+		return false;
+	}
+	return (
+		numberField(record.total_nodes) !== null ||
+		numberField(record.total_edges) !== null ||
+		["languages", "node_labels", "edge_types", "hotspots", "clusters"].some(
+			(key) => arrayValue(record[key]).length > 0,
+		)
+	);
 }
 
 /** Reads CodebaseMemory index status and schema metadata when available. */
@@ -341,6 +353,7 @@ export function codebaseMemoryStatus(
 	}
 	const schemaResult = callCodebaseMemoryTool("get_graph_schema", {
 		project: project.name,
+		...JSON_FORMAT,
 	});
 	const schema = schemaResult.ok ? recordValue(schemaResult.value) : {};
 	return {
@@ -377,7 +390,6 @@ function inspectResultFromPayloads(
 	target: string,
 	root: string,
 	match: Record<string, unknown>,
-	searchValue: unknown,
 	snippetValue: unknown,
 	traceValue: unknown,
 ): CodebaseMemoryInspectResult {
@@ -395,67 +407,21 @@ function inspectResultFromPayloads(
 	);
 	return {
 		name,
-		qualifiedName,
 		filePath,
 		startLine: numberField(snippet.start_line) ?? numberField(match.start_line),
 		endLine: numberField(snippet.end_line) ?? numberField(match.end_line),
-		matchRank: ordinalRank(numberField(match.rank)),
-		matchScore: matchScore(match),
-		signalFacts: signalFacts(snippet),
-		graphFacts: graphFacts(match),
+		signalFacts: signalFacts({ ...match, ...snippet }),
 		signature: signatureText(snippet, name),
 		source: stringField(snippet.source),
 		callers: traceRows(trace.callers, excludedNames),
 		callees: traceRows(trace.callees, excludedNames),
-		related: uniqueRows([
-			...stringArray(snippet.caller_names),
-			...stringArray(snippet.callee_names),
-			...traceNames(trace.callers, excludedNames),
-			...traceNames(trace.callees, excludedNames),
-		]).filter((item) => !testLikeName(item) && !excludedNames.has(item)),
-		graphNeighbors: graphNeighbors(searchValue, qualifiedName).filter(
-			(item) => !testLikeName(item),
-		),
 	};
 }
 
-/** Reads an ordinal graph result rank when the backend supplies one. */
-function ordinalRank(value: number | null): number | null {
-	return value !== null && Number.isInteger(value) && value > 0 ? value : null;
-}
-
-/** Reads the best available graph match confidence score. */
-function matchScore(match: Record<string, unknown>): number | null {
-	const score =
-		numberField(match.rerank_score) ??
-		numberField(match.score) ??
-		numberField(match.similarity);
-	if (score !== null) {
-		return score >= 0 ? score : null;
-	}
-	const rank = numberField(match.rank);
-	return rank !== null && ordinalRank(rank) === null && rank >= 0 ? rank : null;
-}
-
 /** Checks common CodebaseMemory search payload fields for no-answer responses. */
-function hasSearchAnswer(
-	value: unknown,
-	arrayKeys: string[],
-	countKeys: string[],
-): boolean {
+function hasSearchAnswer(value: unknown, arrayKeys: string[]): boolean {
 	const record = recordValue(value);
-	const arrays = arrayKeys.map((key) => arrayValue(record[key]));
-	if (arrays.some((items) => items.length > 0)) {
-		return true;
-	}
-	const hasKnownEmptyArray = arrayKeys.some((key) =>
-		Array.isArray(record[key]),
-	);
-	const hasZeroCount = countKeys.some((key) => record[key] === 0);
-	if (hasKnownEmptyArray || hasZeroCount) {
-		return false;
-	}
-	return true;
+	return arrayKeys.some((key) => arrayValue(record[key]).length > 0);
 }
 
 /** Converts optional graph search flags into CodebaseMemory search_graph arguments. */
@@ -497,7 +463,6 @@ function semanticSearchPayload(value: unknown): Record<string, unknown> {
 	);
 	return {
 		search_mode: "semantic",
-		semantic_total: semanticResults.length,
 		semantic_results: semanticResults,
 		has_more:
 			typeof record.semantic_has_more === "boolean"
@@ -512,24 +477,39 @@ function semanticResultHasSignal(value: unknown): boolean {
 	return score !== null && score >= MIN_SEMANTIC_SCORE;
 }
 
-/** Extracts the first graph search result record. */
-function firstGraphMatch(value: unknown): Record<string, unknown> {
+/** Extracts one unambiguous exact graph result for a symbol target. */
+function firstGraphMatch(
+	value: unknown,
+	target: string,
+): Record<string, unknown> {
 	const record = recordValue(value);
+	const candidates: Record<string, unknown>[] = [];
 	for (const key of ["results", "semantic_results"]) {
 		for (const item of arrayValue(record[key])) {
 			const itemRecord = recordValue(item);
 			if (stringField(itemRecord.qualified_name) !== null) {
-				return itemRecord;
+				candidates.push(itemRecord);
+			}
+			const nested = recordValue(itemRecord.node);
+			if (stringField(nested.qualified_name) !== null) {
+				candidates.push(nested);
 			}
 		}
 	}
-	for (const item of arrayValue(record.results)) {
-		const nested = recordValue(recordValue(item).node);
-		if (stringField(nested.qualified_name) !== null) {
-			return nested;
+	const exact = new Map<string, Record<string, unknown>>();
+	for (const candidate of candidates) {
+		const name = stringField(candidate.name);
+		const qualifiedName = stringField(candidate.qualified_name);
+		if (
+			qualifiedName !== null &&
+			(name === target ||
+				qualifiedName === target ||
+				qualifiedName.endsWith(`.${target}`))
+		) {
+			exact.set(qualifiedName, candidate);
 		}
 	}
-	return {};
+	return exact.size === 1 ? ([...exact.values()][0] ?? {}) : {};
 }
 
 /** Builds compact complexity and graph degree facts from a snippet payload. */
@@ -543,81 +523,6 @@ function signalFacts(snippet: Record<string, unknown>): string[] {
 	]
 		.filter((item): item is [string, number] => item[1] !== null)
 		.map(([name, value]) => `${name}=${value}`);
-}
-
-/** Builds compact node metadata facts from a graph search match. */
-function graphFacts(match: Record<string, unknown>): string[] {
-	return [
-		["label", stringField(match.label) ?? stringField(match.node_label)],
-		["kind", stringField(match.kind) ?? stringField(match.type)],
-		["package", stringField(match.package) ?? stringField(match.package_name)],
-		["language", stringField(match.language)],
-	]
-		.filter((item): item is [string, string] => item[1] !== null)
-		.map(([name, value]) => `${name}=${value}`);
-}
-
-/** Extracts readable neighbor rows from common graph search payload shapes. */
-function graphNeighbors(value: unknown, qualifiedName: string): string[] {
-	const record = recordValue(value);
-	return uniqueRows([
-		...neighborRows(record.connected_nodes, qualifiedName),
-		...neighborRows(record.neighbors, qualifiedName),
-		...relationshipRows(record.relationships, qualifiedName),
-		...relationshipRows(record.edges, qualifiedName),
-	]);
-}
-
-/** Extracts graph neighbor rows from node-like arrays. */
-function neighborRows(value: unknown, qualifiedName: string): string[] {
-	return arrayValue(value)
-		.map((item) => {
-			const record = recordValue(item);
-			const name =
-				stringField(record.name) ??
-				stringField(record.qualified_name) ??
-				stringField(record.target);
-			if (name === null || name === qualifiedName) {
-				return null;
-			}
-			const relation =
-				stringField(record.relationship) ??
-				stringField(record.edge_type) ??
-				stringField(record.type);
-			return relation === null ? name : `${relation}: ${name}`;
-		})
-		.filter((item) => item !== null);
-}
-
-/** Extracts graph neighbor rows from edge-like arrays. */
-function relationshipRows(value: unknown, qualifiedName: string): string[] {
-	return arrayValue(value)
-		.map((item) => {
-			const record = recordValue(item);
-			const source =
-				stringField(record.source) ??
-				stringField(record.from) ??
-				stringField(record.source_name);
-			const target =
-				stringField(record.target) ??
-				stringField(record.to) ??
-				stringField(record.target_name);
-			const relation =
-				stringField(record.type) ??
-				stringField(record.relationship) ??
-				stringField(record.edge_type);
-			const other =
-				source === qualifiedName
-					? target
-					: target === qualifiedName
-						? source
-						: null;
-			if (other === null || other === undefined || other === qualifiedName) {
-				return null;
-			}
-			return relation === null ? other : `${relation}: ${other}`;
-		})
-		.filter((item) => item !== null);
 }
 
 /** Builds a compact signature row from CodebaseMemory snippet fields. */
@@ -693,30 +598,10 @@ function traceRows(
 					return null;
 				}
 				const hop = numberField(record.hop);
-				const risk = stringField(record.risk);
-				const facts = [
-					hop !== null ? `hop ${hop}` : null,
-					risk !== null ? risk.toLowerCase() : null,
-				].filter((item) => item !== null);
-				return facts.length > 0 ? `${name} (${facts.join(", ")})` : name;
+				return hop !== null && hop > 1 ? `${name} (hop ${hop})` : name;
 			})
 			.filter((item) => item !== null),
 	);
-}
-
-/** Extracts names from trace records for the next-read section. */
-function traceNames(
-	value: unknown,
-	excluded: Set<string> = new Set(),
-): string[] {
-	return arrayValue(value)
-		.map((item) => {
-			const record = recordValue(item);
-			const name =
-				stringField(record.name) ?? stringField(record.qualified_name);
-			return name !== null && !excluded.has(name) ? name : null;
-		})
-		.filter((item) => item !== null);
 }
 
 /** Deduplicates trace rows by symbol name while preserving nearest-hop order. */
@@ -757,27 +642,6 @@ function numberField(value: unknown): number | null {
 	return typeof value === "number" ? value : null;
 }
 
-/** Reads string arrays from untrusted payloads. */
-function stringArray(value: unknown): string[] {
-	return arrayValue(value).filter(
-		(item): item is string => typeof item === "string" && item.length > 0,
-	);
-}
-
-/** Deduplicates short rows while preserving first-seen order. */
-function uniqueRows(rows: string[]): string[] {
-	const seen = new Set<string>();
-	const unique: string[] = [];
-	for (const row of rows) {
-		if (seen.has(row)) {
-			continue;
-		}
-		seen.add(row);
-		unique.push(row);
-	}
-	return unique;
-}
-
 /** Shortens absolute paths when Codebase Memory returns them. */
 function displayFilePath(value: string | null, root: string): string | null {
 	if (value === null) {
@@ -787,16 +651,6 @@ function displayFilePath(value: string | null, root: string): string | null {
 		return path.relative(root, value).split(path.sep).join("/");
 	}
 	return value;
-}
-
-/** Filters likely test names out of default next-read suggestions. */
-function testLikeName(value: string): boolean {
-	const lower = value.toLowerCase();
-	return (
-		lower.includes("/test") ||
-		lower.includes(".test.") ||
-		lower.includes("_test.")
-	);
 }
 
 /** Splits user search text into a small CodebaseMemory semantic keyword array. */

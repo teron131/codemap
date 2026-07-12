@@ -52,8 +52,8 @@ export function buildIntentView(
 	likelyEntries: Row[],
 ): Record<string, unknown> {
 	const focusFiles = likelyEntries
-		.filter((entry) => arrayValue(entry.nodeIds).length > 0)
 		.map((entry) => String(entry.title ?? ""))
+		.filter(Boolean)
 		.slice(0, 5);
 	const previews =
 		root && existsSync(root) && focusFiles.length > 0
@@ -151,11 +151,6 @@ function recordValue(value: unknown): Record<string, unknown> {
 	return value !== null && typeof value === "object" && !Array.isArray(value)
 		? (value as Record<string, unknown>)
 		: {};
-}
-
-/** Reads an array field from untrusted JSON-like data. */
-function arrayValue(value: unknown): unknown[] {
-	return Array.isArray(value) ? value : [];
 }
 
 /** Sorts text values with stable lexical ordering. */

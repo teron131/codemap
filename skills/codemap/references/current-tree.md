@@ -1,32 +1,14 @@
 # Current Tree Reference
 
-Use Codemap when the task is about current files: orientation, discovery, focused inspection, smart target cards, relationship context, or refactor evidence. Normal current-tree commands do not write persistent Codemap storage.
+Use Codemap for orientation, focused inspection, and compact refactor evidence over the files that exist now. Codemap does not write its own graph or semantic-index storage.
 
-## Orient In An Unknown Repo
+## Orient
 
 ```sh
 codemap summary --project-root <path>
 ```
 
-Use `summary` to identify inventory, likely entries, import counts, layers, starting paths, source-shape warnings, and intent clues from README or likely-start file docstrings.
-
-## Find Candidate Code
-
-```sh
-codemap search --project-root <path> "<words>"
-```
-
-Use `search` for concept, phrase, filename, function, class, or symbol discovery. Search is the **any -> in** path: start with any clue from the user, README, error text, symbol name, or phrase, then find where it lands in the codebase. It uses Codemap's shared ast-grep layer for identifier-like structural hits plus `rg` for text.
-
-When the query clearly names a file or symbol, default search also adds a focused target card with imports, importers, contained symbols, calls, long functions, and file-profile hints.
-
-Use `search --graph` only when the search result itself needs relationship context:
-
-```sh
-codemap search --graph --project-root <path> "<words>"
-```
-
-This heavier path can include imports, contains edges, summaries, and nearby supporting evidence. It is not the default search mode.
+Use `summary` for indexed counts, hotspots, and clusters. When the backend has no recognized answer, the current-tree fallback shows inventory, likely entries, and import counts. Treat either view as orientation and verify important paths with search and reads.
 
 ## Inspect One Target
 
@@ -34,31 +16,55 @@ This heavier path can include imports, contains edges, summaries, and nearby sup
 codemap inspect --project-root <path> <path-or-symbol>
 ```
 
-Use `inspect` after `summary`, `search`, or `signals` gives you a target. It is the explicit **in -> out** path: start from one known file, directory, function, class, variable, or symbol inside the codebase, then expand outward to its relationship neighborhood. Prefer file or directory targets first when the symbol is ambiguous.
+Inspect expands outward from one known file, directory, function, class, variable, or symbol. Prefer file and directory targets when a short symbol name may resolve to several definitions.
 
-Inspect profiles are useful before edits because they show target-specific evidence: directory summaries, file profiles, function/class profiles, variable definitions, imports, importers, contained symbols, calls, long functions, source metrics, and file-profile hints. Variable rows are source definitions and references seen by syntax scanning; verify behavior before deleting or renaming.
+Path inspection is current-tree first. An unambiguous symbol uses a fresh Codebase Memory snippet and trace without appending a duplicate local report. Ambiguous or unavailable backend matches fall back to current-tree inspection; `--local` selects that lane explicitly.
 
 ## Choose Refactor Targets
 
 ```sh
-codemap signals --project-root <path> top
-codemap signals --json --project-root <path> top | jq '.top.functions.longFunctions[:10]'
+codemap signals --project-root <path>
+codemap signals --json --project-root <path> | jq '{functionPressure, smallFunctions, longNames}'
 ```
 
-Use `signals` for structural refactor evidence. The default output is a compact bucket overview, then other sections expose the underlying measurements. `signals --json` is the durable contract for scripts and agent pipelines:
+The default result is bounded to four rows per bucket:
 
-- `relationships`: relationship counts and hubs.
-- `functions`: long functions with reference counts and broad function names.
-- `variables`: least-used definitions and broad name pools.
-- `files`: dense file profiles.
-- `usage` and `lengths`: lower-level distributions.
+- `functionPressure`: Codebase Memory cognitive/cyclomatic complexity and concrete linear scans inside loops.
+- `smallFunctions`: private functions up to eight lines with few lexical mentions.
+- `longNames`: camelCase or snake_case variable-like identifiers at least thirty characters long with lexical mention counts; ALL_CAPS and PascalCase owners are excluded.
 
-Signals should help choose what to read or change next; they should not automatically decide that code is wrong. Broad function and variable name pools are naming-pressure evidence only. Dense file text rows use `signals` for the summed structural count when full analysis is available. Large-repo fallback rows use `lines` because they are scanner-only file-size hints, while JSON keeps the field name `total` for existing scripts. Rows have an internal high cap to prevent runaway output. Source-specific rows skip generated/vendor-style files, and file-specific rows skip likely tests by default; add `--include-tests` for whole-tree rows. Use `--json` with `jq` for filtering, slicing, scripts, and agent pipelines.
+Function-pressure vocabulary:
+
+- `cognitive`: a unitless understandability score that increases with nested and branching control flow. It is meaningful for relative ranking within the same analyzer, not as a universal grade.
+- `cyclomatic`: an approximation of independent control-flow paths and therefore branch combinations.
+- `lines`: the physical source span of the function.
+- `linear_scan_in_loop`: detected scan operations inside loops. The number counts scan sites, not runtime iterations, and does not prove that the scanned collection is large.
+
+Text and JSON expose the same normalized facts. Text uses one line per target; JSON is compact rather than pretty-printed because it is intended for `jq` and agent pipelines.
+
+The output contains no instructions such as “delete” or “rename.” Selection and ordering are the opinionated layer; the caller verifies the implied change with search, source inspection, and tests.
+
+Lexical mentions count identifier tokens across current source. They are not graph edges, compiler references, or proof that a definition is live or dead.
+
+## Detailed Signal Sections
+
+Request a detailed section only when the compact result points there:
+
+```sh
+codemap signals --project-root <path> relationships
+codemap signals --project-root <path> functions
+codemap signals --project-root <path> variables
+codemap signals --project-root <path> files
+codemap signals --project-root <path> lengths
+codemap signals --project-root <path> docstring-signals
+```
+
+Detailed rows are capped, exclude likely tests by default, and filter generated or bundled paths where the section is source-specific. Add `--include-tests` only when tests are the target.
 
 ## Backend Boundary
 
-Codebase Memory MCP is the persistent graph backend. Backend-backed Codemap commands ask Codebase Memory MCP to index the project before querying, then use `search_code`, `search_graph`, `trace_path`, snippets, architecture, or status results where those primitives fit. If the backend is unavailable, continue with current-tree Codemap commands where a local answer still makes sense.
+Graph-backed commands delete the requested root's prior operational cache entry, call `index_repository` once with `persistence: false`, then query that snapshot. An index with skipped files is marked partial; a missing backend is degraded. Current-tree fallbacks remain available where a local answer exists.
 
 ## Non-Goals
 
-Codemap does not provide compiler-grade reachability, type inference, full call graphs, framework-specific semantics, or dataflow proofs. It gives current-tree source facts and refactor evidence that should be verified with focused reads and tests before edits.
+Codemap does not provide compiler-grade reachability, complete call graphs, framework-specific magic, or dataflow proof. It produces high-signal leads that must be verified before consequential edits.

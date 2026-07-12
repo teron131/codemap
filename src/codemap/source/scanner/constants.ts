@@ -1,5 +1,6 @@
 /** Defines scan suffixes, entrypoint names, and ignored filesystem paths. */
 export const ENTRYPOINT_BASENAMES = new Set([
+	"__main__.py",
 	"main.py",
 	"app.py",
 	"cli.py",
@@ -8,12 +9,26 @@ export const ENTRYPOINT_BASENAMES = new Set([
 	"main.ts",
 	"main.jsx",
 	"main.tsx",
+	"main.mjs",
+	"main.cjs",
+	"main.mts",
+	"main.cts",
 	"app.js",
 	"app.ts",
 	"app.jsx",
 	"app.tsx",
+	"app.mjs",
+	"app.cjs",
+	"app.mts",
+	"app.cts",
 	"index.js",
 	"index.ts",
+	"index.jsx",
+	"index.tsx",
+	"index.mjs",
+	"index.cjs",
+	"index.mts",
+	"index.cts",
 ]);
 
 export const TYPESCRIPT_SUFFIXES = new Set([
@@ -23,6 +38,8 @@ export const TYPESCRIPT_SUFFIXES = new Set([
 	".jsx",
 	".mjs",
 	".cjs",
+	".mts",
+	".cts",
 ]);
 export const PY_SUFFIXES = new Set([".py"]);
 
@@ -149,9 +166,11 @@ export const KEPT_HIDDEN_DIR_NAMES = new Set([".github"]);
 
 export const TYPESCRIPT_LANG_BY_SUFFIX: Record<string, string> = {
 	".cjs": "javascript",
+	".cts": "typescript",
 	".js": "javascript",
 	".jsx": "jsx",
 	".mjs": "javascript",
+	".mts": "typescript",
 	".ts": "typescript",
 	".tsx": "tsx",
 };

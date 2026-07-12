@@ -3,8 +3,13 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { scanEntry } from "../src/codemap/source/extraction/index.js";
+import {
+	runImportMap,
+	scanEntry,
+} from "../src/codemap/source/extraction/index.js";
+import { classifyTags } from "../src/codemap/source/graph/index.js";
 import { scanTypescriptFile } from "../src/codemap/source/scanner/index.js";
+import { collectReports } from "../src/codemap/source/signals/docstrings/index.js";
 
 const workspaceRoot = process.cwd();
 let workDir: string;
@@ -24,22 +29,39 @@ afterEach(() => {
 });
 
 describe("TypeScript-family scanner", () => {
-	it("labels JavaScript module suffixes as JavaScript inventory rows", () => {
-		for (const suffix of [".mjs", ".cjs"]) {
+	it("labels JavaScript and TypeScript module suffixes", () => {
+		for (const [suffix, language] of [
+			[".mjs", "javascript"],
+			[".cjs", "javascript"],
+			[".mts", "typescript"],
+			[".cts", "typescript"],
+		] as const) {
 			const filePath = path.join(workDir, `module${suffix}`);
 			writeFileSync(filePath, "export const value = 1;\n", "utf8");
 
 			expect(scanEntry(workDir, filePath)).toMatchObject({
 				path: `module${suffix}`,
-				language: "javascript",
+				language,
 				fileCategory: "code",
 				sizeLines: 1,
 			});
 		}
 	});
 
-	it("parses JavaScript module suffixes", () => {
-		for (const suffix of [".mjs", ".cjs"]) {
+	it("tags module-suffix app entrypoints consistently", () => {
+		for (const suffix of [".mjs", ".cjs", ".mts", ".cts"]) {
+			expect(
+				classifyTags({
+					path: `src/app${suffix}`,
+					language: "typescript",
+					fileCategory: "code",
+				}),
+			).toContain("entry-candidate");
+		}
+	});
+
+	it("parses JavaScript and TypeScript module suffixes", () => {
+		for (const suffix of [".mjs", ".cjs", ".mts", ".cts"]) {
 			const filePath = path.join(workDir, `module${suffix}`);
 			writeFileSync(
 				filePath,
@@ -69,5 +91,44 @@ describe("TypeScript-family scanner", () => {
 				]),
 			);
 		}
+	});
+
+	it("resolves imports across JavaScript and TypeScript module suffixes", () => {
+		const rows = [
+			["src/main.mts", "import './worker.js';\n"],
+			["src/worker.cts", "export const worker = true;\n"],
+			["src/loader.cjs", "import './feature';\n"],
+			["src/feature.mjs", "export const feature = true;\n"],
+		] as const;
+		for (const [relativePath, source] of rows) {
+			const filePath = path.join(workDir, relativePath);
+			mkdirSync(path.dirname(filePath), { recursive: true });
+			writeFileSync(filePath, source, "utf8");
+		}
+		const files = rows.map(([relativePath]) =>
+			scanEntry(workDir, path.join(workDir, relativePath)),
+		);
+
+		expect(runImportMap(workDir, files).importMap).toMatchObject({
+			"src/main.mts": ["src/worker.cts"],
+			"src/loader.cjs": ["src/feature.mjs"],
+		});
+	});
+
+	it("includes module suffixes in docstring reports", () => {
+		const focusFiles = [".mjs", ".cjs", ".mts", ".cts"].map((suffix) => {
+			const filePath = path.join(workDir, `documented${suffix}`);
+			writeFileSync(
+				filePath,
+				"/** Module purpose. */\nexport function run() { return true; }\n",
+				"utf8",
+			);
+			return filePath;
+		});
+
+		const [, reports] = collectReports(workDir, { focusFiles });
+		expect(reports.map((report) => report.displayPath).sort()).toEqual(
+			focusFiles.map((filePath) => path.basename(filePath)).sort(),
+		);
 	});
 });

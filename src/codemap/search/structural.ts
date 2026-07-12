@@ -16,18 +16,8 @@ import {
 } from "../ast-grep/index.js";
 import { expandUser } from "../common.js";
 
-export const CALL_TARGET_RE =
+const CALL_TARGET_RE =
 	/^[A-Za-z_$][A-Za-z0-9_$]*(\.[A-Za-z_$][A-Za-z0-9_$]*)*$/;
-
-/** Finds syntax-shaped matches across files with optional call prefiltering. */
-export function structuralMatches(
-	root: string,
-	language: string,
-	pattern: string,
-	paths: string[],
-): SyntaxMatch[] | null {
-	return syntaxMatches(root, language, pattern, paths);
-}
 
 /** Finds function or method call sites through structural search. */
 export function callMatches(
@@ -90,7 +80,7 @@ export function resolveTargetPaths(root: string, paths: string[]): string[] {
 }
 
 /** Validates and normalizes a function or dotted call target. */
-export function callTarget(name: string): string {
+function callTarget(name: string): string {
 	if (!CALL_TARGET_RE.test(name)) {
 		throw new Error(`Invalid call target: ${name}`);
 	}
@@ -150,11 +140,17 @@ function callCandidatePaths(
 }
 
 /** Extracts a plain callee name from a Python call-search pattern. */
-function callTextPattern(target: string): RegExp {
+function callTextPattern(
+	target: string,
+	{ global = false }: { global?: boolean } = {},
+): RegExp {
 	const parts = target.split(".").map((part) => escapeRegExp(part));
 	const callPrefix =
 		parts.length === 1 ? parts[0] : parts.join(String.raw`\s*\.\s*`);
-	return new RegExp(`(^|[^A-Za-z0-9_.$])${callPrefix}\\s*\\(`);
+	return new RegExp(
+		`(^|[^A-Za-z0-9_.$])${callPrefix}\\s*\\(`,
+		global ? "g" : "",
+	);
 }
 
 /** Finds Python call expressions with text matching the requested callee. */
@@ -164,7 +160,6 @@ function pythonCallMatches(
 	paths: string[],
 ): SyntaxMatch[] {
 	const matches: SyntaxMatch[] = [];
-	const callPattern = callTextPattern(target);
 	for (const filePath of targetFiles(root, paths, "python")) {
 		let source = "";
 		try {
@@ -178,24 +173,39 @@ function pythonCallMatches(
 			.split("\n");
 		for (let index = 0; index < sourceLines.length; index += 1) {
 			const line = sourceLines[index] ?? "";
-			const found = callPattern.exec(line);
-			if (found === null) {
+			if (pythonDefinitionLine(line, target)) {
 				continue;
 			}
-			const prefix = found[1] ?? "";
-			const column = found.index + prefix.length + 1;
-			matches.push({
-				filePath: path.relative(root, filePath).split(path.sep).join("/"),
-				text: line.trim(),
-				line: index + 1,
-				column,
-				endLine: index + 1,
-				endColumn: line.length + 1,
-				lines: contextLines(sourceLines, index, index),
-			});
+			for (const found of line.matchAll(
+				callTextPattern(target, { global: true }),
+			)) {
+				const prefix = found[1] ?? "";
+				const column = Number(found.index) + prefix.length + 1;
+				matches.push({
+					engine: "regex",
+					filePath: path.relative(root, filePath).split(path.sep).join("/"),
+					text: line.trim(),
+					line: index + 1,
+					column,
+					endLine: index + 1,
+					endColumn: line.length + 1,
+					lines: contextLines(sourceLines, index, index),
+				});
+			}
 		}
 	}
 	return matches;
+}
+
+/** Excludes Python function or class definitions from approximate call rows. */
+function pythonDefinitionLine(line: string, target: string): boolean {
+	if (target.includes(".")) {
+		return false;
+	}
+	const name = escapeRegExp(target);
+	return new RegExp(`^\\s*(?:(?:async\\s+)?def|class)\\s+${name}\\s*\\(`).test(
+		line,
+	);
 }
 
 /** Escapes text for literal use inside regular expressions. */

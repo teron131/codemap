@@ -1,7 +1,7 @@
 /** Builds lightweight signal payloads from scan rows when full analysis is unavailable. */
 import path from "node:path";
 
-import { scanFile } from "../scanner/index.js";
+import { ENTRYPOINT_BASENAMES, scanFile } from "../scanner/index.js";
 import { fileProfileRow } from "./analysis.js";
 import {
 	isGeneratedSignalPath,
@@ -22,7 +22,7 @@ export type LightweightSignalFile = {
 	sizeLines?: number | null;
 };
 
-export type LightweightSignalPayloadOptions = {
+type LightweightSignalPayloadOptions = {
 	includeTests?: boolean;
 	root?: string;
 };
@@ -35,23 +35,6 @@ const LIGHTWEIGHT_SIGNAL_LANGUAGES = new Set([
 	"typescript",
 ]);
 const LIGHTWEIGHT_SIGNAL_ENRICHMENT_LIMIT = SIGNAL_TOP_ROW_LIMIT;
-const ENTRYPOINT_LIKE_BASENAMES = new Set([
-	"app.js",
-	"app.jsx",
-	"app.py",
-	"app.ts",
-	"app.tsx",
-	"index.js",
-	"index.jsx",
-	"index.ts",
-	"index.tsx",
-	"main.js",
-	"main.jsx",
-	"main.py",
-	"main.ts",
-	"main.tsx",
-]);
-
 /** Builds a compact signal payload when full analysis is absent. */
 export function buildLightweightSignalPayload(
 	files: LightweightSignalFile[],
@@ -59,17 +42,9 @@ export function buildLightweightSignalPayload(
 ): SignalRow {
 	const denseFiles = buildLightweightDenseFiles(files, { includeTests, root });
 	const top = {
-		functions: {
-			longFunctions: [],
-			lowUseDefinitions: [],
-		},
-		variables: {
-			leastUsedDefinitions: [],
-			broadNamePools: [],
-		},
-		files: {
-			denseFiles: denseFiles.slice(0, SIGNAL_TOP_ROW_LIMIT),
-		},
+		functionPressure: [],
+		smallFunctions: [],
+		longNames: [],
 	};
 	return {
 		top,
@@ -95,14 +70,13 @@ export function buildLightweightSignalPayload(
 			distribution: {},
 		},
 		functions: {
-			frequency: { python: [], typescript: [] },
 			definitions: { python: [], typescript: [] },
 			lowUseDefinitions: { python: [], typescript: [] },
 		},
 		variables: {
-			frequency: { python: [], typescript: [] },
 			definitions: { python: [], typescript: [] },
 			lowUseDefinitions: { python: [], typescript: [] },
+			longNames: [],
 		},
 	};
 }
@@ -197,7 +171,7 @@ function emptyFunctionLengthSection(): FunctionLengthSection {
 /** Counts files that look like CLI or app entrypoints. */
 function countEntrypointLikeFiles(files: LightweightSignalFile[]): number {
 	return files.filter((entry) =>
-		ENTRYPOINT_LIKE_BASENAMES.has(entry.path.split("/").at(-1) ?? ""),
+		ENTRYPOINT_BASENAMES.has(entry.path.split("/").at(-1) ?? ""),
 	).length;
 }
 
