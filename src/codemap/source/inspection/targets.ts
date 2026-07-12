@@ -3,6 +3,7 @@ import { existsSync, statSync } from "node:fs";
 import path from "node:path";
 
 import { expandUser } from "../../common.js";
+import type { ScanEntry, ScanPayload } from "../extraction/index.js";
 import type { GraphNode } from "../graph/index.js";
 import { type FileMetrics, scanFile } from "../scanner/index.js";
 
@@ -26,13 +27,12 @@ export function normalizeTarget(root: string, target: string): string {
 export function targetFilePaths(
 	root: string,
 	rawTarget: string,
-	scan: Record<string, unknown>,
-	_pythonTreesByPath: Record<string, unknown>,
+	scan: ScanPayload,
 	fileMetricsByPath: Record<string, FileMetrics | undefined>,
 ): Set<string> {
 	const target = normalizeTarget(root, rawTarget);
-	const files = scanFiles(scan);
-	const filesByPath = new Set(files.map((entry) => String(entry.path ?? "")));
+	const files = scan.files;
+	const filesByPath = new Set(files.map((entry) => entry.path));
 	if (isDirectory(path.join(root, target))) {
 		return directoryFilePaths(target, filesByPath);
 	}
@@ -60,12 +60,12 @@ export function directoryFilePaths(
 export function symbolFilePaths(
 	root: string,
 	target: string,
-	files: Array<Record<string, unknown>>,
+	files: ScanEntry[],
 	fileMetricsByPath: Record<string, FileMetrics | undefined>,
 ): Set<string> {
 	const paths = new Set<string>();
 	for (const scanEntry of files) {
-		const relPath = String(scanEntry.path ?? "");
+		const relPath = scanEntry.path;
 		let metrics = fileMetricsByPath[relPath];
 		if (metrics === undefined && relPath) {
 			metrics = scanFile(path.join(root, relPath), { displayRoot: root });
@@ -86,18 +86,11 @@ export function symbolFilePaths(
 export function inspectEmitPaths(
 	root: string,
 	rawTarget: string,
-	scan: Record<string, unknown>,
+	scan: ScanPayload,
 	importMap: Record<string, string[] | undefined>,
-	pythonTreesByPath: Record<string, unknown>,
 	fileMetricsByPath: Record<string, FileMetrics | undefined>,
 ): Set<string> | null {
-	const paths = targetFilePaths(
-		root,
-		rawTarget,
-		scan,
-		pythonTreesByPath,
-		fileMetricsByPath,
-	);
+	const paths = targetFilePaths(root, rawTarget, scan, fileMetricsByPath);
 	if (paths.size === 0) {
 		return null;
 	}
@@ -149,18 +142,6 @@ export function nodeLabel(
 		return `${String(node.name ?? "")} in ${filePath}${suffix}`;
 	}
 	return filePath || String(node.id ?? "");
-}
-
-/** Filters scan entries down to files under an inspect target. */
-function scanFiles(
-	scan: Record<string, unknown>,
-): Array<Record<string, unknown>> {
-	return Array.isArray(scan.files)
-		? scan.files.filter(
-				(entry): entry is Record<string, unknown> =>
-					entry !== null && typeof entry === "object" && !Array.isArray(entry),
-			)
-		: [];
 }
 
 /** Checks the directory condition used by source inspection targets. */

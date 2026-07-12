@@ -28,27 +28,17 @@ describe("signals CLI", () => {
 	it("prints a concise note for sparse top signals", () => {
 		const output = renderSignalText(
 			{
-				top: {
-					functions: {
-						longFunctions: [],
-						lowUseDefinitions: [],
-					},
-					variables: {
-						leastUsedDefinitions: [],
-						broadNamePools: [],
-					},
-					files: {
-						denseFiles: [],
-					},
-				},
+				functionPressure: [],
+				smallFunctions: [],
+				longNames: [],
 			},
 			"top",
 		);
 
-		expect(output).toContain("No local refactor signal rows.");
-		expect(output).not.toContain("## Functions");
-		expect(output).not.toContain("## Variables");
-		expect(output).not.toContain("## Files");
+		expect(output).toContain("No refactor signal rows.");
+		expect(output).not.toContain("## Function Pressure");
+		expect(output).not.toContain("## Small Low-Use Functions");
+		expect(output).not.toContain("## Long Names");
 	});
 
 	it("keeps full docstring text output bounded", () => {
@@ -106,9 +96,9 @@ describe("signals CLI", () => {
 
 		expect(fileRows(payload)).toEqual(["src/worker.py", "src/app.ts"]);
 		expect(firstDenseRow(payload).total_label).toBe("lines");
-		expect(renderSignalText(payload, "top")).toContain(
-			"line-ranked rows use lightweight fallback for ranking; top rows include bounded syntax details when available, and inspect gives the full local profile.",
-		);
+		expect(
+			renderSignalText(payload.top as Record<string, unknown>, "top"),
+		).toContain("No refactor signal rows.");
 
 		const withTests = buildLightweightSignalPayload(
 			[
@@ -349,24 +339,24 @@ describe("signals CLI", () => {
 		expect(result.status).toBe(0);
 		expect(result.stderr).toBe("");
 		const payload = JSON.parse(result.stdout);
-		expect(payload.top.functions.longFunctions).toHaveLength(20);
-		expect(payload.top.functions.lowUseDefinitions.length).toBeLessThanOrEqual(
-			20,
-		);
-		expect(
-			payload.top.variables.leastUsedDefinitions.length,
-		).toBeLessThanOrEqual(20);
-		expect(payload.top.variables.broadNamePools.length).toBeLessThanOrEqual(20);
-		expect(payload.top.files.denseFiles.length).toBeLessThanOrEqual(20);
+		expect(payload).toEqual({
+			freshness: "degraded",
+			functionPressure: [],
+			smallFunctions: [],
+			longNames: [],
+		});
+		expect(result.stdout.length).toBeLessThan(500);
 	});
 
-	it("keeps test-only broad names out unless tests are included", () => {
+	it("keeps test-only long names out unless tests are included", () => {
 		writeFileSync(
 			path.join(workDir, "src", "app.ts"),
 			[
-				"export const sourceSignalName = 1;",
-				"export function readSourceSignalName() {",
-				"  return sourceSignalName;",
+				"export const sourceIdentifierNameWithReviewPressure = 1;",
+				"export const PORTFOLIO_NEWS_SUMMARY_RESPONSE_TICKER = 1;",
+				"export const PortfolioNewsSummaryResponseTickerSchema = 1;",
+				"export function readSourceIdentifierName() {",
+				"  return sourceIdentifierNameWithReviewPressure;",
 				"}",
 			].join("\n"),
 			"utf8",
@@ -374,25 +364,30 @@ describe("signals CLI", () => {
 		writeFileSync(
 			path.join(workDir, "src", "app.test.ts"),
 			[
-				"const testOnlySignalName = 1;",
-				"export function readTestOnlySignalName() {",
-				"  return [",
-				"    testOnlySignalName,",
-				"    testOnlySignalName,",
-				"    testOnlySignalName,",
-				"    testOnlySignalName,",
-				"  ];",
+				"const testOnlyIdentifierNameWithReviewPressure = 1;",
+				"export function readTestOnlyIdentifierName() {",
+				"  return testOnlyIdentifierNameWithReviewPressure;",
 				"}",
 			].join("\n"),
 			"utf8",
 		);
 
-		const defaultNames = broadNamePoolNames(signalTopJson());
-		expect(defaultNames).toContain("sourceSignalName");
-		expect(defaultNames).not.toContain("testOnlySignalName");
+		const defaultNames = longNameNames(signalTopJson());
+		expect(defaultNames).toContain("sourceIdentifierNameWithReviewPressure");
+		expect(defaultNames).not.toContain(
+			"PORTFOLIO_NEWS_SUMMARY_RESPONSE_TICKER",
+		);
+		expect(defaultNames).not.toContain(
+			"PortfolioNewsSummaryResponseTickerSchema",
+		);
+		expect(defaultNames).not.toContain(
+			"testOnlyIdentifierNameWithReviewPressure",
+		);
 
-		const withTestsNames = broadNamePoolNames(signalTopJson("--include-tests"));
-		expect(withTestsNames).toContain("testOnlySignalName");
+		const withTestsNames = longNameNames(signalTopJson("--include-tests"));
+		expect(withTestsNames).toContain(
+			"testOnlyIdentifierNameWithReviewPressure",
+		);
 	});
 });
 
@@ -406,9 +401,7 @@ function scanEntry(pathValue: string, language: string, sizeLines: number) {
 }
 
 function fileRows(payload: Record<string, unknown>): string[] {
-	const top = payload.top as Record<string, unknown>;
-	const files = top.files as Record<string, unknown>;
-	return (files.denseFiles as Array<Record<string, unknown>>).map((row) =>
+	return (payload.files as Array<Record<string, unknown>>).map((row) =>
 		String(row.file),
 	);
 }
@@ -416,9 +409,7 @@ function fileRows(payload: Record<string, unknown>): string[] {
 function firstDenseRow(
 	payload: Record<string, unknown>,
 ): Record<string, unknown> {
-	const top = payload.top as Record<string, unknown>;
-	const files = top.files as Record<string, unknown>;
-	return (files.denseFiles as Array<Record<string, unknown>>)[0] ?? {};
+	return (payload.files as Array<Record<string, unknown>>)[0] ?? {};
 }
 
 function signalTopJson(...args: string[]): Record<string, unknown> {
@@ -443,10 +434,8 @@ function signalTopJson(...args: string[]): Record<string, unknown> {
 	return JSON.parse(result.stdout) as Record<string, unknown>;
 }
 
-function broadNamePoolNames(payload: Record<string, unknown>): string[] {
-	const top = payload.top as Record<string, unknown>;
-	const variables = top.variables as Record<string, unknown>;
-	return (variables.broadNamePools as Array<Record<string, unknown>>).map(
-		(row) => String(row.name),
+function longNameNames(payload: Record<string, unknown>): string[] {
+	return (payload.longNames as Array<Record<string, unknown>>).map((row) =>
+		String(row.name),
 	);
 }

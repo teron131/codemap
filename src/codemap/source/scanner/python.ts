@@ -75,7 +75,7 @@ export function pythonFunctionIdentifier(
 }
 
 /** Collects Python imports, definitions, variables, and function spans. */
-export function collectPythonImportsAndVariables(
+function collectPythonImportsAndVariables(
 	metrics: FileMetrics,
 	source: string,
 ): void {

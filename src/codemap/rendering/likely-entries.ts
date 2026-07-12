@@ -38,8 +38,8 @@ export function buildLikelyEntries(
 		}
 		return compareText(left.filePath, right.filePath);
 	});
-	return selectLikelyEntriesWithSurfaceCap(scored, 8).map((node, index) =>
-		likelyEntryRow(node, index, {
+	return selectLikelyEntriesWithSurfaceCap(scored, 8).map((node) =>
+		likelyEntryRow(node, {
 			description: likelyEntryDescription(node, fanIn, fanOut),
 			relationshipCount: (fanIn.get(node.id) ?? 0) + (fanOut.get(node.id) ?? 0),
 		}),
@@ -63,8 +63,8 @@ export function buildPathRankedLikelyEntries(nodes: GraphNode[]): Row[] {
 			}
 			return compareText(left.filePath, right.filePath);
 		});
-	return scored.slice(0, 8).map((node, index) =>
-		likelyEntryRow(node, index, {
+	return scored.slice(0, 8).map((node) =>
+		likelyEntryRow(node, {
 			description: "Fallback entry candidate; detailed graph skipped.",
 			relationshipCount: 0,
 		}),
@@ -99,7 +99,6 @@ function likelyEntryCandidates(nodes: GraphNode[]): GraphNode[] {
 /** Builds one public likely-entry row. */
 function likelyEntryRow(
 	node: GraphNode,
-	index: number,
 	{
 		description,
 		relationshipCount,
@@ -107,12 +106,10 @@ function likelyEntryRow(
 ): Row {
 	const role = likelyEntryRole(node, relationshipCount);
 	return {
-		order: index + 1,
 		title: String(node.filePath || node.name || node.id),
 		role: role.label,
 		reason: role.reason,
 		description,
-		nodeIds: [node.id],
 	};
 }
 

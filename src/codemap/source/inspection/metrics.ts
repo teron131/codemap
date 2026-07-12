@@ -1,6 +1,7 @@
 /** Collects scanner metrics for files selected by inspection targets. */
 import path from "node:path";
 
+import type { ScanEntry } from "../extraction/index.js";
 import {
 	type FileMetrics,
 	PY_SUFFIXES,
@@ -16,24 +17,23 @@ export function emptyUsageMetrics(): Record<string, Record<string, Row[]>> {
 	return {
 		lowUsageFunctions: { python: [], typescript: [] },
 		lowUsageVariables: { python: [], typescript: [] },
-		noisyVariables: { python: [], typescript: [] },
 	};
 }
 
 /** Builds scanner metrics for selected inspection files. */
 export function metricsForFiles(
 	root: string,
-	files: Array<Record<string, unknown>>,
+	files: ScanEntry[],
 	fileMetricsByPath: Record<string, FileMetrics | undefined>,
 ): Record<string, unknown> {
 	const scanned: FileMetrics[] = [];
 	for (const item of files) {
-		const relPath = String(item.path ?? "");
+		const relPath = item.path;
 		let metrics = fileMetricsByPath[relPath];
 		if (metrics === undefined) {
 			metrics = scanFile(path.join(root, relPath), { displayRoot: root });
 		}
-		const sizeLines = Number(item.sizeLines ?? 0);
+		const sizeLines = item.sizeLines;
 		if (sizeLines > 0 && metrics.lines === 0) {
 			metrics.lines = sizeLines;
 		}

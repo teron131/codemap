@@ -142,27 +142,24 @@ describe("summary CLI", () => {
 	});
 
 	it("marks relationship counts as fallback when summary graphing was skipped", () => {
-		const output = renderSummaryText(
-			{
-				project: { name: "large-repo" },
-				counts: { files: 6001 },
-				relationships: {
-					pythonImportEdges: 0,
-					typescriptImportEdges: 0,
-					entrypointLikeFiles: 12,
-					importCountsUnavailable: true,
-					importCountsNote: "skipped detailed graph above 5000 files",
-				},
-				inventory: {
-					languages: [{ name: "typescript", count: 6001 }],
-					categories: [{ name: "code", count: 6001 }],
-					rootHotspots: [{ name: "src", count: 6001 }],
-				},
-				intent: {},
+		const output = renderSummaryText({
+			project: { name: "large-repo" },
+			stats: { files: 6001 },
+			relationships: {
+				pythonImportEdges: 0,
+				typescriptImportEdges: 0,
+				entrypointLikeFiles: 12,
+				importCountsUnavailable: true,
+				importCountsNote: "skipped detailed graph above 5000 files",
 			},
-			{ likelyEntries: [] },
-			{},
-		);
+			inventory: {
+				languages: [{ name: "typescript", count: 6001 }],
+				categories: [{ name: "code", count: 6001 }],
+				rootHotspots: [{ name: "src", count: 6001 }],
+			},
+			intent: {},
+			likelyEntries: [],
+		});
 
 		expect(output).toContain("- Python imports: unknown (fallback)");
 		expect(output).toContain("- TypeScript imports: unknown (fallback)");

@@ -1,6 +1,7 @@
 /** Combines ast-grep symbol hits and ripgrep text hits into source matches. */
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import path from "node:path";
 import type { NapiConfig } from "@ast-grep/napi";
 
 import {
@@ -9,11 +10,16 @@ import {
 	type SyntaxMatch,
 	targetFiles,
 } from "../ast-grep/index.js";
+import {
+	CONFIG_BASENAMES,
+	LANGUAGE_BY_SUFFIX,
+	runScan,
+} from "../source/extraction/index.js";
 import { IGNORED_DIR_NAMES } from "../source/scanner/index.js";
 
-export const IDENTIFIER_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
+const IDENTIFIER_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 
-export const SYMBOL_KINDS_BY_LANGUAGE: Record<string, string[]> = {
+const SYMBOL_KINDS_BY_LANGUAGE: Record<string, string[]> = {
 	typescript: [
 		"function_declaration",
 		"class_declaration",
@@ -42,7 +48,7 @@ export const SYMBOL_KINDS_BY_LANGUAGE: Record<string, string[]> = {
 };
 
 export type SourceMatch = {
-	engine: "ast-grep" | "rg";
+	engine: "ast-grep" | "path" | "regex" | "rg";
 	kind: string;
 	filePath: string;
 	line: number;
@@ -56,9 +62,7 @@ export type SourceFallbackGroup = {
 	truncated: boolean;
 };
 
-export type JsonMatchParser = (
-	payload: Record<string, unknown>,
-) => SourceMatch | null;
+type JsonMatchParser = (payload: Record<string, unknown>) => SourceMatch | null;
 
 const FALLBACK_TERM_LIMIT = 8;
 const FALLBACK_MATCHES_PER_TERM = 2;
@@ -110,6 +114,63 @@ export function sourceMatches(
 		}
 	}
 	return matches;
+}
+
+/** Finds exact basenames and partial project paths for path-shaped queries. */
+export function pathMatches(
+	root: string,
+	searchText: string,
+	{ limit }: { limit: number },
+): SourceMatch[] {
+	if (!pathLikeSearchText(searchText)) {
+		return [];
+	}
+	const query = searchText.replaceAll("\\", "/").replace(/^\.\//, "");
+	const queryLower = query.toLowerCase();
+	return runScan(root)
+		.files.filter((entry) => {
+			const filePath = entry.path.toLowerCase();
+			return (
+				filePath === queryLower ||
+				filePath.endsWith(`/${queryLower}`) ||
+				filePath.includes(queryLower)
+			);
+		})
+		.sort((left, right) => {
+			const leftExact = pathExactness(left.path, queryLower);
+			const rightExact = pathExactness(right.path, queryLower);
+			return leftExact - rightExact || compareText(left.path, right.path);
+		})
+		.slice(0, limit)
+		.map((entry) => ({
+			engine: "path",
+			kind: "file",
+			filePath: entry.path,
+			line: 1,
+			column: 1,
+			text: entry.path,
+		}));
+}
+
+/** Checks whether a query carries a file suffix or path separator. */
+function pathLikeSearchText(searchText: string): boolean {
+	const query = searchText.trim();
+	if (/[/\\]/.test(query) || CONFIG_BASENAMES.has(query)) {
+		return true;
+	}
+	return Object.hasOwn(LANGUAGE_BY_SUFFIX, path.extname(query).toLowerCase());
+}
+
+/** Ranks an exact path before basename and partial-path matches. */
+function pathExactness(filePath: string, queryLower: string): number {
+	const lower = filePath.toLowerCase();
+	if (lower === queryLower) {
+		return 0;
+	}
+	if (lower.endsWith(`/${queryLower}`)) {
+		return 1;
+	}
+	return 2;
 }
 
 /** Finds partial source matches when a full phrase has no direct hits. */
@@ -234,7 +295,7 @@ function fallbackMatchRank(match: SourceMatch): number {
 }
 
 /** Finds likely symbol matches with ast-grep before rg fallback. */
-export function astGrepSymbolMatches(
+function astGrepSymbolMatches(
 	root: string,
 	symbol: string,
 	{ limit }: { limit: number },
@@ -270,7 +331,7 @@ export function astGrepSymbolMatches(
 }
 
 /** Finds Python definitions or assignments that match a symbol name. */
-export function pythonSymbolMatches(
+function pythonSymbolMatches(
 	root: string,
 	symbol: string,
 	{ limit }: { limit: number },
@@ -301,6 +362,7 @@ export function pythonSymbolMatches(
 				const endIndex = pythonBlockEnd(sourceLines, index, definition.indent);
 				matches.push(
 					astGrepMatch({
+						engine: "regex",
 						filePath: relPath,
 						text: sourceLines.slice(index, endIndex + 1).join("\n"),
 						line: index + 1,
@@ -316,6 +378,7 @@ export function pythonSymbolMatches(
 			if (assignment !== null) {
 				matches.push(
 					astGrepMatch({
+						engine: "regex",
 						filePath: relPath,
 						text: line,
 						line: index + 1,
@@ -332,7 +395,7 @@ export function pythonSymbolMatches(
 }
 
 /** Builds ast-grep patterns for function, class, and export symbol queries. */
-export function symbolMatchConfig(symbol: string, kinds: string[]): NapiConfig {
+function symbolMatchConfig(symbol: string, kinds: string[]): NapiConfig {
 	const escaped = escapeRegExp(symbol);
 	return {
 		rule: {
@@ -348,13 +411,13 @@ export function symbolMatchConfig(symbol: string, kinds: string[]): NapiConfig {
 }
 
 /** Finds ast-grep pattern matches for one source string. */
-export function astGrepMatch(match: SyntaxMatch): SourceMatch {
+function astGrepMatch(match: SyntaxMatch): SourceMatch {
 	const text = (match.lines || match.text)
 		.split(/\s+/)
 		.filter(Boolean)
 		.join(" ");
 	return {
-		engine: "ast-grep",
+		engine: match.engine,
 		kind: "symbol",
 		filePath: match.filePath,
 		line: match.line,
@@ -364,7 +427,7 @@ export function astGrepMatch(match: SyntaxMatch): SourceMatch {
 }
 
 /** Runs ripgrep and converts output to source match rows. */
-export function ripgrepMatches(
+function ripgrepMatches(
 	root: string,
 	searchText: string,
 	{ limit }: { limit: number },
@@ -401,7 +464,7 @@ function ripgrepExcludeArgs(): string[] {
 }
 
 /** Parses streamed ripgrep JSON into source match rows. */
-export function streamedJsonMatches(
+function streamedJsonMatches(
 	command: string[],
 	root: string,
 	parser: JsonMatchParser,
@@ -440,9 +503,7 @@ export function streamedJsonMatches(
 }
 
 /** Runs ripgrep for one query and returns the first text match. */
-export function ripgrepMatch(
-	rgEvent: Record<string, unknown>,
-): SourceMatch | null {
+function ripgrepMatch(rgEvent: Record<string, unknown>): SourceMatch | null {
 	if (rgEvent.type !== "match") {
 		return null;
 	}
@@ -466,7 +527,7 @@ export function ripgrepMatch(
 }
 
 /** Adds a source match once while respecting the result limit. */
-export function appendMatch(
+function appendMatch(
 	matches: SourceMatch[],
 	seen: Set<string>,
 	sourceMatch: SourceMatch,

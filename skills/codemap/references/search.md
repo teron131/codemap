@@ -1,82 +1,57 @@
 # Search Reference
 
-Use default search as the fast source interface:
+## Default Search
 
 ```sh
 codemap search --project-root <path> "<words>"
 ```
 
-Default `search` is for plain words, phrases, filenames, symbols, functions, classes, and identifiers. When Codebase Memory MCP is available, Codemap indexes the project first and asks `search_code` for graph-augmented matches. If the backend is unavailable or returns no useful answer, Codemap asks its shared ast-grep layer for structural symbol matches and fills remaining results with fixed-string, case-insensitive `rg` matches.
+Path-shaped queries resolve exact basenames and project paths from the current tree without indexing. Other default searches ask Codebase Memory `search_code` for graph-ranked source matches after one fresh index. If the backend is unavailable, empty, filtered out, or structurally unrecognized, Codemap falls back to local ast-grep symbol search plus fixed-string, case-insensitive `rg`.
 
-Search has four lanes:
-
-- Default `search`: Codebase Memory MCP `search_code` after indexing, then local shared ast-grep plus `rg` fallback.
-- `search match` and `search rule`: `codemap.search.structural`, explicit read-only ast-grep matching.
-- `search calls`: Codebase Memory MCP `trace_path` when unscoped, then local ast-grep call-site matching when a language or paths are provided.
-- `search --graph`: Codebase Memory MCP `search_graph` after indexing, then derived current-tree graph fallback.
-- `search --semantic`: Codebase Memory MCP semantic `search_graph` after indexing, then current-tree fallback.
-
-Default `search` does not evaluate regular expressions. For raw regex text search, use `rg` directly:
+Default search does not evaluate regular expressions. Use raw `rg` for regex completeness:
 
 ```sh
 rg -n "<regex>" <path>
-codemap inspect --project-root <path> <candidate-file>
 ```
 
-Use relationship-context search only when the result itself needs import/contains evidence:
+## Graph And Semantic Search
 
 ```sh
-codemap search --graph --project-root <path> "<words>"
+codemap search --graph --project-root <path> "<concept>"
+codemap search --semantic --project-root <path> "<concept>"
 ```
 
-Relationship-context search builds the heavier derived evidence path and can show nearby imports, contains edges, summaries, and supporting evidence. It is slower on large repos, so default shared ast-grep plus rg search should stay first.
+Graph search uses Codebase Memory BM25 and relationship filters, then a current-tree graph fallback. Semantic search uses Codebase Memory embeddings and falls back to current-tree search when no above-floor semantic rows remain.
 
-Use semantic search when Codebase Memory MCP should answer from the persistent graph:
+Use `codemap memory status` when backend readiness itself is the question.
+
+## Call Sites
 
 ```sh
-codemap semantic status --project-root <path>
-codemap search --semantic --project-root <path> "<words>"
+codemap search calls --project-root <path> <function-or-method> [paths...]
 ```
 
-Semantic search is a backend-backed graph branch. It is for fuzzy concept matching over Codebase Memory's persistent graph, not a Codemap-owned saved index. Codemap triggers indexing before querying so it does not knowingly read stale graph data.
+`search calls` always means source call-shaped matches such as `print(...)`, `logger.info(...)`, or `console.log(...)`. Backend availability does not change the result into a caller/callee trace. JavaScript/TypeScript rows come from ast-grep. Python uses the ast-grep CLI when available and otherwise labels its approximate rows `[regex]`; regex rows can still match comments or strings and need a focused source read.
 
-Use structural search when the query is an ast-grep pattern, call target, or read-only YAML rule. Start with simple pattern arguments or call wrappers; for rewrite previews and syntax codemods, read `references/syntax.md`.
+The default is at most twenty rows. Use `--limit <count>` to change the bound. `--json` returns compact `{total,matches}` data so truncation remains visible.
+
+## Structural Patterns And Rules
 
 ```sh
-codemap search match --project-root <path> --lang python --pattern "def $NAME($$$ARGS): $$$BODY" <paths...>
-codemap search match --project-root <path> --lang ts --pattern "function $NAME($$$ARGS) { $$$BODY }" <paths...>
+codemap search match --project-root <path> --lang ts --pattern "function $NAME($$$ARGS) { $$$BODY }" [paths...]
+codemap search rule --project-root <path> --rule <rule.yml> [paths...]
 ```
 
-Use call wrappers for the common ast-grep pattern `$TARGET($$$ARGS)`:
+Use these for built-in read-only JavaScript/TypeScript ast-grep discovery. A simple Python `search match` works only when the ast-grep CLI is installed; use raw ast-grep for complex Python rules, rewrite previews, fixes, interactive rule authoring, detailed parse dumps, or engine options Codemap does not expose.
 
-```sh
-codemap search calls --project-root <path> print <paths...>
-codemap search calls --project-root <path> console.log <paths...>
-```
+## Search Lanes
 
-`calls` means call sites: invocations like `print(...)`, `logger.info(...)`, or `console.log(...)`. It infers Python, TypeScript, JavaScript, TSX, and JSX from target file suffixes. Use `--lang` only when inference is not enough. Use `syntax replace-call` only when rewriting the call target.
+- Default: current-tree path matches, then Codebase Memory ranked code search, then ast-grep plus `rg` fallback.
+- Graph: Codebase Memory relationship search, then current-tree graph fallback.
+- Semantic: Codebase Memory semantic search, then current-tree text fallback.
+- Calls: ast-grep for JavaScript/TypeScript; labeled Python regex fallback when the CLI is absent.
+- Match and rule: built-in JavaScript/TypeScript ast-grep; limited Python CLI handoff.
 
-Use syntax recipes when a structural search or rewrite is common enough to standardize:
+`--graph` and `--semantic` are mutually exclusive. Graph-only filters require `--graph` instead of being silently ignored.
 
-```sh
-codemap syntax recipes --project-root <path>
-codemap syntax recipe --project-root <path> python-none-comparison <paths...>
-codemap syntax recipe --project-root <path> python-none-comparison <paths...> --apply --yes
-```
-
-Current recipes include conservative replacements like Python `None` comparison cleanup and search recipes for debug-print/log calls. Recipes can package simple patterns or complex ast-grep rule configs with relational rules, transforms, rewriters, and fixes.
-
-Use `codemap search rule` for read-only project-specific ast-grep YAML rules:
-
-```sh
-codemap search rule --project-root <path> --rule <rule.yml> <paths...>
-```
-
-Run raw `ast-grep` or `sg` directly only when you need engine flags, interactive rule debugging, rule authoring workflows, full debug dumps, or behavior not exposed by Codemap.
-
-Preview rewrites before applying:
-
-```sh
-codemap syntax replace --project-root <path> --lang python --pattern "<pattern>" --rewrite "<rewrite>" <paths...>
-codemap syntax replace --project-root <path> --lang python --pattern "<pattern>" --rewrite "<rewrite>" --apply --yes <paths...>
-```
+Backend payloads are accepted only when they contain the tool-specific result fields Codemap knows how to normalize. Unknown or error payloads fall back instead of suppressing current-tree evidence.

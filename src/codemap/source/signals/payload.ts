@@ -1,6 +1,6 @@
 /** Builds JSON signal payload sections for CLI output. */
 import { PY_SUFFIXES, TYPESCRIPT_SUFFIXES } from "../scanner/index.js";
-import { isUsefulNamePoolTerm } from "./name-pools.js";
+import { isAllCapsName, isPascalCaseName } from "./analysis.js";
 import {
 	isGeneratedSignalPath,
 	isTestPath,
@@ -12,12 +12,10 @@ import type {
 	SignalRow,
 } from "./schema.js";
 
-export const STRUCTURAL_SUFFIXES = new Set([
-	...PY_SUFFIXES,
-	...TYPESCRIPT_SUFFIXES,
-]);
-
-export { isUsefulNamePoolTerm } from "./name-pools.js";
+const STRUCTURAL_SUFFIXES = new Set([...PY_SUFFIXES, ...TYPESCRIPT_SUFFIXES]);
+const LONG_IDENTIFIER_MIN_CHARACTERS = 30;
+const LOCAL_FUNCTION_PRESSURE_MIN_LINES = 20;
+const SMALL_FUNCTION_MAX_LINES = 8;
 
 type SignalExport = {
 	sections?: Record<string, unknown>;
@@ -25,9 +23,9 @@ type SignalExport = {
 
 type Row = SignalRow;
 type TopSignalPayload = {
-	functions: Record<string, Row[]>;
-	variables: Record<string, Row[]>;
-	files: Record<string, Row[]>;
+	functionPressure: Row[];
+	smallFunctions: Row[];
+	longNames: Row[];
 };
 
 /** Selects and shapes signal sections for JSON output. */
@@ -79,7 +77,7 @@ export function buildSignalPayload(
 }
 
 /** Builds JSON payload rows for function usage signals. */
-export function functionPayload(
+function functionPayload(
 	usageTables: Record<string, unknown>,
 	limit: number,
 	{ includeTests }: { includeTests: boolean },
@@ -93,16 +91,6 @@ export function functionPayload(
 		{ includeTests },
 	);
 	return {
-		frequency: {
-			python: highFrequencyRows(
-				arrayValue(usageTables.python_functions),
-				limit,
-			),
-			typescript: highFrequencyRows(
-				arrayValue(usageTables.typescript_functions),
-				limit,
-			),
-		},
 		definitions: {
 			python: functionPressureRows(pythonCandidates, limit),
 			typescript: functionPressureRows(typescriptCandidates, limit),
@@ -115,11 +103,11 @@ export function functionPayload(
 }
 
 /** Builds JSON payload rows for variable usage signals. */
-export function variablePayload(
+function variablePayload(
 	usageTables: Record<string, unknown>,
 	limit: number,
 	{ includeTests }: { includeTests: boolean },
-): Record<string, LanguageRows> {
+): Record<string, unknown> {
 	const pythonCandidates = fileScopedRows(
 		arrayValue(usageTables.python_variable_candidates),
 		{ includeTests },
@@ -129,37 +117,29 @@ export function variablePayload(
 		{ includeTests },
 	);
 	return {
-		frequency: {
-			python: highFrequencyRows(
-				arrayValue(
-					includeTests
-						? usageTables.python_variables
-						: usageTables.source_python_variables,
-				),
-				limit,
-			),
-			typescript: highFrequencyRows(
-				arrayValue(
-					includeTests
-						? usageTables.typescript_variables
-						: usageTables.source_typescript_variables,
-				),
-				limit,
-			),
-		},
 		definitions: {
-			python: referenceCountRows(pythonCandidates, limit),
-			typescript: referenceCountRows(typescriptCandidates, limit),
+			python: mentionCountRows(pythonCandidates, limit),
+			typescript: mentionCountRows(typescriptCandidates, limit),
 		},
 		lowUseDefinitions: {
 			python: lowUseRows(pythonCandidates, limit),
 			typescript: lowUseRows(typescriptCandidates, limit),
 		},
+		longNames: longIdentifierRows(
+			[
+				...pythonCandidates.map((row) => ({ language: "python", ...row })),
+				...typescriptCandidates.map((row) => ({
+					language: "typescript",
+					...row,
+				})),
+			],
+			limit,
+		),
 	};
 }
 
 /** Checks whether a file row belongs to structural source. */
-export function isStructuralFileRow(row: Row): boolean {
+function isStructuralFileRow(row: Row): boolean {
 	const filePath = rowFile(row);
 	if (!filePath || filePath.endsWith("__init__.py")) {
 		return false;
@@ -174,7 +154,7 @@ export function isStructuralFileRow(row: Row): boolean {
 }
 
 /** Builds a capped table for the longest scanned code blocks. */
-export function limitedLengthSection(
+function limitedLengthSection(
 	section: Record<string, unknown>,
 	limit: number,
 	{ includeTests }: { includeTests: boolean },
@@ -200,7 +180,7 @@ export function limitedLengthSection(
 }
 
 /** Filters signal rows to one source file. */
-export function fileScopedRows(
+function fileScopedRows(
 	rows: Row[],
 	{ includeTests }: { includeTests: boolean },
 ): Row[] {
@@ -211,7 +191,7 @@ export function fileScopedRows(
 }
 
 /** Reads the source file path from a signal row. */
-export function rowFile(row: Row): string {
+function rowFile(row: Row): string {
 	const filePath = row.file;
 	if (filePath) {
 		return String(filePath);
@@ -221,45 +201,108 @@ export function rowFile(row: Row): string {
 }
 
 /** Builds the top-signal payload section for summary output. */
-export function topPayload(
+function topPayload(
 	payload: Record<string, unknown>,
 	limit: number,
 ): TopSignalPayload {
 	const functions = recordValue(payload.functions);
 	const variables = recordValue(payload.variables);
 	return {
-		functions: {
-			longFunctions: limitedRows(
-				languageRows(recordValue(functions.definitions)),
-				limit,
-			),
-			lowUseDefinitions: limitedRows(
-				languageRows(recordValue(functions.lowUseDefinitions)),
-				limit,
-			),
-		},
-		variables: {
-			leastUsedDefinitions: limitedRows(
-				languageRows(recordValue(variables.lowUseDefinitions)),
-				limit,
-			),
-			broadNamePools: limitedRows(
-				languageRows(recordValue(variables.frequency)),
-				limit,
-			),
-		},
-		files: {
-			denseFiles: limitedRows(
-				arrayValue(payload.files)
-					.slice()
-					.sort(
-						(left, right) =>
-							-Number(left.total ?? 0) - -Number(right.total ?? 0) ||
-							compareText(String(left.file ?? ""), String(right.file ?? "")),
+		functionPressure: compactLocalFunctionPressureRows(
+			languageRows(recordValue(functions.definitions)),
+			limit,
+		),
+		smallFunctions: compactSmallFunctionRows(
+			languageRows(recordValue(functions.lowUseDefinitions)),
+			limit,
+		),
+		longNames: compactLongNameRows(arrayValue(variables.longNames), limit),
+	};
+}
+
+/** Compacts locally ranked function size and mention evidence for fallback. */
+function compactLocalFunctionPressureRows(rows: Row[], limit: number): Row[] {
+	return limitedRows(
+		rows.filter(
+			(row) => Number(row.lines ?? 0) >= LOCAL_FUNCTION_PRESSURE_MIN_LINES,
+		),
+		limit,
+	).map((row) => ({
+		name: String(row.name ?? ""),
+		path: String(row.file ?? ""),
+		...(Number(row.line ?? 0) > 0 ? { line: Number(row.line) } : {}),
+		lines: Number(row.lines ?? 0),
+		mentions: Number(row.count ?? 0),
+		...(row.exported === true ? { exported: true } : {}),
+	}));
+}
+
+/** Selects small private functions with few lexical mentions. */
+function compactSmallFunctionRows(rows: Row[], limit: number): Row[] {
+	return limitedRows(
+		rows
+			.filter((row) => {
+				const lines = Number(row.lines ?? 0);
+				return lines > 0 && lines <= SMALL_FUNCTION_MAX_LINES;
+			})
+			.sort(
+				(left, right) =>
+					Number(left.count ?? 0) - Number(right.count ?? 0) ||
+					Number(left.lines ?? 0) - Number(right.lines ?? 0) ||
+					compareText(
+						String(left.identifier ?? ""),
+						String(right.identifier ?? ""),
 					),
-				limit,
+			)
+			.map(compactSmallFunctionRow),
+		limit,
+	);
+}
+
+/** Selects unusually long variable-like identifiers. */
+function longIdentifierRows(rows: Row[], limit: number): Row[] {
+	return limitedRows(
+		rows
+			.filter((row) => {
+				const name = String(row.name ?? "");
+				return (
+					name.length >= LONG_IDENTIFIER_MIN_CHARACTERS &&
+					!isAllCapsName(name) &&
+					!isPascalCaseName(name)
+				);
+			})
+			.sort(
+				(left, right) =>
+					String(right.name ?? "").length - String(left.name ?? "").length ||
+					Number(left.count ?? 0) - Number(right.count ?? 0) ||
+					compareText(
+						String(left.identifier ?? ""),
+						String(right.identifier ?? ""),
+					),
 			),
-		},
+		limit,
+	);
+}
+
+/** Compacts long-name rows to the facts needed for review. */
+function compactLongNameRows(rows: Row[], limit: number): Row[] {
+	return limitedRows(rows, limit).map((row) => ({
+		name: String(row.name ?? ""),
+		path: String(row.file ?? ""),
+		...(Number(row.line ?? 0) > 0 ? { line: Number(row.line) } : {}),
+		characters: String(row.name ?? "").length,
+		mentions: Number(row.count ?? 0),
+	}));
+}
+
+/** Compacts one small-function row to location and lexical evidence. */
+function compactSmallFunctionRow(row: Row): Row {
+	return {
+		name: String(row.name ?? ""),
+		path: String(row.file ?? ""),
+		...(Number(row.line ?? 0) > 0 ? { line: Number(row.line) } : {}),
+		lines: Number(row.lines ?? 0),
+		mentions: Number(row.count ?? 0),
 	};
 }
 
@@ -283,29 +326,15 @@ export function languageRows(
 }
 
 /** Sorts and caps metric rows for compact signal payload sections. */
-export function limitedRows(rows: Row[], limit: number): Row[] {
+function limitedRows(rows: Row[], limit: number): Row[] {
 	if (limit <= 0) {
 		return rows;
 	}
 	return rows.slice(0, limit);
 }
 
-/** Selects the most frequently referenced signal rows. */
-export function highFrequencyRows(rows: Row[], limit: number): Row[] {
-	return limitedRows(
-		rows
-			.filter((row) => isUsefulNamePoolTerm(String(row.name ?? "")))
-			.sort(
-				(left, right) =>
-					-Number(left.count ?? 0) - -Number(right.count ?? 0) ||
-					compareText(String(left.name ?? ""), String(right.name ?? "")),
-			),
-		limit,
-	);
-}
-
-/** Selects the lowest-reference signal rows. */
-export function lowUseRows(rows: Row[], limit: number): Row[] {
+/** Selects the lowest-mention signal rows. */
+function lowUseRows(rows: Row[], limit: number): Row[] {
 	return limitedRows(
 		rows
 			.filter((row) => row.refactorCandidate)
@@ -321,8 +350,8 @@ export function lowUseRows(rows: Row[], limit: number): Row[] {
 	);
 }
 
-/** Ranks functions by combined length and low-reference pressure. */
-export function functionPressureRows(rows: Row[], limit: number): Row[] {
+/** Ranks functions by combined length and low-mention pressure. */
+function functionPressureRows(rows: Row[], limit: number): Row[] {
 	return limitedRows(
 		rows
 			.slice()
@@ -339,8 +368,8 @@ export function functionPressureRows(rows: Row[], limit: number): Row[] {
 	);
 }
 
-/** Counts incoming reference edges for symbols in the graph. */
-export function referenceCountRows(rows: Row[], limit: number): Row[] {
+/** Sorts definitions by lexical mention count. */
+function mentionCountRows(rows: Row[], limit: number): Row[] {
 	return limitedRows(
 		rows
 			.slice()
@@ -363,6 +392,9 @@ export function selectPayloadSection(
 ): Record<string, unknown> {
 	if (section === "all") {
 		return payload;
+	}
+	if (section === "top") {
+		return recordValue(payload.top);
 	}
 	const key = payloadKeyForSection(section);
 	return { [key]: payload[key] ?? {} };

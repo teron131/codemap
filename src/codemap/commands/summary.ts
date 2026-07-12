@@ -3,7 +3,7 @@ import type { Command } from "commander";
 
 import { printCodebaseMemoryArchitectureSummary } from "../codebase-memory/index.js";
 import { DETAILED_ANALYSIS_FILE_LIMIT, resolveProjectRoot } from "../common.js";
-import { buildViews } from "../rendering/index.js";
+import { buildSummaryText } from "../rendering/index.js";
 import { runScan, type ScanEntry } from "../source/extraction/index.js";
 import {
 	currentTreeGraph,
@@ -45,16 +45,12 @@ export function commandSummary(
 	if (printCodebaseMemoryArchitectureSummary(root)) {
 		return 0;
 	}
-	const renderedViews = buildViews(buildSummaryGraph(root), {
-		includeHtml: false,
-		root,
-	});
-	console.log(String(renderedViews.summaryText ?? "").trim());
+	console.log(buildSummaryText(buildSummaryGraph(root), { root }).trim());
 	return 0;
 }
 
 /** Builds the current-tree graph payload used by summary-style output. */
-export function buildSummaryGraph(root: string): GraphPayload {
+function buildSummaryGraph(root: string): GraphPayload {
 	const scan = runScan(root);
 	return buildSummaryGraphFromScan(root, scan);
 }
@@ -66,10 +62,10 @@ export function buildSummaryGraphFromScan(
 ): GraphPayload {
 	return scan.files.length > DETAILED_ANALYSIS_FILE_LIMIT
 		? buildLightweightSummaryGraph(scan)
-		: currentTreeGraph(root, { includeSignals: false });
+		: currentTreeGraph(root);
 }
 
-/** Builds a minimal graph when summary output has no saved graph yet. */
+/** Builds a minimal graph when detailed relationship analysis is too broad. */
 function buildLightweightSummaryGraph(scan: {
 	files: ScanEntry[];
 	stats: {

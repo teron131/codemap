@@ -3,7 +3,6 @@ import { existsSync, statSync } from "node:fs";
 import path from "node:path";
 
 import type { GraphPayload } from "../graph/index.js";
-import { languageMetricItems } from "../signals/index.js";
 import { denseFileCounters } from "../signals/render.js";
 import { importBoundaryRows } from "./graph.js";
 
@@ -15,6 +14,11 @@ export type FileInspectMetrics = {
 	lowUsageVariables: MetricRow[];
 	fileProfiles: MetricRow[];
 };
+
+/** Flattens Python and TypeScript metric rows for one inspection profile. */
+function languageMetricItems(section: MetricRow): MetricRow[] {
+	return [...arrayRows(section.python), ...arrayRows(section.typescript)];
+}
 
 /** Finds scanner metrics for one inspection file path. */
 export function fileMetricsForPath(
@@ -68,13 +72,13 @@ export function appendFileProfile(
 		}
 		appendLimitMarker(lines, fileMetrics.longFunctions.length, limit);
 	}
-	appendReferenceRows(
+	appendMentionRows(
 		lines,
 		"## Low-Use Internal Functions In File",
 		fileMetrics.lowUsageFunctions,
 		{ limit },
 	);
-	appendReferenceRows(
+	appendMentionRows(
 		lines,
 		"## Low-Use Internal Variables In File",
 		fileMetrics.lowUsageVariables,
@@ -83,8 +87,8 @@ export function appendFileProfile(
 	appendFileProfileRow(lines, fileMetrics.fileProfiles);
 }
 
-/** Appends a limited reference table to an inspection profile. */
-export function appendReferenceRows(
+/** Appends a limited lexical-mention table to an inspection profile. */
+export function appendMentionRows(
 	lines: string[],
 	title: string,
 	rows: MetricRow[],
@@ -97,9 +101,7 @@ export function appendReferenceRows(
 	lines.push(title);
 	for (const item of rows.slice(0, limit)) {
 		const identifier = item.identifier || item.name;
-		lines.push(
-			`- ${String(identifier)}: ${String(item.count ?? 0)} references`,
-		);
+		lines.push(`- ${String(identifier)}: ${String(item.count ?? 0)} mentions`);
 	}
 	appendLimitMarker(lines, rows.length, limit);
 }
@@ -146,11 +148,7 @@ export function renderVariableProfile(
 	metrics: Record<string, unknown>,
 	{ limit }: { limit: number },
 ): string | null {
-	const rows = arrayRows(metrics.variableDefinitions).filter(
-		(item) =>
-			item.name === target ||
-			String(item.identifier ?? "").endsWith(`::${target}`),
-	);
+	const rows = definitionRows(metrics, "variableDefinitions", target);
 	if (rows.length === 0) {
 		return null;
 	}
@@ -162,12 +160,34 @@ export function renderVariableProfile(
 		);
 	}
 	appendLimitMarker(lines, rows.length, limit);
+	appendDefinitionFileProfiles(lines, metrics, rows);
+	return lines.join("\n").trim();
+}
+
+/** Selects metric definitions matching a short or qualified target name. */
+function definitionRows(
+	metrics: Record<string, unknown>,
+	key: "variableDefinitions",
+	target: string,
+): MetricRow[] {
+	return arrayRows(metrics[key]).filter(
+		(item) =>
+			item.name === target ||
+			String(item.identifier ?? "").endsWith(`::${target}`),
+	);
+}
+
+/** Appends file facts shared by definition-only fallback profiles. */
+function appendDefinitionFileProfiles(
+	lines: string[],
+	metrics: Record<string, unknown>,
+	rows: MetricRow[],
+): void {
 	const rowFiles = new Set(rows.map((item) => item.file));
 	const fileRows = arrayRows(metrics.fileProfiles).filter((row) =>
 		rowFiles.has(row.file),
 	);
 	appendFileProfileRow(lines, fileRows);
-	return lines.join("\n").trim();
 }
 
 /** Renders file, import, export, and contained-node summaries for a directory. */
