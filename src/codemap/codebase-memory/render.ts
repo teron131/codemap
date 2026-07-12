@@ -1,6 +1,7 @@
 /** Renders normalized CodebaseMemory backend results for Codemap commands. */
 
 import { matchesGlobFilter, matchesTextFilter } from "../search/filters.js";
+import { canonicalPath } from "./client.js";
 import {
 	type CodebaseMemoryChangeOptions,
 	type CodebaseMemoryGraphSearchOptions,
@@ -840,8 +841,10 @@ function renderCodebaseMemoryProjects(
 	const projects = arrayValue(recordValue(value).projects)
 		.map(projectRecord)
 		.filter((project) => project !== null);
+	const currentRootPath = canonicalPath(currentRoot);
 	const currentProject = projects.find(
-		(project) => project.root === currentRoot,
+		(project) =>
+			project.root !== null && canonicalPath(project.root) === currentRootPath,
 	);
 	const otherProjects = projects.filter(
 		(project) =>
