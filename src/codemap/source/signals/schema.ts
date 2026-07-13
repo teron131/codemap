@@ -44,7 +44,6 @@ export type DefinitionRow = SignalRow & {
 	line?: number;
 	exported?: boolean;
 	moduleLevel?: boolean;
-	refactorCandidate?: boolean;
 	language?: SignalLanguage;
 };
 

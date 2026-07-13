@@ -42,9 +42,9 @@ export function buildLightweightSignalPayload(
 ): SignalRow {
 	const denseFiles = buildLightweightDenseFiles(files, { includeTests, root });
 	const top = {
-		functionPressure: [],
-		smallFunctions: [],
-		longNames: [],
+		functionMetrics: [],
+		functionsByMentions: [],
+		variablesByNameLength: [],
 	};
 	return {
 		top,
@@ -70,13 +70,12 @@ export function buildLightweightSignalPayload(
 			distribution: {},
 		},
 		functions: {
-			definitions: { python: [], typescript: [] },
-			lowUseDefinitions: { python: [], typescript: [] },
+			byLength: { python: [], typescript: [] },
+			byMentions: { python: [], typescript: [] },
 		},
 		variables: {
-			definitions: { python: [], typescript: [] },
-			lowUseDefinitions: { python: [], typescript: [] },
-			longNames: [],
+			byMentions: { python: [], typescript: [] },
+			byNameLength: [],
 		},
 	};
 }
