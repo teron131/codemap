@@ -1,8 +1,8 @@
-/** Defines CLI behavior for current-tree summary output. */
+/** Defines CLI behavior for backend-first source summary output. */
 import type { Command } from "commander";
 
-import { printCodebaseMemoryArchitectureSummary } from "../codebase-memory/index.js";
 import { resolveProjectRoot } from "../common.js";
+import { codebaseMemoryArchitectureSummary } from "../rendering/architecture.js";
 import { buildSummaryText } from "../rendering/index.js";
 import { currentTreeSummaryGraph } from "../source/graph/index.js";
 import { addProjectRootArgument } from "./options.js";
@@ -29,7 +29,7 @@ export function addSummaryParser(program: Command): void {
 	addProjectRootArgument(summary);
 }
 
-/** Builds and prints the current-tree summary output. */
+/** Builds and prints backend architecture or current-tree fallback output. */
 export function commandSummary(
 	options: SummaryOptions,
 	rootOptions: RootOptions = {},
@@ -37,7 +37,9 @@ export function commandSummary(
 	const root = resolveProjectRoot(
 		options.projectRoot ?? rootOptions.projectRoot,
 	);
-	if (printCodebaseMemoryArchitectureSummary(root)) {
+	const backendSummary = codebaseMemoryArchitectureSummary(root);
+	if (backendSummary !== null) {
+		console.log(backendSummary);
 		return 0;
 	}
 	console.log(buildSummaryText(currentTreeSummaryGraph(root), { root }).trim());

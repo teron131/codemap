@@ -1,15 +1,18 @@
 /** Re-exports source inspection graph, target, metric, profile, and render APIs. */
 export {
-	currentTreeInspectGraph,
-	importBoundaryRows,
-	uniqueRows,
-} from "./graph.js";
+	type CodebaseMemoryInspectResult,
+	codebaseMemoryInspect,
+	renderCodebaseMemoryInspect,
+} from "./codebase-memory.js";
 export {
+	currentTreeInspectGraph,
 	emptyUsageMetrics,
 	functionDefinitionRows,
+	importBoundaryRows,
 	metricsForFiles,
+	uniqueRows,
 	variableDefinitionRows,
-} from "./metrics.js";
+} from "./graph.js";
 export {
 	appendBoundaryRows,
 	appendFileProfile,

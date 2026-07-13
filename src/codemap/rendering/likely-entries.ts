@@ -175,7 +175,7 @@ function likelyEntryScore(
 	const outgoing = fanOut.get(node.id) ?? 0;
 	const filePath = node.filePath;
 	const centrality = incoming + outgoing;
-	let score = centralityScore(centrality);
+	let score = Math.min(centrality, 120);
 	if ((node.tags ?? []).includes("entry-candidate")) {
 		score += isShallowEntrypoint(filePath) ? 80 : 12;
 	}
@@ -193,11 +193,6 @@ function likelyEntryScore(
 		score -= 80;
 	}
 	return score;
-}
-
-/** Caps import centrality so extreme fan-in does not swamp role evidence. */
-function centralityScore(centrality: number): number {
-	return Math.min(centrality, 120);
 }
 
 /** Checks whether an entry-candidate filename is near an actual package/app root. */

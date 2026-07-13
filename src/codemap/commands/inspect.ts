@@ -1,13 +1,11 @@
 /** Defines CLI behavior for focused source inspection targets. */
 import type { Command } from "commander";
 
-import {
-	codebaseMemoryInspect,
-	renderCodebaseMemoryInspect,
-} from "../codebase-memory/index.js";
 import { resolveProjectRoot } from "../common.js";
 import {
+	codebaseMemoryInspect,
 	inspectPathTargetKind,
+	renderCodebaseMemoryInspect,
 	renderCurrentTreeInspection,
 } from "../source/inspection/index.js";
 import { addProjectRootArgument, parseIntegerOption } from "./options.js";
@@ -87,10 +85,9 @@ export function commandInspect(
 	}
 	const inspection = renderCurrentTreeInspection(root, target, { limit });
 	if (inspection === null) {
+		const quotedTarget = `'${target.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
 		console.log(`No match: ${target}`);
-		console.log(
-			`Run: codemap search --project-root ${root} ${pythonRepr(target)}`,
-		);
+		console.log(`Run: codemap search --project-root ${root} ${quotedTarget}`);
 		return 1;
 	}
 	console.log(inspection);
@@ -105,9 +102,4 @@ function inspectLimit(value: string | number | undefined): number {
 	const parsed =
 		typeof value === "number" ? value : Number.parseInt(String(value), 10);
 	return Number.isNaN(parsed) ? 8 : parsed;
-}
-
-/** Formats values using Python-style repr for CLI compatibility. */
-function pythonRepr(value: string): string {
-	return `'${value.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
 }

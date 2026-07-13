@@ -92,7 +92,9 @@ export function ruleMatches(
 	const language = normalizeLanguage(lang);
 	if (napiLanguageFor(language) === null) {
 		if (language === "python") {
-			const pattern = patternFromMatchConfig(matchConfig);
+			const config = matchConfig as unknown as Record<string, unknown>;
+			const patternValue = recordValue(config.rule).pattern;
+			const pattern = typeof patternValue === "string" ? patternValue : null;
 			return pattern === null
 				? null
 				: cliPatternMatches(root, language, pattern, paths, { limit });
@@ -313,9 +315,10 @@ function cliJsonMatches(root: string, stdout: string): SyntaxMatch[] {
 		const range = recordValue(item.range);
 		const start = recordValue(range.start);
 		const end = recordValue(range.end);
+		const absoluteFilePath = path.resolve(root, String(item.file ?? ""));
 		return {
 			engine: "ast-grep",
-			filePath: cliRelPath(root, String(item.file ?? "")),
+			filePath: path.relative(root, absoluteFilePath).split(path.sep).join("/"),
 			text: String(item.text ?? ""),
 			line: numberValue(start.line) + 1,
 			column: numberValue(start.column) + 1,
@@ -334,20 +337,6 @@ function cliRows(stdout: string): AstGrepCliMatch[] {
 	}
 	const parsed = JSON.parse(trimmed) as unknown;
 	return Array.isArray(parsed) ? (parsed as AstGrepCliMatch[]) : [];
-}
-
-/** Converts ast-grep CLI file names into project-relative paths. */
-function cliRelPath(root: string, rawFile: string): string {
-	const absolute = path.resolve(root, rawFile);
-	return path.relative(root, absolute).split(path.sep).join("/");
-}
-
-/** Reads the top-level ast-grep pattern from a rule match config. */
-function patternFromMatchConfig(matchConfig: NapiConfig): string | null {
-	const config = matchConfig as unknown as Record<string, unknown>;
-	const rule = recordValue(config.rule);
-	const pattern = rule.pattern;
-	return typeof pattern === "string" ? pattern : null;
 }
 
 /** Reads a record field from untrusted JSON-like data. */
