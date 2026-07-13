@@ -2,12 +2,12 @@
 export {
 	buildIntentView,
 	buildInventoryView,
+	buildSummaryText,
 	readmeFirstLine,
 	readmeIntentLine,
 	relationshipCountsFromGraph,
 	topCountItems,
 } from "./architecture.js";
-export { buildSummaryText } from "./build.js";
 export {
 	buildLikelyEntries,
 	buildPathRankedLikelyEntries,

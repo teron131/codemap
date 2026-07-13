@@ -2,14 +2,15 @@
 
 export {
 	addBackendParsers,
+	addIndexParser,
 	commandBackendChanges,
 	commandBackendProjects,
 	commandBackendQuery,
 	commandBackendSchema,
 	commandBackendStatus,
+	commandIndex,
 } from "./backend.js";
 export { buildParser, dispatch, main, run } from "./cli.js";
-export { addIndexParser, commandIndex } from "./index-memory.js";
 export { addInspectParser, commandInspect } from "./inspect.js";
 export { addProjectRootArgument, PROJECT_ROOT_HELP } from "./options.js";
 export {

@@ -1,4 +1,4 @@
-/** Checks the CodebaseMemory adapter and clean-index lifecycle with mocked MCP output. */
+/** Checks Codebase Memory transport and feature integration with a shared mock backend. */
 import { spawn } from "node:child_process";
 import {
 	chmodSync,
@@ -15,20 +15,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
 	callCodebaseMemoryTool,
-	codebaseMemoryInspect,
 	codebaseMemoryQueryRows,
 	codebaseMemorySchema,
 	codebaseMemoryStatus,
 	withFreshCodebaseMemoryProject,
 } from "../src/codemap/codebase-memory/index.js";
-import {
-	printCodebaseMemoryArchitectureSummary,
-	printCodebaseMemoryGraphSearch,
-	printCodebaseMemorySearch,
-	printCodebaseMemorySemanticSearch,
-	renderCodebaseMemoryArchitectureSummary,
-	renderCodebaseMemoryInspect,
-} from "../src/codemap/codebase-memory/render.js";
 import {
 	buildParser,
 	commandBackendChanges,
@@ -39,7 +30,17 @@ import {
 	commandIndex,
 	commandInspect,
 	commandSignals,
+	commandSummary,
 } from "../src/codemap/commands/index.js";
+import {
+	printCodebaseMemoryGraphSearch,
+	printCodebaseMemorySearch,
+	printCodebaseMemorySemanticSearch,
+} from "../src/codemap/search/codebase-memory.js";
+import {
+	codebaseMemoryInspect,
+	renderCodebaseMemoryInspect,
+} from "../src/codemap/source/inspection/index.js";
 
 const workspaceRoot = process.cwd();
 let workDir: string;
@@ -50,7 +51,7 @@ beforeEach(() => {
 		workspaceRoot,
 		"test",
 		".work",
-		`codebase-memory-client-${process.pid}-${Date.now()}`,
+		`codebase-memory-integration-${process.pid}-${Date.now()}`,
 	);
 	mkdirSync(workDir, { recursive: true });
 	serverPath = path.join(workDir, "mock-codebase-memory-mcp.cjs");
@@ -66,7 +67,7 @@ afterEach(() => {
 	rmSync(workDir, { recursive: true, force: true });
 });
 
-describe("CodebaseMemory client", () => {
+describe("Codebase Memory integration", () => {
 	it("exposes the backend namespace without a memory alias", () => {
 		const commandNames = buildParser().commands.map((command) =>
 			command.name(),
@@ -530,7 +531,7 @@ describe("CodebaseMemory client", () => {
 	it("prints compact backend architecture summaries", () => {
 		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 		try {
-			expect(printCodebaseMemoryArchitectureSummary(workDir)).toBe(true);
+			expect(commandSummary({ projectRoot: workDir })).toBe(0);
 			const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
 
 			expect(output).toContain("# CodebaseMemory Architecture");
@@ -552,7 +553,7 @@ describe("CodebaseMemory client", () => {
 		vi.stubEnv("CODEBASE_MEMORY_MOCK_SPARSE_ARCHITECTURE", "1");
 		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 		try {
-			expect(printCodebaseMemoryArchitectureSummary(workDir)).toBe(true);
+			expect(commandSummary({ projectRoot: workDir })).toBe(0);
 			const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
 
 			expect(output).toContain("node labels: File 12, Module 12");
@@ -563,86 +564,6 @@ describe("CodebaseMemory client", () => {
 		} finally {
 			logSpy.mockRestore();
 		}
-	});
-
-	it("notes when architecture summaries only have file-level nodes", () => {
-		const output = renderCodebaseMemoryArchitectureSummary({
-			project: "sparse-project",
-			total_nodes: 10,
-			total_edges: 8,
-			node_labels: [
-				{ label: "Folder", count: 3 },
-				{ label: "File", count: 2 },
-				{ label: "Module", count: 2 },
-			],
-			edge_types: [{ type: "DEFINES", count: 4 }],
-		});
-
-		expect(output).toContain("project: sparse-project");
-		expect(output).toContain(
-			"note: no function/class/method nodes; summary is file-level only.",
-		);
-	});
-
-	it("hides generic architecture hotspots and cluster names", () => {
-		const output = renderCodebaseMemoryArchitectureSummary({
-			project: "busy-project",
-			total_nodes: 100,
-			total_edges: 200,
-			node_labels: [{ label: "Function", count: 10 }],
-			hotspots: [
-				{ name: "get", fan_in: 30 },
-				{
-					name: "handleRequest",
-					fan_in: 12,
-					qualified_name: "app.server.handleRequest",
-				},
-			],
-			clusters: [
-				{
-					label: "server",
-					members: 5,
-					top_nodes: ["get", "send", "handleRequest", "routeRequest"],
-				},
-			],
-		});
-
-		expect(output).toContain("## Hotspots (hidden generic: 1)");
-		expect(output).toContain("- handleRequest");
-		expect(output).not.toContain("- get");
-		expect(output).toContain("top: handleRequest, routeRequest");
-		expect(output).not.toContain("top: get");
-	});
-
-	it("replaces repeated cluster labels with their top symbols", () => {
-		const output = renderCodebaseMemoryArchitectureSummary({
-			project: "clustered-project",
-			node_labels: [{ label: "Function", count: 10 }],
-			clusters: [
-				{ label: "src", members: 5, top_nodes: ["alpha", "beta"] },
-				{ label: "src", members: 4, top_nodes: ["gamma", "delta"] },
-			],
-		});
-
-		expect(output).toContain("- alpha, beta (5 nodes)");
-		expect(output).toContain("- gamma, delta (4 nodes)");
-		expect(output).not.toContain("- src");
-	});
-
-	it("omits generic utility hotspots and unreliable backend entry points", () => {
-		const output = renderCodebaseMemoryArchitectureSummary({
-			project: "utility-project",
-			node_labels: [{ label: "Function", count: 10 }],
-			hotspots: [
-				{ name: "recordValue", fan_in: 30 },
-				{ name: "runWorkflow", fan_in: 8 },
-			],
-			entry_points: [{ name: "syntaxMatches", file: "src/search.ts" }],
-		});
-
-		expect(output).not.toContain("- recordValue");
-		expect(output).toContain("- runWorkflow");
-		expect(output).not.toContain("## Entry Points");
 	});
 
 	it("prints compact semantic graph search rows from semantic_results", () => {
@@ -694,8 +615,10 @@ describe("CodebaseMemory client", () => {
 		vi.stubEnv("CODEBASE_MEMORY_MOCK_UNKNOWN_ARCHITECTURE", "1");
 		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 		try {
-			expect(printCodebaseMemoryArchitectureSummary(workDir)).toBe(false);
-			expect(logSpy).not.toHaveBeenCalled();
+			expect(commandSummary({ projectRoot: workDir })).toBe(0);
+			const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+			expect(output).toContain("# codebase-memory-integration-");
+			expect(output).not.toContain("# CodebaseMemory Architecture");
 		} finally {
 			logSpy.mockRestore();
 		}

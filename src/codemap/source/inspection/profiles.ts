@@ -7,8 +7,7 @@ import { type ScanEntry, structureForFile } from "../extraction/index.js";
 import type { GraphPayload } from "../graph/index.js";
 import { type FileMetrics, scanFile } from "../scanner/index.js";
 import { denseFileCounters } from "../signals/render.js";
-import { importBoundaryRows } from "./graph.js";
-import { metricsForFiles } from "./metrics.js";
+import { importBoundaryRows, metricsForFiles } from "./graph.js";
 
 export type MetricRow = Record<string, unknown>;
 

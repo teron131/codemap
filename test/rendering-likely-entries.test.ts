@@ -10,7 +10,7 @@ import type {
 	GraphPayload,
 } from "../src/codemap/source/graph/index.js";
 
-describe("rendering view building", () => {
+describe("likely entry rendering", () => {
 	it("prefers production entry files over test files in normal graph rankings", () => {
 		const entries = buildLikelyEntries(
 			[node("src/index.ts"), node("src/index.test.ts"), node("src/helpers.ts")],
