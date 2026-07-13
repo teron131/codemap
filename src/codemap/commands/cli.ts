@@ -1,7 +1,6 @@
 /** Builds and dispatches the top-level Codemap CLI parser. */
 import { Command, CommanderError } from "commander";
-import { addBackendParsers } from "./backend.js";
-import { addIndexParser } from "./index-memory.js";
+import { addBackendParsers, addIndexParser } from "./backend.js";
 import { addInspectParser } from "./inspect.js";
 import { PROJECT_ROOT_HELP } from "./options.js";
 import { addSearchParser } from "./search.js";

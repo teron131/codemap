@@ -46,3 +46,4 @@ export type {
 	SignalRow,
 } from "./schema.js";
 export { buildUsageSection, metricNames } from "./usage.js";
+export { buildSignalView } from "./workflow.js";

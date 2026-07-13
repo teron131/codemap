@@ -24,8 +24,8 @@ Once the command surface stabilized, Codemap became a globally installable npm C
 - Treat Codebase Memory's system-cache storage as operational state, not a human-reviewed artifact or source of truth.
 - Keep explicit refresh as the default until upstream lifecycle behavior is demonstrably reliable.
 - Keep Codebase Memory, current-tree scanning, `rg`, and ast-grep as distinct evidence sources with clear labels.
-- Keep `src/codemap/codebase-memory` responsible for transport, freshness, serialization, backend normalization, and backend-specific rendering.
-- Let feature commands own orchestration, filtering, ranking, fallback, final composition, and compact output contracts.
+- Keep `src/codemap/codebase-memory` responsible for transport, freshness, serialization, generic tool-result validation, and reusable diagnostic/query operations.
+- Let feature modules own provider arguments, payload projection, filtering, ranking, fallback, final composition, and compact output contracts.
 - Preserve upstream metric values as upstream facts and keep Codemap-derived ranking scores private to ordering.
 - Prefer readable text for agent use. Add normalized JSON only for stable row surfaces that benefit from `jq` or scripts.
 - Emit evidence rather than prompts or recommendations. Ranking and selection should imply what deserves inspection.

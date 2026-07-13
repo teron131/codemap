@@ -1,13 +1,13 @@
 /** Registers CLI commands that search text, graph nodes, symbols, and calls. */
 import type { Command } from "commander";
 
+import { DETAILED_ANALYSIS_FILE_LIMIT, resolveProjectRoot } from "../common.js";
 import {
 	type CodebaseMemoryGraphSearchOptions,
 	printCodebaseMemoryGraphSearch,
 	printCodebaseMemorySearch,
 	printCodebaseMemorySemanticSearch,
-} from "../codebase-memory/index.js";
-import { DETAILED_ANALYSIS_FILE_LIMIT, resolveProjectRoot } from "../common.js";
+} from "../search/codebase-memory.js";
 import {
 	type GraphMatchOptions,
 	pathMatches,
@@ -191,7 +191,8 @@ export async function commandSearch(
 			).join("\n"),
 		);
 	} else {
-		const textOnlySearch = shouldUseTextOnlySourceSearch(root);
+		const textOnlySearch =
+			runScan(root).files.length > DETAILED_ANALYSIS_FILE_LIMIT;
 		const matches = sourceMatches(root, searchText, {
 			limit,
 			textOnly: textOnlySearch,
@@ -289,11 +290,6 @@ function printSourceFallbackMatches(
 			console.log("    ...");
 		}
 	}
-}
-
-/** Uses text-only source search when detailed structural work is too broad. */
-function shouldUseTextOnlySourceSearch(root: string): boolean {
-	return runScan(root).files.length > DETAILED_ANALYSIS_FILE_LIMIT;
 }
 
 /** Builds current-tree graph fallback filters without explicit undefined fields. */

@@ -65,7 +65,7 @@ Detailed sections remain explicit for narrower investigations: `relationships`, 
 
 ## Backend Boundary
 
-`src/codemap/codebase-memory` owns MCP transport, manual clean-index lifecycle, cross-process root serialization, payload validation, and backend result normalization. Its short-lived MCP children start outside the target repository so upstream session auto-indexing and watching do not race the explicit lifecycle. Search, inspect, signals, summary, and backend commands own their selection and presentation policy.
+`src/codemap/codebase-memory` owns MCP transport, manual clean-index lifecycle, cross-process root serialization, generic tool-result validation, and reusable diagnostic/query operations. Its short-lived MCP children start outside the target repository so upstream session auto-indexing and watching do not race the explicit lifecycle. Search, inspect, signals, summary, and backend commands own their provider arguments, payload projection, fallback eligibility, and presentation policy.
 
 The implementation journey, settled constraints, and evidence required for future enhancements are recorded in [`docs/IDEAS.md`](docs/IDEAS.md).
 

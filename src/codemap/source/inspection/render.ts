@@ -1,4 +1,4 @@
-/** Builds and formats current-tree inspection profiles and related graph context. */
+/** Builds and formats current-tree source inspection profiles. */
 import path from "node:path";
 
 import { DETAILED_ANALYSIS_FILE_LIMIT } from "../../common.js";
