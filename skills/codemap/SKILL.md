@@ -1,6 +1,6 @@
 ---
 name: codemap
-description: Navigate and scope Python and TypeScript/JavaScript repositories, including frontend source, with compact Codebase Memory, current-tree, rg, and ast-grep evidence. Use when Codex needs repository orientation, path/name/concept discovery, graph or semantic search, call-site or structural matches, focused target inspection, refactor-signal triage, or backend freshness and change-impact diagnostics.
+description: Navigate and scope Python and TypeScript/JavaScript repositories, including frontend source, with compact Codebase Memory, current-tree, rg, and ast-grep evidence. Use when Codex needs repository orientation, path/name/concept discovery, graph or semantic search, call-site or structural matches, focused target inspection, source-metric ranking, or backend freshness and change-impact diagnostics.
 ---
 
 # Codemap
@@ -15,7 +15,7 @@ Graph-backed commands serialize by project root, clear the matching operational 
 codemap summary --project-root <path>
 ```
 
-Use `summary` to find repository inventory, likely entrypoints, hubs, backend hotspots, and clusters. Continue with `search` to find a target, `inspect` to expand one known target, and `signals` to choose refactor pressure.
+Use `summary` to find repository inventory, likely entrypoints, hubs, backend hotspots, and clusters. Continue with `search` to find a target, `inspect` to expand one known target, and `signals` to compare ranked source metrics.
 
 ## Find Source From A Clue
 
@@ -64,28 +64,28 @@ codemap inspect --backend --project-root <path> <symbol>
 
 Use `inspect` after search identifies one likely target. Prefer a file or directory when a short symbol may be ambiguous. Paths use current-tree evidence. Unambiguous symbols use a fresh backend snippet and call trace; ambiguous or unavailable backend matches fall back locally. Use `--local` for current-tree-only detail and `--backend` when backend resolution itself is under inspection.
 
-## Choose Refactor Work
+## Compare Source Metrics
 
 ```sh
 codemap signals --project-root <path>
-codemap signals --json --project-root <path> | jq '{functionPressure, smallFunctions, longNames}'
+codemap signals --json --project-root <path> | jq '{functionMetrics, functionsByMentions, variablesByNameLength}'
 ```
 
-Start with the default. Codemap filters and ranks before keeping up to twenty rows in each nonempty bucket; the cap prevents overflow rather than creating a tiny sample.
+Start with the default. Codemap sorts measured rows before keeping up to twenty in each nonempty bucket; the cap prevents overflow rather than defining good or bad code.
 
-- `functionPressure`: inspect control flow, size, and repeated traversal together. Do not treat one metric as proof that extraction is needed.
-- `smallFunctions`: verify callers, exports, framework hooks, and tests before deleting or inlining a small private function.
-- `longNames`: inspect vocabulary or mixed responsibility. Do not rename solely because a name crosses the threshold.
+- `functionMetrics`: backend rows sort by cognitive complexity, cyclomatic complexity, and length; current-tree fallback rows sort by length and mentions.
+- `functionsByMentions`: all function definitions sort by lexical mentions ascending, then length ascending.
+- `variablesByNameLength`: all variable definitions sort by identifier length descending, then lexical mentions ascending.
 
 Interpret compact fields directly:
 
-- `cognitive`: upstream understandability pressure raised by nesting and branching.
+- `cognitive`: upstream control-flow measurement raised by nesting and branching.
 - `cyclomatic`: upstream approximation of independent control-flow paths.
 - `lines`: physical source lines spanned by the function.
 - `linearScanInLoop` in JSON, rendered as `linear_scan_in_loop` in text: upstream scan sites detected inside loops, not runtime iterations or proof of a large collection.
 - `mentions`: lexical identifier occurrences, not graph edges or compiler references.
 
-Upstream metrics remain provider facts. Codemap's composite pressure score affects ordering only and is not printed. Fresh `functionPressure` uses backend rows; partial results fill remaining capacity with distinct local rows; degraded results use local rows. `smallFunctions` and `longNames` always come from the current tree.
+Upstream metrics remain provider facts. Fresh `functionMetrics` uses backend rows; partial results fill remaining capacity with distinct current-tree rows; degraded results use current-tree rows. Mention and name-length rankings always come from the current tree. The rows describe ordering criteria, not refactor instructions.
 
 Open a detailed lane only when the default points there:
 
@@ -94,9 +94,9 @@ codemap signals --project-root <path> <section>
 ```
 
 - `relationships`: broader import and call relationships.
-- `files` or `lengths`: density and size pressure.
+- `files` or `lengths`: density and size measurements.
 - `functions`, `variables`, or `usage`: definition and lexical-usage tables.
-- `docstring-signals` or `docstrings`: documentation pressure or full docstring rows.
+- `docstring-signals` or `docstrings`: documentation coverage or full docstring rows.
 - `all`: every section only when a broad audit justifies the larger output.
 
 Detailed row surfaces are capped at fifty and filter generated or bundled paths where source-specific. Add `--include-tests` only when tests are the target. Text and JSON expose the same normalized facts; compact JSON is intended for `jq` and pipelines.

@@ -8,7 +8,7 @@ Codemap does not own a persistent graph store or rely on Codebase Memory's sessi
 
 - Default text is the main agent-facing representation: compact, ranked, and evidence-only.
 - Stable row surfaces (`signals`, structural matches, and call matches) offer compact normalized JSON for `jq`; composed orientation and inspection stay text-only instead of maintaining a second noisy contract. Raw backend JSON is reserved for `backend query --json` and `backend changes --json`.
-- `signals` selects evidence that implies what deserves review without printing advice or prompts.
+- `signals` ranks measured source facts without labeling the rows as problems or recommendations.
 - `search calls` never changes into a backend caller/callee trace; every row names its source matching engine.
 - Backend failures and unknown payloads fail closed so local fallbacks are not suppressed.
 
@@ -31,11 +31,11 @@ npm install -g .
 | `search calls <name>` | ast-grep, or labeled Python regex fallback | Call-shaped source matches, capped at 20 by default. |
 | `search match` / `search rule` | ast-grep | Built-in JS/TS structural discovery; simple Python patterns require the ast-grep CLI. |
 | `inspect <target>` | Codebase Memory for symbols, current tree for paths and fallback | Focused in-to-out neighborhood inspection. |
-| `signals` | Codebase Memory function metrics plus current-tree definitions | Up to twenty useful rows in each nonempty default evidence bucket. |
+| `signals` | Codebase Memory function metrics plus current-tree definitions | Up to twenty rows in each nonempty ranked metric bucket. |
 | `backend ...` | Raw Codebase Memory diagnostics | Projects, status, schema, Cypher queries, and change impact. |
 | `index` | Codebase Memory indexing | Explicit refresh timing and status. |
 
-## Refactor Signals
+## Ranked Source Metrics
 
 Readable output is the default:
 
@@ -46,20 +46,20 @@ codemap signals --project-root <path>
 The compact JSON surface contains the same facts:
 
 ```sh
-codemap signals --json --project-root <path> | jq '{functionPressure, smallFunctions, longNames}'
+codemap signals --json --project-root <path> | jq '{functionMetrics, functionsByMentions, variablesByNameLength}'
 ```
 
-The three default buckets are deliberately factual:
+The three default buckets describe their ordering criteria directly:
 
-- `functionPressure`: cognitive complexity, cyclomatic complexity, source lines, and concrete linear scans inside loops when the backend reports them.
-- `smallFunctions`: private functions no longer than eight lines with few lexical mentions.
-- `longNames`: camelCase or snake_case variable-like identifiers at least thirty characters long with lexical mention counts; conventional constants and PascalCase owners are excluded.
+- `functionMetrics`: backend rows ordered by cognitive complexity, cyclomatic complexity, and source length; current-tree fallback rows are ordered by length and mentions.
+- `functionsByMentions`: all scanned function definitions ordered by lexical mentions ascending, then source length ascending.
+- `variablesByNameLength`: all scanned variable definitions ordered by identifier length descending, then lexical mentions ascending.
 
-Each bucket is capped at twenty rows only to prevent overflow; filters and ranking remove noise before that cap is applied. Detailed sections retain their broader fifty-row views.
+Each bucket is capped at twenty rows only to prevent overflow. Generated paths and tests are omitted by default, but the ranking does not classify a long, rarely mentioned, or verbose definition as defective. Detailed sections retain broader fifty-row views.
 
-Function-pressure fields use compact standard names: `cognitive` is a unitless control-flow understandability score that rises with nesting and branching; `cyclomatic` approximates independent control-flow paths; `lines` is the physical function span; and JSON's `linearScanInLoop` (rendered as `linear_scan_in_loop` in readable text) counts detected scan sites such as `find`, `filter`, or `some` inside loops. Higher values are stronger review pressure, not correctness failures. A scan site may operate on a bounded collection, so it is not proof of a performance problem.
+Function metric fields use compact standard names: `cognitive` is a unitless control-flow measurement that rises with nesting and branching; `cyclomatic` approximates independent control-flow paths; `lines` is the physical function span; and JSON's `linearScanInLoop` (rendered as `linear_scan_in_loop` in readable text) counts detected scan sites such as `find`, `filter`, or `some` inside loops. These are sorting facts, not correctness findings. A scan site may operate on a bounded collection, so it is not proof of a performance problem.
 
-Lexical mentions are not graph references and are labeled accordingly. The rows are review leads, not deletion or rename instructions.
+Lexical mentions are not graph references and are labeled accordingly. A one-mention function may be a substantial, well-owned workflow; its position states only the measured frequency and tie-break order.
 
 Detailed sections remain explicit for narrower investigations: `relationships`, `files`, `lengths`, `functions`, `variables`, `usage`, `docstring-signals`, and `docstrings`.
 

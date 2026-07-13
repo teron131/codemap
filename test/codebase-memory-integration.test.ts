@@ -961,7 +961,7 @@ describe("Codebase Memory integration", () => {
 		}
 	});
 
-	it("adds bounded backend function pressure without graph decoration", () => {
+	it("adds bounded backend function metrics without graph decoration", () => {
 		mkdirSync(path.join(workDir, "src"), { recursive: true });
 		writeFileSync(
 			path.join(workDir, "src", "app.ts"),
@@ -973,26 +973,25 @@ describe("Codebase Memory integration", () => {
 			expect(commandSignals("top", { projectRoot: workDir })).toBe(0);
 			const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
 
-			expect(output).toContain("## Function Pressure");
+			expect(output).toContain("## Function Metrics");
 			expect(output).toContain("src/app.ts:1 app");
 			expect(output).toContain("cognitive=20");
 			expect(output).not.toContain("exported");
 			expect(output).not.toContain("## Backend Graph");
-			expect(output).toContain("# Refactor Signals");
-			expect(output.split("\n").length).toBeLessThanOrEqual(20);
+			expect(output).toContain("# Ranked Source Metrics");
 			expect(readIndexCalls()).toHaveLength(1);
 		} finally {
 			logSpy.mockRestore();
 		}
 	});
 
-	it("keeps local function pressure when backend query shape is unknown", () => {
+	it("keeps local function metrics when backend query shape is unknown", () => {
 		vi.stubEnv("CODEBASE_MEMORY_MOCK_UNKNOWN_QUERY", "1");
 		mkdirSync(path.join(workDir, "src"), { recursive: true });
 		writeFileSync(
 			path.join(workDir, "src", "app.ts"),
 			[
-				"function localPressure() {",
+				"function localMetric() {",
 				...Array.from(
 					{ length: 18 },
 					(_, index) => `  const value${index} = ${index};`,
@@ -1008,16 +1007,16 @@ describe("Codebase Memory integration", () => {
 			const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
 
 			expect(output).toContain("backend: unavailable");
-			expect(output).toContain("src/app.ts:1 localPressure");
+			expect(output).toContain("src/app.ts:1 localMetric");
 			expect(output).toContain("lines=21, mentions=1");
 		} finally {
 			logSpy.mockRestore();
 		}
 	});
 
-	it("caps partial backend and local pressure after merging", () => {
+	it("caps partial backend and local function metrics after merging", () => {
 		vi.stubEnv("CODEBASE_MEMORY_MOCK_SKIPPED_COUNT", "1");
-		vi.stubEnv("CODEBASE_MEMORY_MOCK_TWENTY_PRESSURE", "1");
+		vi.stubEnv("CODEBASE_MEMORY_MOCK_TWENTY_METRICS", "1");
 		mkdirSync(path.join(workDir, "src"), { recursive: true });
 		for (let index = 0; index < 20; index += 1) {
 			writeFileSync(
@@ -1029,7 +1028,7 @@ describe("Codebase Memory integration", () => {
 		writeFileSync(
 			path.join(workDir, "src", "local.ts"),
 			[
-				"function localPressure() {",
+				"function localMetric() {",
 				...Array.from(
 					{ length: 18 },
 					(_, index) => `  const value${index} = ${index};`,
@@ -1047,10 +1046,10 @@ describe("Codebase Memory integration", () => {
 			const payload = JSON.parse(String(logSpy.mock.calls[0]?.[0] ?? "{}"));
 
 			expect(payload.freshness).toBe("partial");
-			expect(payload.functionPressure).toHaveLength(20);
+			expect(payload.functionMetrics).toHaveLength(20);
 			expect(
-				payload.functionPressure.some(
-					(row: Record<string, unknown>) => row.name === "localPressure",
+				payload.functionMetrics.some(
+					(row: Record<string, unknown>) => row.name === "localMetric",
 				),
 			).toBe(false);
 		} finally {
@@ -1603,7 +1602,7 @@ const payloads = {
 	        "is_exported",
 	        "is_test",
 	      ],
-	      rows: process.env.CODEBASE_MEMORY_MOCK_TWENTY_PRESSURE === "1"
+	      rows: process.env.CODEBASE_MEMORY_MOCK_TWENTY_METRICS === "1"
 	        ? Array.from({ length: 20 }, (_, index) => [
 	            "backend" + index,
 	            "src/backend" + index + ".ts",

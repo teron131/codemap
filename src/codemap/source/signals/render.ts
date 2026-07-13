@@ -1,5 +1,9 @@
 /** Renders signal payload sections as readable text output. */
-import { languageRows } from "./payload.js";
+import {
+	languageRows,
+	rankDefinitionRowsByMentions,
+	rankFunctionRowsByLength,
+} from "./payload.js";
 import type { SignalRow } from "./schema.js";
 
 type Row = SignalRow;
@@ -53,15 +57,15 @@ export function renderSignalText(
 /** Formats a signal section title for text output. */
 function signalTitle(section: string): string {
 	if (section === "all") {
-		return "# Refactor Signals";
+		return "# Ranked Source Metrics";
 	}
 	const titles: Record<string, string> = {
-		top: "# Refactor Signals",
+		top: "# Ranked Source Metrics",
 		relationships: "# Relationship Signals",
 		files: "# File Profile Signals",
-		lengths: "# Function Length Signals",
-		functions: "# Function Signals",
-		variables: "# Variable Signals",
+		lengths: "# Function Lengths",
+		functions: "# Function Rankings",
+		variables: "# Variable Rankings",
 		usage: "# Usage Signals",
 		"docstring-signals": "# Docstring Signals",
 		docstrings: "# Docstrings",
@@ -71,34 +75,53 @@ function signalTitle(section: string): string {
 	);
 }
 
-/** Appends top refactor signal sections to text output. */
+/** Appends top ranked metric sections to text output. */
 function appendTop(lines: string[], top: Record<string, unknown>): void {
-	const functionPressure = arrayValue(top.functionPressure);
-	const smallFunctions = arrayValue(top.smallFunctions);
-	const longNames = arrayValue(top.longNames);
+	const functionMetrics = arrayValue(top.functionMetrics);
+	const functionsByMentions = arrayValue(top.functionsByMentions);
+	const variablesByNameLength = arrayValue(top.variablesByNameLength);
 	if (
-		functionPressure.length === 0 &&
-		smallFunctions.length === 0 &&
-		longNames.length === 0
+		functionMetrics.length === 0 &&
+		functionsByMentions.length === 0 &&
+		variablesByNameLength.length === 0
 	) {
-		lines.push("No refactor signal rows.");
+		lines.push("No ranked source rows.");
 		lines.push("");
 		return;
 	}
 	appendCompactSignalRows(
 		lines,
-		"Function Pressure",
-		functionPressure,
-		functionPressureFacts,
+		functionMetricRankingTitle(functionMetrics),
+		functionMetrics,
+		functionMetricFacts,
 	);
 	appendCompactSignalRows(
 		lines,
-		"Small Low-Use Functions",
-		smallFunctions,
-		smallFunctionFacts,
+		"Functions by Mentions (fewest, then shortest)",
+		functionsByMentions,
+		functionMentionFacts,
 	);
-	appendCompactSignalRows(lines, "Long Names", longNames, longNameFacts);
+	appendCompactSignalRows(
+		lines,
+		"Variables by Name Length (longest, then fewest mentions)",
+		variablesByNameLength,
+		variableNameLengthFacts,
+	);
 	lines.push("");
+}
+
+/** Describes the metric order represented by backend, local, or mixed rows. */
+function functionMetricRankingTitle(rows: Row[]): string {
+	const backendRows = rows.filter(
+		(row) => "cognitive" in row || "cyclomatic" in row,
+	).length;
+	if (backendRows === 0) {
+		return "Function Metrics (length, then fewest mentions)";
+	}
+	if (backendRows === rows.length) {
+		return "Function Metrics (cognitive, cyclomatic, then length)";
+	}
+	return "Function Metrics (backend complexity, then local length fallback)";
 }
 
 /** Appends one compact evidence bucket with one line per source target. */
@@ -119,7 +142,7 @@ function appendCompactSignalRows(
 }
 
 /** Formats backend complexity and loop evidence without advice text. */
-function functionPressureFacts(row: Row): string[] {
+function functionMetricFacts(row: Row): string[] {
 	const facts: string[] = [];
 	if ("cognitive" in row) {
 		facts.push(`cognitive=${numberValue(row.cognitive)}`);
@@ -138,8 +161,8 @@ function functionPressureFacts(row: Row): string[] {
 	return facts;
 }
 
-/** Formats small-function size and lexical mention evidence. */
-function smallFunctionFacts(row: Row): string[] {
+/** Formats function size and lexical mention evidence. */
+function functionMentionFacts(row: Row): string[] {
 	return [
 		`lines=${numberValue(row.lines)}`,
 		`mentions=${numberValue(row.mentions)}`,
@@ -147,7 +170,7 @@ function smallFunctionFacts(row: Row): string[] {
 }
 
 /** Formats identifier length and lexical mention evidence. */
-function longNameFacts(row: Row): string[] {
+function variableNameLengthFacts(row: Row): string[] {
 	return [
 		`characters=${numberValue(row.characters)}`,
 		`mentions=${numberValue(row.mentions)}`,
@@ -227,53 +250,45 @@ function appendUsageDistribution(
 	lines.push("");
 }
 
-/** Appends function usage candidate rows to text signal output. */
+/** Appends function rankings to text output. */
 function appendFunctionSignals(
 	lines: string[],
 	payload: Record<string, unknown>,
 ): void {
-	const lowUseRows = languageRows(recordValue(payload.lowUseDefinitions));
 	appendDefinitionRows(
 		lines,
-		"Long Functions",
-		languageRows(recordValue(payload.definitions)),
+		"Functions by Length (longest, then fewest mentions)",
+		rankFunctionRowsByLength(languageRows(recordValue(payload.byLength))),
 	);
 	lines.push("");
-	appendDefinitionRows(lines, "Low-Use Function Definitions", lowUseRows, {
-		skipEmpty: true,
-	});
-	if (lowUseRows.length > 0) {
-		lines.push("");
-	}
+	appendDefinitionRows(
+		lines,
+		"Functions by Mentions (fewest, then shortest)",
+		rankDefinitionRowsByMentions(languageRows(recordValue(payload.byMentions))),
+	);
+	lines.push("");
 }
 
-/** Appends variable usage candidate rows to text signal output. */
+/** Appends variable rankings to text output. */
 function appendVariableSignals(
 	lines: string[],
 	payload: Record<string, unknown>,
 ): void {
-	appendLongNameRows(lines, arrayValue(payload.longNames));
-	const lowUseRows = languageRows(recordValue(payload.lowUseDefinitions));
+	appendVariableNameLengthRows(lines, arrayValue(payload.byNameLength));
 	appendDefinitionRows(
 		lines,
-		"Least-Used Variable Definitions",
-		languageRows(recordValue(payload.definitions)),
+		"Variables by Mentions (fewest first)",
+		rankDefinitionRowsByMentions(languageRows(recordValue(payload.byMentions))),
 	);
 	lines.push("");
-	appendDefinitionRows(lines, "Low-Use Variable Definitions", lowUseRows, {
-		skipEmpty: true,
-	});
-	if (lowUseRows.length > 0) {
-		lines.push("");
-	}
 }
 
-/** Appends explicit long-name rows for detailed variable output. */
-function appendLongNameRows(lines: string[], rows: Row[]): void {
+/** Appends variable definitions ranked by identifier length. */
+function appendVariableNameLengthRows(lines: string[], rows: Row[]): void {
 	if (rows.length === 0) {
 		return;
 	}
-	lines.push("## Long Names");
+	lines.push("## Variables by Name Length (longest, then fewest mentions)");
 	for (const row of rows) {
 		lines.push(
 			`- ${row.identifier ?? row.name}: characters=${String(row.name ?? "").length}, mentions=${numberValue(row.count)}`,
@@ -388,15 +403,8 @@ function appendDefinitionRows(
 	lines: string[],
 	title: string,
 	rows: Row[],
-	{
-		heading = "##",
-		skipEmpty = false,
-	}: { heading?: string; skipEmpty?: boolean } = {},
 ): void {
-	if (rows.length === 0 && skipEmpty) {
-		return;
-	}
-	lines.push(`${heading} ${title}`);
+	lines.push(`## ${title}`);
 	if (rows.length === 0) {
 		lines.push("- none");
 		return;

@@ -1,4 +1,4 @@
-/** Defines CLI behavior for refactor signal output. */
+/** Defines CLI behavior for ranked source-metric output. */
 import type { Command } from "commander";
 
 import { resolveProjectRoot } from "../common.js";
@@ -19,12 +19,12 @@ type RootOptions = {
 	projectRoot?: string;
 };
 
-/** Registers refactor signal commands and output modes. */
+/** Registers ranked source-metric commands and output modes. */
 export function addSignalsParser(program: Command): void {
 	const signals = program
 		.command("signals")
 		.description(
-			"Print compact refactor evidence from the backend and current tree.",
+			"Print compact ranked metrics from the backend and current tree.",
 		)
 		.argument("[section]", "Signal section to print.", "top")
 		.option(
@@ -48,7 +48,7 @@ export function addSignalsParser(program: Command): void {
 	addProjectRootArgument(signals);
 }
 
-/** Runs refactor signal analysis and prints text or JSON output. */
+/** Runs source-metric analysis and prints text or JSON output. */
 export function commandSignals(
 	section: string,
 	options: SignalOptions,

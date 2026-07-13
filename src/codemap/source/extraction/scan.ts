@@ -1,5 +1,5 @@
 /** Scans project files into language, category, and path inventory rows. */
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 
 import {
@@ -184,9 +184,4 @@ function countBy<T>(
 		counts[key] = (counts[key] ?? 0) + 1;
 	}
 	return counts;
-}
-
-/** Checks whether a scan payload has been written for a project. */
-export function scanExists(filePath: string): boolean {
-	return existsSync(filePath);
 }

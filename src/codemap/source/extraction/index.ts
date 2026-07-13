@@ -111,7 +111,6 @@ export {
 	type ScanEntry,
 	type ScanPayload,
 	scanEntry,
-	scanExists,
 } from "./scan.js";
 export type { StructurePayload } from "./structure.js";
 export {

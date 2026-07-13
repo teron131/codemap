@@ -34,7 +34,7 @@ export function callMatches(
 		searchPaths.length === 0
 			? []
 			: syntaxMatches(root, language, `${target}($$$ARGS)`, searchPaths);
-	if (matches === null && pythonLanguage(language)) {
+	if (matches === null && (language === "python" || language === "py")) {
 		return pythonCallMatches(root, target, paths);
 	}
 	return matches;
@@ -99,11 +99,6 @@ function relativeTargetPath(root: string, rawPath: string): string {
 		return relative.split(path.sep).join("/");
 	}
 	return rawPath;
-}
-
-/** Chooses the ast-grep language name for Python structural searches. */
-function pythonLanguage(language: string): boolean {
-	return language === "python" || language === "py";
 }
 
 /** Detects call-search patterns that can be narrowed before ast-grep runs. */

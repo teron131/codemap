@@ -1,4 +1,4 @@
-/** Builds refactor signal rows from file metrics and identifier usage. */
+/** Builds ranked source rows from file metrics and identifier usage. */
 import { readFileSync } from "node:fs";
 
 import type { FileMetrics, FunctionSpan } from "../scanner/index.js";
@@ -13,11 +13,10 @@ import type {
 } from "./schema.js";
 
 export const IDENTIFIER_RE = /\b[A-Za-z_][A-Za-z0-9_]*\b/g;
-export const LOW_USAGE_MAX_MENTIONS = 5;
 
 type OccurrenceCounts = Map<string, number> | Record<string, unknown>;
 
-/** Builds a compact row of file-level refactor signals. */
+/** Builds a compact row of file-level source metrics. */
 export function fileProfileRow(metrics: FileMetrics): FileProfileRow {
 	const total =
 		metrics.defines +
@@ -210,34 +209,11 @@ export function usageRows(
 	}));
 }
 
-/** Checks whether a Python name uses double-underscore form. */
-export function isDunderName(name: string): boolean {
-	return name.length > 4 && name.startsWith("__") && name.endsWith("__");
-}
-
-/** Checks whether a symbol name is PascalCase. */
-export function isPascalCaseName(name: string): boolean {
-	return (
-		Boolean(name) &&
-		name[0] === name[0]?.toUpperCase() &&
-		name !== name.toUpperCase()
-	);
-}
-
-/** Checks whether a symbol name is all caps. */
-export function isAllCapsName(name: string): boolean {
-	const letters = [...name].filter((char) => /[A-Za-z]/.test(char));
-	return (
-		letters.length > 0 && letters.every((char) => char === char.toUpperCase())
-	);
-}
-
-/** Builds low-mention rows for function definitions. */
+/** Builds length and lexical-mention rows for function definitions. */
 export function functionUsageRows(
 	scannedFiles: FileMetrics[],
 	suffixes: Set<string>,
 	occurrences: OccurrenceCounts,
-	{ language }: { language: string },
 ): DefinitionRow[] {
 	const rows: DefinitionRow[] = [];
 	for (const metrics of scannedFiles) {
@@ -256,10 +232,6 @@ export function functionUsageRows(
 				line: span.startLine,
 				lines: span.span,
 				exported: exportedNames.has(name),
-				refactorCandidate: isLowUsageRefactorCandidate(name, count, {
-					exported: exportedNames.has(name),
-					language,
-				}),
 			});
 		}
 	}
@@ -271,12 +243,11 @@ export function functionUsageRows(
 	return rows;
 }
 
-/** Builds low-mention rows for variable definitions. */
+/** Builds lexical-mention rows for variable definitions. */
 export function variableUsageRows(
 	scannedFiles: FileMetrics[],
 	suffixes: Set<string>,
 	occurrences: OccurrenceCounts,
-	{ language }: { language: string },
 ): DefinitionRow[] {
 	const rows: DefinitionRow[] = [];
 	const seen = new Set<string>();
@@ -301,11 +272,6 @@ export function variableUsageRows(
 				line: signal.startLine,
 				moduleLevel: signal.moduleLevel,
 				exported: exportedNames.has(name),
-				refactorCandidate: isLowUsageVariableRefactorCandidate(name, count, {
-					exported: exportedNames.has(name),
-					moduleLevel: signal.moduleLevel,
-					language,
-				}),
 			});
 		}
 	}
@@ -315,52 +281,6 @@ export function variableUsageRows(
 			compareText(String(left.identifier), String(right.identifier)),
 	);
 	return rows;
-}
-
-/** Checks whether a function row is a low-use refactor candidate. */
-export function isLowUsageRefactorCandidate(
-	name: string,
-	count: number,
-	{ exported, language }: { exported: boolean; language: string },
-): boolean {
-	if (count > LOW_USAGE_MAX_MENTIONS) {
-		return false;
-	}
-	if (exported) {
-		return false;
-	}
-	if (language === "python") {
-		return name.startsWith("_") && !isDunderName(name);
-	}
-	if (language === "typescript") {
-		return !isPascalCaseName(name);
-	}
-	return true;
-}
-
-/** Checks whether a variable row is a low-use refactor candidate. */
-export function isLowUsageVariableRefactorCandidate(
-	name: string,
-	count: number,
-	{
-		exported,
-		moduleLevel,
-		language,
-	}: { exported: boolean; moduleLevel: boolean; language: string },
-): boolean {
-	if (count > LOW_USAGE_MAX_MENTIONS) {
-		return false;
-	}
-	if (exported || !moduleLevel) {
-		return false;
-	}
-	if (language === "python") {
-		return name.startsWith("_") && !isDunderName(name);
-	}
-	if (language === "typescript") {
-		return !isPascalCaseName(name) && !isAllCapsName(name);
-	}
-	return true;
 }
 
 /** Builds long-function rows from function spans. */
