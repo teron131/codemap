@@ -13,20 +13,15 @@ import {
 	usageRows,
 	variableUsageRows,
 } from "./analysis.js";
-import type {
-	DefinitionRow,
-	NameFrequencyRow,
-	SignalLanguage,
-	SignalRow,
-} from "./schema.js";
+import type { DefinitionRow, NameFrequencyRow, SignalRow } from "./schema.js";
 
 type Row = SignalRow;
 
 type UsageLanguageRows = {
 	functionRows: NameFrequencyRow[];
 	variableRows: NameFrequencyRow[];
-	functionCandidates: DefinitionRow[];
-	variableCandidates: DefinitionRow[];
+	functionDefinitions: DefinitionRow[];
+	variableDefinitions: DefinitionRow[];
 };
 
 /** Collects metric names for files matching a language suffix set. */
@@ -44,22 +39,16 @@ export function metricNames(
 	return names;
 }
 
-/** Builds usage distributions and low-use candidate tables. */
+/** Builds usage distributions and measured definition tables. */
 export function buildUsageSection(
 	allFiles: string[],
 	scannedFiles: FileMetrics[],
 ): Row {
-	const python = buildLanguageUsageRows(
-		allFiles,
-		scannedFiles,
-		PY_SUFFIXES,
-		"python",
-	);
+	const python = buildLanguageUsageRows(allFiles, scannedFiles, PY_SUFFIXES);
 	const typescript = buildLanguageUsageRows(
 		allFiles,
 		scannedFiles,
 		TYPESCRIPT_SUFFIXES,
-		"typescript",
 	);
 	return {
 		distribution: {
@@ -69,22 +58,23 @@ export function buildUsageSection(
 			python_variables: usageDistribution(python.variableRows),
 		},
 		tables: {
-			typescript_function_candidates: typescript.functionCandidates,
-			typescript_variable_candidates: typescript.variableCandidates,
-			python_function_candidates: python.functionCandidates,
-			python_variable_candidates: python.variableCandidates,
+			typescript_function_definitions: typescript.functionDefinitions,
+			typescript_variable_definitions: typescript.variableDefinitions,
+			python_function_definitions: python.functionDefinitions,
+			python_variable_definitions: python.variableDefinitions,
 		},
 	};
 }
 
-/** Builds frequency and candidate rows for one source language. */
+/** Builds frequency and definition rows for one source language. */
 function buildLanguageUsageRows(
 	allFiles: string[],
 	scannedFiles: FileMetrics[],
 	suffixes: Set<string>,
-	language: SignalLanguage,
 ): UsageLanguageRows {
-	const files = filesBySuffix(allFiles, suffixes);
+	const files = allFiles.filter((filePath) =>
+		suffixes.has(path.extname(filePath)),
+	);
 	const occurrences = countIdentifierOccurrences(files);
 	const functionRows = usageRows(
 		metricNames(scannedFiles, suffixes, "functionNames"),
@@ -97,16 +87,7 @@ function buildLanguageUsageRows(
 	return {
 		functionRows,
 		variableRows,
-		functionCandidates: functionUsageRows(scannedFiles, suffixes, occurrences, {
-			language,
-		}),
-		variableCandidates: variableUsageRows(scannedFiles, suffixes, occurrences, {
-			language,
-		}),
+		functionDefinitions: functionUsageRows(scannedFiles, suffixes, occurrences),
+		variableDefinitions: variableUsageRows(scannedFiles, suffixes, occurrences),
 	};
-}
-
-/** Selects files with a suffix handled by one language scanner. */
-function filesBySuffix(allFiles: string[], suffixes: Set<string>): string[] {
-	return allFiles.filter((filePath) => suffixes.has(path.extname(filePath)));
 }

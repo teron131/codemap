@@ -30,7 +30,6 @@ describe("signal analysis", () => {
 				["target", 9],
 				["helper", 2],
 			]),
-			{ language: "python" },
 		);
 
 		expect(
@@ -44,7 +43,6 @@ describe("signal analysis", () => {
 				line: 18,
 				lines: 40,
 				exported: false,
-				refactorCandidate: false,
 			},
 		]);
 	});

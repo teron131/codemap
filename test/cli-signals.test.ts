@@ -28,17 +28,71 @@ describe("signals CLI", () => {
 	it("prints a concise note for sparse top signals", () => {
 		const output = renderSignalText(
 			{
-				functionPressure: [],
-				smallFunctions: [],
-				longNames: [],
+				functionMetrics: [],
+				functionsByMentions: [],
+				variablesByNameLength: [],
 			},
 			"top",
 		);
 
-		expect(output).toContain("No refactor signal rows.");
-		expect(output).not.toContain("## Function Pressure");
-		expect(output).not.toContain("## Small Low-Use Functions");
-		expect(output).not.toContain("## Long Names");
+		expect(output).toContain("No ranked source rows.");
+		expect(output).not.toContain("## Function Metrics");
+		expect(output).not.toContain("## Functions by Mentions");
+		expect(output).not.toContain("## Variables by Name Length");
+	});
+
+	it("labels local function metrics by the ordering actually available", () => {
+		const output = renderSignalText(
+			{
+				freshness: "degraded",
+				functionMetrics: [
+					{
+						name: "localWorkflow",
+						path: "src/app.ts",
+						lines: 40,
+						mentions: 1,
+					},
+				],
+				functionsByMentions: [],
+				variablesByNameLength: [],
+			},
+			"top",
+		);
+
+		expect(output).toContain(
+			"## Function Metrics (length, then fewest mentions)",
+		);
+		expect(output).not.toContain("cognitive, cyclomatic");
+	});
+
+	it("globally orders detailed function rows across languages", () => {
+		const output = renderSignalText(
+			{
+				functions: {
+					byLength: {
+						python: [definitionRow("pythonShort", 4, 3)],
+						typescript: [definitionRow("typescriptLong", 20, 2)],
+					},
+					byMentions: {
+						python: [definitionRow("pythonFrequent", 4, 5)],
+						typescript: [definitionRow("typescriptRare", 20, 1)],
+					},
+				},
+			},
+			"functions",
+		);
+		const byLength = output.slice(
+			output.indexOf("## Functions by Length"),
+			output.indexOf("## Functions by Mentions"),
+		);
+		const byMentions = output.slice(output.indexOf("## Functions by Mentions"));
+
+		expect(byLength.indexOf("typescriptLong")).toBeLessThan(
+			byLength.indexOf("pythonShort"),
+		);
+		expect(byMentions.indexOf("typescriptRare")).toBeLessThan(
+			byMentions.indexOf("pythonFrequent"),
+		);
 	});
 
 	it("keeps full docstring text output bounded", () => {
@@ -98,7 +152,7 @@ describe("signals CLI", () => {
 		expect(firstDenseRow(payload).total_label).toBe("lines");
 		expect(
 			renderSignalText(payload.top as Record<string, unknown>, "top"),
-		).toContain("No refactor signal rows.");
+		).toContain("No ranked source rows.");
 
 		const withTests = buildLightweightSignalPayload(
 			[
@@ -300,19 +354,51 @@ describe("signals CLI", () => {
 		});
 	});
 
+	it("ranks all functions by mentions without labeling candidates", () => {
+		writeFileSync(
+			path.join(workDir, "src", "app.ts"),
+			[
+				"/** Exercises neutral function ranking. */",
+				"function shortOnce(value: string) {",
+				"  return value.trim();",
+				"}",
+				"export function seriousOnce(value: string) {",
+				"  const first = value.trim();",
+				"  const second = first.toLowerCase();",
+				"  const third = second.replaceAll('-', ' ');",
+				"  const fourth = third.split(' ');",
+				"  const fifth = fourth.filter(Boolean);",
+				"  const sixth = fifth.join(' ');",
+				"  return sixth;",
+				"}",
+				"function shared(value: string) {",
+				"  return value;",
+				"}",
+				"shared('first');",
+				"shared('second');",
+			].join("\n"),
+			"utf8",
+		);
+
+		expect(functionNamesByMentions(signalTopJson())).toEqual([
+			"shortOnce",
+			"seriousOnce",
+			"shared",
+		]);
+	});
+
 	it("caps useful top buckets only at the overflow boundary", () => {
 		const functionBlocks = Array.from({ length: 24 }, (_, idx) =>
 			[
 				`function candidate${idx}(value: string) {`,
-				"  const next = value.trim();",
-				"  return next;",
+				"  return value.trim();",
 				"}",
 			].join("\n"),
 		).join("\n\n");
 		const variableRows = Array.from(
 			{ length: 24 },
 			(_, idx) =>
-				`const candidateVariableIdentifierWithReviewPressure${idx} = ${idx};`,
+				`const candidateVariableIdentifierForLengthRanking${idx} = ${idx};`,
 		).join("\n");
 		writeFileSync(
 			path.join(workDir, "src", "app.ts"),
@@ -350,36 +436,41 @@ describe("signals CLI", () => {
 		const payload = JSON.parse(result.stdout);
 		expect(payload).toMatchObject({
 			freshness: "degraded",
-			functionPressure: [],
 		});
-		expect(payload.smallFunctions).toHaveLength(20);
-		expect(payload.longNames).toHaveLength(20);
+		expect(payload.functionMetrics).toHaveLength(20);
+		expect(payload.functionsByMentions).toHaveLength(20);
+		expect(payload.variablesByNameLength).toHaveLength(20);
 		expect(
 			new Set(
-				payload.smallFunctions.map((row: Record<string, unknown>) => row.name),
+				payload.functionsByMentions.map(
+					(row: Record<string, unknown>) => row.name,
+				),
 			).size,
 		).toBe(20);
 		expect(
-			new Set(payload.longNames.map((row: Record<string, unknown>) => row.name))
-				.size,
+			new Set(
+				payload.variablesByNameLength.map(
+					(row: Record<string, unknown>) => row.name,
+				),
+			).size,
 		).toBe(20);
 		const output = renderSignalText(payload, "top");
-		expect(output).toContain(payload.smallFunctions[0].name);
-		expect(output).toContain(payload.smallFunctions[19].name);
-		expect(output).toContain(payload.longNames[0].name);
-		expect(output).toContain(payload.longNames[19].name);
+		expect(output).toContain(payload.functionsByMentions[0].name);
+		expect(output).toContain(payload.functionsByMentions[19].name);
+		expect(output).toContain(payload.variablesByNameLength[0].name);
+		expect(output).toContain(payload.variablesByNameLength[19].name);
 		expect(output).not.toContain("should");
 	});
 
-	it("keeps test-only long names out unless tests are included", () => {
+	it("ranks all variable names while keeping tests opt-in", () => {
 		writeFileSync(
 			path.join(workDir, "src", "app.ts"),
 			[
-				"export const sourceIdentifierNameWithReviewPressure = 1;",
+				"export const sourceIdentifierNameForLengthRanking = 1;",
 				"export const PORTFOLIO_NEWS_SUMMARY_RESPONSE_TICKER = 1;",
 				"export const PortfolioNewsSummaryResponseTickerSchema = 1;",
 				"export function readSourceIdentifierName() {",
-				"  return sourceIdentifierNameWithReviewPressure;",
+				"  return sourceIdentifierNameForLengthRanking;",
 				"}",
 			].join("\n"),
 			"utf8",
@@ -387,30 +478,44 @@ describe("signals CLI", () => {
 		writeFileSync(
 			path.join(workDir, "src", "app.test.ts"),
 			[
-				"const testOnlyIdentifierNameWithReviewPressure = 1;",
+				"const testOnlyIdentifierNameForLengthRanking = 1;",
 				"export function readTestOnlyIdentifierName() {",
-				"  return testOnlyIdentifierNameWithReviewPressure;",
+				"  return testOnlyIdentifierNameForLengthRanking;",
+				"}",
+			].join("\n"),
+			"utf8",
+		);
+		mkdirSync(path.join(workDir, "src", "generated"), { recursive: true });
+		writeFileSync(
+			path.join(workDir, "src", "generated", "api.ts"),
+			[
+				"export const generatedOnlyIdentifierNameForLengthRanking = 1;",
+				"export function generatedOnlyFunction() {",
+				"  return generatedOnlyIdentifierNameForLengthRanking;",
 				"}",
 			].join("\n"),
 			"utf8",
 		);
 
-		const defaultNames = longNameNames(signalTopJson());
-		expect(defaultNames).toContain("sourceIdentifierNameWithReviewPressure");
+		const defaultPayload = signalTopJson();
+		const defaultNames = variableNamesByLength(defaultPayload);
+		expect(defaultNames).toContain("sourceIdentifierNameForLengthRanking");
+		expect(defaultNames).toContain("PORTFOLIO_NEWS_SUMMARY_RESPONSE_TICKER");
+		expect(defaultNames).toContain("PortfolioNewsSummaryResponseTickerSchema");
 		expect(defaultNames).not.toContain(
-			"PORTFOLIO_NEWS_SUMMARY_RESPONSE_TICKER",
+			"testOnlyIdentifierNameForLengthRanking",
 		);
 		expect(defaultNames).not.toContain(
-			"PortfolioNewsSummaryResponseTickerSchema",
+			"generatedOnlyIdentifierNameForLengthRanking",
 		);
-		expect(defaultNames).not.toContain(
-			"testOnlyIdentifierNameWithReviewPressure",
+		expect(functionNamesByMentions(defaultPayload)).not.toContain(
+			"generatedOnlyFunction",
 		);
 
-		const withTestsNames = longNameNames(signalTopJson("--include-tests"));
-		expect(withTestsNames).toContain(
-			"testOnlyIdentifierNameWithReviewPressure",
+		const withTestsNames = variableNamesByLength(
+			signalTopJson("--include-tests"),
 		);
+		expect(withTestsNames).toContain("testOnlyIdentifierNameForLengthRanking");
 	});
 });
 
@@ -420,6 +525,16 @@ function scanEntry(pathValue: string, language: string, sizeLines: number) {
 		language,
 		fileCategory: "code",
 		sizeLines,
+	};
+}
+
+function definitionRow(name: string, lines: number, count: number) {
+	return {
+		name,
+		identifier: `src/${name}.ts::${name}`,
+		file: `src/${name}.ts`,
+		lines,
+		count,
 	};
 }
 
@@ -457,8 +572,14 @@ function signalTopJson(...args: string[]): Record<string, unknown> {
 	return JSON.parse(result.stdout) as Record<string, unknown>;
 }
 
-function longNameNames(payload: Record<string, unknown>): string[] {
-	return (payload.longNames as Array<Record<string, unknown>>).map((row) =>
-		String(row.name),
+function variableNamesByLength(payload: Record<string, unknown>): string[] {
+	return (payload.variablesByNameLength as Array<Record<string, unknown>>).map(
+		(row) => String(row.name),
+	);
+}
+
+function functionNamesByMentions(payload: Record<string, unknown>): string[] {
+	return (payload.functionsByMentions as Array<Record<string, unknown>>).map(
+		(row) => String(row.name),
 	);
 }

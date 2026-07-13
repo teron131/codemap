@@ -10,11 +10,11 @@ Codebase Memory later became the primary source for repository structure, symbol
 
 Search and inspection settled into complementary lanes. Search starts from any clue and narrows toward source: path-shaped queries resolve from the current tree, concept queries use ranked backend evidence, graph and semantic modes stay explicit, and local ast-grep plus `rg` remain the verifiable fallback. Inspect starts from one known target and expands outward, using backend snippets and relationships only when the match is unambiguous and structurally recognized.
 
-Signal provenance also became explicit. Backend `cognitive`, `cyclomatic`, and `linearScanInLoop` values are upstream Codebase Memory properties passed through after numeric normalization. Partial or degraded backend results may be completed with locally derived function-pressure rows containing source lines and lexical mentions. Small-function mention counts and long-name rows also come from current-tree lexical analysis. Codemap owns thresholds, filtering, ranking, field naming, and display limits; its internal composite score affects ordering only and is never printed as though it were a provider measurement.
+Signal provenance also became explicit. Backend `cognitive`, `cyclomatic`, and `linearScanInLoop` values are upstream Codebase Memory properties passed through after numeric normalization. Partial or degraded backend results may be completed with current-tree function rows containing source lines and lexical mentions. Function-mention and variable-name-length rankings also come from current-tree lexical analysis. Codemap owns path eligibility, deterministic ordering, field naming, and display limits; headings state the primary and tie-break criteria instead of labeling ranked definitions as problems.
 
 Upstream session auto-indexing proved unreliable across a working session. The current lifecycle therefore serializes graph-backed operations by project root, clears the matching operational cache entry, indexes once with `persistence: false`, and reuses that clean snapshot for every backend query in the operation. Short-lived MCP children start outside the target repository so upstream watching and auto-index behavior cannot race the explicit refresh.
 
-The default signal summary originally favored a very small sample. In practice, two to four examples from many categories created a metric buffet that encouraged agents to reopen every section. The current design filters and ranks first, then keeps up to twenty useful rows per bucket as overflow protection. Expensive lightweight syntax enrichment remains independently bounded so a broader display does not imply proportionally broader parsing.
+The default signal summary originally favored a very small sample. In practice, two to four examples from many categories created a metric buffet that encouraged agents to reopen every section. The current design sorts eligible measurements first, then keeps up to twenty rows per bucket as overflow protection. Expensive lightweight syntax enrichment remains independently bounded so a broader display does not imply proportionally broader parsing.
 
 Once the command surface stabilized, Codemap became a globally installable npm CLI with a separate companion skill. The executable owns behavior and output; the skill owns when to use each command, how to interpret compact metrics, and which caveats matter to an agent. Repository development remains pnpm-based while `npm install -g .` provides the linked global command.
 
@@ -26,26 +26,26 @@ Once the command surface stabilized, Codemap became a globally installable npm C
 - Keep Codebase Memory, current-tree scanning, `rg`, and ast-grep as distinct evidence sources with clear labels.
 - Keep `src/codemap/codebase-memory` responsible for transport, freshness, serialization, generic tool-result validation, and reusable diagnostic/query operations.
 - Let feature modules own provider arguments, payload projection, filtering, ranking, fallback, final composition, and compact output contracts.
-- Preserve upstream metric values as upstream facts and keep Codemap-derived ranking scores private to ordering.
+- Preserve upstream metric values as upstream facts and use explicit deterministic tie-breakers for Codemap-owned ordering.
 - Prefer readable text for agent use. Add normalized JSON only for stable row surfaces that benefit from `jq` or scripts.
-- Emit evidence rather than prompts or recommendations. Ranking and selection should imply what deserves inspection.
+- Emit measurements rather than prompts or recommendations. Ranking headings should state their criteria without classifying the rows as good, bad, or in need of refactoring.
 - Keep interpretation rules and metric caveats in the companion skill rather than repeating explanatory prose in every command result.
 - Keep the installed command as the behavior surface and the companion skill as a thin agent operating contract.
 - Keep Python and TypeScript/JavaScript, including frontend source, as the supported language scope.
 
 ## Enhancement Directions
 
-### Stronger Refactor Signals
+### Additional Rankings
 
-New default signals should identify a distinct review pressure rather than add another generic metric. Promising directions include:
+New default rankings should expose a distinct measurable relationship rather than add another generic metric. Promising directions include:
 
 - High fan-in symbols that also carry substantial size or complexity.
 - Similar implementation clusters with concrete source anchors.
 - Dependency cycles or boundary crossings that concentrate change pressure.
 - Exported definitions with weak usage evidence, clearly labeled as leads rather than dead-code proof.
-- Intersections between existing signals, such as complex functions in dense files, when the intersection removes noise rather than merely restating both lists.
+- Intersections between existing measurements, such as complex functions in dense files, when the intersection removes noise rather than merely restating both lists.
 
-A new bucket earns default placement only when its ranking is stable, its rows imply a recognizable next inspection, and live output remains useful under the current per-bucket overflow caps. Otherwise it belongs in an explicit detailed section.
+A new bucket earns default placement only when its ranking is stable, its criteria are interpretable, and live output remains useful under the current per-bucket overflow caps. Otherwise it belongs in an explicit detailed section.
 
 ### Search Quality
 
