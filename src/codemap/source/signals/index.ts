@@ -1,43 +1,40 @@
 /** Re-exports signal analysis builders, payloads, and renderers. */
 export {
-	countIdentifierOccurrences,
-	fileProfileRow,
-	functionLengthSection,
-	functionUsageRows,
-	IDENTIFIER_RE,
-	topHubs,
-	topInheritanceHubs,
-	usageBucket,
-	usageDistribution,
-	usageRows,
-	variableUsageRows,
+  countIdentifierOccurrences,
+  fileProfileRow,
+  functionLengthSection,
+  functionUsageRows,
+  IDENTIFIER_RE,
+  topHubs,
+  topInheritanceHubs,
+  usageBucket,
+  usageDistribution,
+  usageRows,
+  variableUsageRows,
 } from "./analysis.js";
 export { buildSignalExport, runSignalsExport } from "./build.js";
+export { buildSignalPayload, selectPayloadSection } from "./payload.js";
 export {
-	buildSignalPayload,
-	selectPayloadSection,
-} from "./payload.js";
-export {
-	isGeneratedSignalPath,
-	isTestPath,
-	SIGNAL_OUTPUT_ROW_LIMIT,
-	SIGNAL_SECTION_CHOICES,
-	SIGNAL_TOP_ROW_LIMIT,
+  isGeneratedSignalPath,
+  isTestPath,
+  SIGNAL_OUTPUT_ROW_LIMIT,
+  SIGNAL_SECTION_CHOICES,
+  SIGNAL_TOP_ROW_LIMIT,
 } from "./policy.js";
 export { renderSignalText } from "./render.js";
 export type {
-	DefinitionRow,
-	DenseFileRow,
-	FileCountRow,
-	FileProfileRow,
-	FileSignalCounters,
-	FunctionLengthItem,
-	FunctionLengthSection,
-	LanguageRows,
-	NameFrequencyRow,
-	SignalFocusEntry,
-	SignalLanguage,
-	SignalRow,
+  DefinitionRow,
+  DenseFileRow,
+  FileCountRow,
+  FileProfileRow,
+  FileSignalCounters,
+  FunctionLengthItem,
+  FunctionLengthSection,
+  LanguageRows,
+  NameFrequencyRow,
+  SignalFocusEntry,
+  SignalLanguage,
+  SignalRow,
 } from "./schema.js";
 export { buildUsageSection, metricNames } from "./usage.js";
 export { buildSignalView } from "./workflow.js";
