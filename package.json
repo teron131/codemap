@@ -1,41 +1,43 @@
 {
-	"$schema": "https://www.schemastore.org/package.json",
-	"name": "codemap",
-	"version": "0.0.0",
-	"private": true,
-	"description": "Opinionated Codebase Memory, rg, and ast-grep source inspection CLI.",
-	"type": "module",
-	"bin": {
-		"codemap": "./dist/codemap/cli.js"
-	},
-	"files": [
-		"dist/codemap"
-	],
-	"scripts": {
-		"build": "pnpm run clean && tsc -p tsconfig.build.json && chmod +x dist/codemap/cli.js",
-		"check": "pnpm run typecheck && biome check src test/*.ts package.json tsconfig.json tsconfig.build.json && pnpm run test",
-		"clean": "rm -rf dist",
-		"dev": "tsx src/codemap/cli.ts",
-		"format": "biome format src test/*.ts package.json tsconfig.json tsconfig.build.json",
-		"format:write": "biome format --write src test/*.ts package.json tsconfig.json tsconfig.build.json",
-		"lint": "biome lint src test/*.ts package.json tsconfig.json tsconfig.build.json",
-		"test": "vitest run --dir test --exclude 'test/.work/**'",
-		"typecheck": "tsc -p tsconfig.json --noEmit"
-	},
-	"dependencies": {
-		"@ast-grep/napi": "^0.39.5",
-		"commander": "^14.0.2",
-		"yaml": "^2.9.0"
-	},
-	"devDependencies": {
-		"@biomejs/biome": "^2.3.8",
-		"@types/node": "^24.10.1",
-		"tsx": "^4.20.6",
-		"typescript": "^5.9.3",
-		"vitest": "^4.0.14"
-	},
-	"engines": {
-		"node": ">=22"
-	},
-	"packageManager": "pnpm@10.28.1"
+  "$schema": "https://www.schemastore.org/package.json",
+  "name": "codemap",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Opinionated Codebase Memory, rg, and ast-grep source inspection CLI.",
+  "type": "module",
+  "bin": {
+    "codemap": "./dist/codemap/cli.js"
+  },
+  "files": [
+    "dist/codemap"
+  ],
+  "scripts": {
+    "build": "pnpm run clean && tsc -p tsconfig.build.json && chmod +x dist/codemap/cli.js",
+    "check": "pnpm run typecheck && pnpm run format:check && pnpm run lint && pnpm run test",
+    "clean": "rm -rf dist",
+    "dev": "tsx src/codemap/cli.ts",
+    "format": "oxfmt .",
+    "format:check": "oxfmt --check .",
+    "lint": "oxlint .",
+    "lint:fix": "oxlint --fix .",
+    "test": "vitest run --dir test --exclude 'test/.work/**'",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@ast-grep/napi": "^0.39.5",
+    "commander": "^14.0.2",
+    "yaml": "^2.9.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "oxfmt": "0.60.0",
+    "oxlint": "1.75.0",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.14"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@10.28.1"
 }
