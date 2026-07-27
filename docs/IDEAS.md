@@ -14,7 +14,7 @@ Signal provenance also became explicit. Backend `cognitive`, `cyclomatic`, and `
 
 Upstream session auto-indexing proved unreliable across a working session. The current lifecycle therefore serializes graph-backed operations by project root, clears the matching operational cache entry, indexes once with `persistence: false`, and reuses that clean snapshot for every backend query in the operation. Short-lived MCP children start outside the target repository so upstream watching and auto-index behavior cannot race the explicit refresh. An explicit Codebase Memory cache path remains authoritative; an unwritable default user cache falls back to a private OS temporary cache.
 
-Once the command surface stabilized, Codemap became a globally installable npm CLI with a separate companion skill. The executable owns behavior and output; the skill owns when to use each command, how to interpret compact metrics, and which caveats matter to an agent. Repository development remains pnpm-based while `npm install -g .` provides the linked global command.
+Once the command surface stabilized, Codemap became a globally installable npm CLI with a separate companion skill. The executable owns behavior and output; the skill owns when to use each command, how to interpret compact metrics, and which caveats matter to an agent. Source installation works with npm or pnpm, while `npm install -g .` provides the linked global command.
 
 ## Settled Direction
 
