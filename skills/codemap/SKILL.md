@@ -1,13 +1,13 @@
 ---
 name: codemap
-description: Navigate and scope Python and TypeScript/JavaScript repositories, including frontend source, with compact Codebase Memory, current-tree, rg, and ast-grep evidence. Use when Codex needs repository orientation, path/name/concept discovery, graph or semantic search, call-site or structural matches, focused target inspection, source-metric ranking, or backend freshness and change-impact diagnostics.
+description: Navigate and scope Python and TypeScript/JavaScript repositories using Codebase Memory for graph and semantic evidence, rg for current-tree exact text, and ast-grep for syntax patterns. Use for repository orientation, path/name/concept discovery, graph or semantic search, call-site or structural matches, focused target inspection, source-metric ranking, or backend freshness and change-impact diagnostics.
 ---
 
 # Codemap
 
-Use Codemap to navigate and scope Python or TypeScript/JavaScript changes. Prefer compact readable output for agent work; use normalized JSON only on stable row surfaces such as `signals`, `search calls`, `search match`, and `search rule`. Every command applies one final conservative 10,000-token stdout ceiling; text reports truncation inline, while JSON remains valid for `jq` and reports truncation on stderr.
+Route relationship and semantic questions to Codebase Memory, exact text to `rg`, and syntax patterns to ast-grep. Prefer compact readable output for agent work; use normalized JSON only on stable row surfaces such as `signals`, `search calls`, `search match`, and `search rule`. Every command applies one final conservative 10,000-token stdout ceiling; text reports truncation inline, while JSON remains valid for `jq` and reports truncation on stderr.
 
-Graph-backed commands serialize by project root, clear the matching operational cache entry, index once with `persistence: false`, and reuse that snapshot within the operation. Codemap does not write persistent graph data into the inspected repository. It preserves an explicit `CBM_CACHE_DIR` and otherwise falls back to a private OS temporary cache when the normal user cache is unwritable. Local `rg`, ast-grep, and current-tree evidence remain independently verifiable fallbacks.
+Graph-backed commands explicitly refresh one non-persistent snapshot per operation and do not write graph data into the inspected repository. An explicit `CBM_CACHE_DIR` remains authoritative; an unwritable default cache falls back to a private OS temporary cache. Local `rg`, ast-grep, and current-tree evidence remain independently verifiable fallbacks.
 
 ## Orient Before Substantial Work
 
@@ -33,7 +33,7 @@ Use `--graph` when the result needs BM25-ranked relationship context. Add graph 
 codemap search --graph --relationship <type> --file-pattern "<glob>" --limit <count> --project-root <path> "<concept>"
 ```
 
-Use `--semantic` when repository vocabulary differs from the clue. Do not combine `--graph` and `--semantic`. Unknown, empty, filtered, or error backend payloads fall back instead of suppressing current-tree evidence.
+Use `--semantic` when repository vocabulary differs from the clue. Do not combine `--graph` and `--semantic`. When the backend has no useful answer, Codemap falls back to current-tree evidence.
 
 Default search does not evaluate regular expressions. Use raw `rg` for regex completeness:
 
@@ -126,7 +126,7 @@ codemap backend changes --since <ref> --depth <count> --project-root <path>
 codemap backend query --json --max-rows <count> --project-root <path> "<read-only Cypher>"
 ```
 
-Use `index` to measure explicit refresh timing, `status` or `schema` to diagnose backend readiness, `changes` for backend changed-code impact, and raw `query --json` only as an escape hatch. Short-lived MCP children start outside the target repository so upstream watching cannot race the explicit lifecycle. A partial index may retain useful backend evidence; a missing backend degrades to current-tree evidence where a local answer exists.
+Use `index` to measure explicit refresh timing, `status` or `schema` to diagnose backend readiness, `changes` for backend changed-code impact, and raw `query --json` only as an escape hatch. A partial index may retain useful backend evidence; an unavailable backend degrades to current-tree evidence where a local answer exists.
 
 ## Boundaries
 
