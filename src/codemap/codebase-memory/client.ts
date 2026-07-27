@@ -2,7 +2,9 @@
 import { spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import {
+  accessSync,
   closeSync,
+  constants,
   mkdirSync,
   openSync,
   readFileSync,
@@ -12,7 +14,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 
 type JsonObject = Record<string, unknown>;
@@ -50,7 +52,12 @@ type CodebaseMemoryLock = {
 type ActiveCodebaseMemoryOperation = {
   lock: CodebaseMemoryLock;
   project: CodebaseMemoryReadyProject | null;
+  root: string;
 };
+
+type CodebaseMemoryRefreshResult =
+  | { ok: true; project: CodebaseMemoryReadyProject }
+  | { ok: false; reason: string };
 
 const PROTOCOL_VERSION = "2024-11-05";
 const DEFAULT_COMMAND = "codebase-memory-mcp";
@@ -63,6 +70,7 @@ const INCOMPLETE_LOCK_GRACE_MS = 30_000;
 const CHILD_RECOVERY_GRACE_MS = 5_000;
 const READY_INDEX_STATUSES = new Set(["complete", "completed", "indexed", "ready"]);
 const activeOperations: ActiveCodebaseMemoryOperation[] = [];
+const failureReasons = new Map<string, string>();
 const lockSleepView = new Int32Array(new SharedArrayBuffer(4));
 
 /** Supervises one MCP child so its process lifetime remains represented in the root lock. */
@@ -187,9 +195,11 @@ export function withFreshCodebaseMemoryProject<T>(
   operation: (project: CodebaseMemoryReadyProject) => T,
 ): T | null {
   if (!codebaseMemoryEnabled()) {
+    failureReasons.set(canonicalPath(root), "Codebase Memory integration is disabled.");
     return null;
   }
   const resolvedRoot = canonicalPath(root);
+  failureReasons.delete(resolvedRoot);
   const lockPath = projectLockPath(resolvedRoot);
   const activeOperation = activeOperations.find((active) => active.lock.path === lockPath);
   if (activeOperation !== undefined && activeOperation.project !== null) {
@@ -197,21 +207,32 @@ export function withFreshCodebaseMemoryProject<T>(
   }
   const lock = acquireProjectLock(lockPath);
   if (lock === null) {
+    failureReasons.set(
+      resolvedRoot,
+      `Could not acquire the operational cache lock at ${lockPath}.`,
+    );
     return null;
   }
-  const active: ActiveCodebaseMemoryOperation = { lock, project: null };
+  const active: ActiveCodebaseMemoryOperation = { lock, project: null, root: resolvedRoot };
   activeOperations.push(active);
   try {
-    const project = refreshProject(resolvedRoot);
-    if (project === null) {
+    const refresh = refreshProject(resolvedRoot);
+    if (!refresh.ok) {
+      failureReasons.set(resolvedRoot, refresh.reason);
       return null;
     }
+    const project = refresh.project;
     active.project = project;
     return runSynchronousProjectOperation(project, operation);
   } finally {
     activeOperations.pop();
     releaseProjectLock(lock.path, lock.token);
   }
+}
+
+/** Returns the most recent backend failure for one project root. */
+export function codebaseMemoryFailureReason(root: string): string | null {
+  return failureReasons.get(canonicalPath(root)) ?? null;
 }
 
 /** Runs a callback while rejecting asynchronous callback forms. */
@@ -244,9 +265,10 @@ function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
 }
 
 /** Rebuilds the requested root and returns its ready project metadata. */
-function refreshProject(root: string): CodebaseMemoryReadyProject | null {
-  if (!deleteExistingProject(root)) {
-    return null;
+function refreshProject(root: string): CodebaseMemoryRefreshResult {
+  const deletion = deleteExistingProject(root);
+  if (!deletion.ok) {
+    return deletion;
   }
   const indexResult = callCodebaseMemoryTool(
     "index_repository",
@@ -260,7 +282,7 @@ function refreshProject(root: string): CodebaseMemoryReadyProject | null {
     },
   );
   if (!indexResult.ok) {
-    return null;
+    return { ok: false, reason: `Index refresh failed: ${readableToolReason(indexResult.reason)}` };
   }
   const indexed = recordValue(indexResult.value);
   const projectName = stringOrNull(indexed.project);
@@ -270,17 +292,23 @@ function refreshProject(root: string): CodebaseMemoryReadyProject | null {
     indexStatus === null ||
     !READY_INDEX_STATUSES.has(indexStatus.toLowerCase())
   ) {
-    return null;
+    return {
+      ok: false,
+      reason: `Index refresh returned ${indexStatus === null ? "no status" : `status ${indexStatus}`}.`,
+    };
   }
   const skippedFiles =
     typeof indexed.skipped_count === "number" && indexed.skipped_count >= 0
       ? indexed.skipped_count
       : 0;
   return {
-    name: projectName,
-    nodes: numberOrNull(indexed.nodes),
-    edges: numberOrNull(indexed.edges),
-    status: skippedFiles > 0 ? "partial" : "ready",
+    ok: true,
+    project: {
+      name: projectName,
+      nodes: numberOrNull(indexed.nodes),
+      edges: numberOrNull(indexed.edges),
+      status: skippedFiles > 0 ? "partial" : "ready",
+    },
   };
 }
 
@@ -433,11 +461,8 @@ function releaseProjectLock(lockPath: string, token: string): void {
 
 /** Derives a stable lock path beside CodebaseMemory's operational cache. */
 function projectLockPath(root: string): string {
-  const cacheRoot = process.env.CBM_CACHE_DIR
-    ? path.resolve(process.env.CBM_CACHE_DIR)
-    : path.join(homedir(), ".cache", "codebase-memory-mcp");
   const rootHash = createHash("sha256").update(root).digest("hex");
-  return path.join(cacheRoot, "codemap-locks", `${rootHash}.lock`);
+  return path.join(codebaseMemoryCacheRoot(), "codemap-locks", `${rootHash}.lock`);
 }
 
 /** Canonicalizes path aliases for cache matching and backend result normalization. */
@@ -460,14 +485,17 @@ function errorCode(error: unknown): string | null {
 }
 
 /** Clears the current root's operational cache so deleted symbols cannot survive a full index. */
-function deleteExistingProject(root: string): boolean {
+function deleteExistingProject(root: string): { ok: true } | { ok: false; reason: string } {
   const projectsResult = callCodebaseMemoryTool("list_projects", {});
   if (!projectsResult.ok) {
-    return false;
+    return {
+      ok: false,
+      reason: `Could not list existing projects: ${readableToolReason(projectsResult.reason)}`,
+    };
   }
   const projects = recordValue(projectsResult.value).projects;
   if (!Array.isArray(projects)) {
-    return false;
+    return { ok: false, reason: "Could not list existing projects: invalid projects payload." };
   }
   const resolvedRoot = canonicalPath(root);
   const existing = projects.map(recordValue).find((project) => {
@@ -475,16 +503,24 @@ function deleteExistingProject(root: string): boolean {
     return projectRoot !== null && canonicalPath(projectRoot) === resolvedRoot;
   });
   if (existing === undefined) {
-    return true;
+    return { ok: true };
   }
   const projectName = stringOrNull(existing.name);
   if (projectName === null) {
-    return false;
+    return { ok: false, reason: "Could not delete existing project: missing project name." };
   }
   const deleteResult = callCodebaseMemoryTool("delete_project", {
     project: projectName,
   });
-  return deleteResult.ok && stringOrNull(recordValue(deleteResult.value).status) === "deleted";
+  if (!deleteResult.ok) {
+    return {
+      ok: false,
+      reason: `Could not delete existing project: ${readableToolReason(deleteResult.reason)}`,
+    };
+  }
+  return stringOrNull(recordValue(deleteResult.value).status) === "deleted"
+    ? { ok: true }
+    : { ok: false, reason: "Could not delete existing project: invalid deletion response." };
 }
 
 /** Calls one CodebaseMemory MCP tool through the configured stdio server command. */
@@ -551,35 +587,42 @@ export function callCodebaseMemoryTool(
           spawnOptions,
         );
   if (result.error !== undefined) {
-    return { ok: false, reason: result.error.message };
+    return failedToolResult(result.error.message);
   }
   if (result.status !== 0 && result.status !== null) {
-    return {
-      ok: false,
-      reason: result.stderr.trim() || `exit ${result.status}`,
-    };
+    return failedToolResult(result.stderr.trim() || `exit ${result.status}`);
   }
   const responses = parseJsonRpcResponses(result.stdout);
   const response = responses.find((item) => item.id === 2);
   if (response === undefined) {
-    return { ok: false, reason: "missing tool response" };
+    return failedToolResult("missing tool response");
   }
   if (response.error !== undefined) {
-    return {
-      ok: false,
-      reason: response.error.message ?? "tool error",
-    };
+    return failedToolResult(response.error.message ?? "tool error");
   }
   const resultError = toolResultError(response.result);
   if (resultError !== null) {
-    return { ok: false, reason: resultError };
+    return failedToolResult(resultError);
   }
   const payload = toolPayload(response.result);
   const payloadError = toolPayloadError(payload);
   if (payloadError !== null) {
-    return { ok: false, reason: payloadError };
+    return failedToolResult(payloadError);
+  }
+  const root = activeOperations.at(-1)?.root;
+  if (root !== undefined) {
+    failureReasons.delete(root);
   }
   return { ok: true, value: payload };
+}
+
+/** Associates a nested provider failure with the active project operation. */
+function failedToolResult(reason: string): CodebaseMemoryToolResult {
+  const root = activeOperations.at(-1)?.root;
+  if (root !== undefined) {
+    failureReasons.set(root, readableToolReason(reason));
+  }
+  return { ok: false, reason };
 }
 
 /** Resolves path-shaped command overrides before moving the child away from the project cwd. */
@@ -591,9 +634,7 @@ function codebaseMemoryCommand(): string {
 /** Builds a child environment that avoids leaking launcher-specific argv hints. */
 function codebaseMemoryChildEnv(): NodeJS.ProcessEnv {
   const env = { ...process.env };
-  if (env.CBM_CACHE_DIR) {
-    env.CBM_CACHE_DIR = path.resolve(env.CBM_CACHE_DIR);
-  }
+  env.CBM_CACHE_DIR = codebaseMemoryCacheRoot();
   delete env._;
   for (const key of Object.keys(env)) {
     if (key.startsWith("CODEMAP_")) {
@@ -601,6 +642,48 @@ function codebaseMemoryChildEnv(): NodeJS.ProcessEnv {
     }
   }
   return env;
+}
+
+/** Uses the configured cache, the normal user cache, or a sandbox-writable temporary cache. */
+function codebaseMemoryCacheRoot(): string {
+  if (process.env.CBM_CACHE_DIR) {
+    return path.resolve(process.env.CBM_CACHE_DIR);
+  }
+  const defaultRoot = path.join(homedir(), ".cache", "codebase-memory-mcp");
+  if (ensureWritableDirectory(defaultRoot)) {
+    return defaultRoot;
+  }
+  const userKey =
+    typeof process.getuid === "function"
+      ? String(process.getuid())
+      : createHash("sha256").update(homedir()).digest("hex").slice(0, 12);
+  const fallbackRoot = path.join(tmpdir(), `codemap-${userKey}-codebase-memory-mcp`);
+  ensureWritableDirectory(fallbackRoot);
+  return fallbackRoot;
+}
+
+/** Creates one private cache directory and verifies that the current process may write it. */
+function ensureWritableDirectory(directory: string): boolean {
+  try {
+    mkdirSync(directory, { recursive: true, mode: 0o700 });
+    accessSync(directory, constants.W_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Extracts a concise provider hint from JSON-encoded or plain tool failures. */
+function readableToolReason(reason: string): string {
+  try {
+    const payload = recordValue(JSON.parse(reason));
+    const hint = stringOrNull(payload.hint);
+    const outcome = stringOrNull(payload.outcome);
+    if (hint !== null) {
+      return outcome === null ? hint : `${outcome}: ${hint}`;
+    }
+  } catch {}
+  return reason;
 }
 
 /** Parses newline-delimited JSON-RPC responses from MCP stdio output. */

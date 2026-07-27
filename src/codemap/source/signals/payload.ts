@@ -268,13 +268,17 @@ export function selectPayloadSection(
   section: string,
 ): Record<string, unknown> {
   if (section === "all") {
-    return payload;
+    return Object.fromEntries(Object.entries(payload).filter(([key]) => key !== "top"));
   }
   if (section === "top") {
     return recordValue(payload.top);
   }
   const key = payloadKeyForSection(section);
-  return { [key]: payload[key] ?? {} };
+  const coverage = recordValue(payload.coverage);
+  return {
+    ...(Object.keys(coverage).length === 0 ? {} : { coverage }),
+    [key]: payload[key] ?? {},
+  };
 }
 
 /** Maps CLI section names to payload field names. */

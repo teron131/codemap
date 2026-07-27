@@ -16,6 +16,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   callCodebaseMemoryTool,
+  codebaseMemoryFailureReason,
   codebaseMemoryQueryRows,
   codebaseMemorySchema,
   codebaseMemoryStatus,
@@ -796,6 +797,41 @@ describe("Codebase Memory integration", () => {
     }
   });
 
+  it("prints nested provider failures from backend commands", () => {
+    vi.stubEnv("CODEBASE_MEMORY_MOCK_ERROR_TOOL", "query_graph");
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      expect(
+        commandBackendQuery(["MATCH", "(f:Function)", "RETURN", "f.name"], {
+          projectRoot: workDir,
+        }),
+      ).toBe(1);
+      const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+
+      expect(output).toContain("Could not run Codebase Memory query.");
+      expect(output).toContain("reason: project not found or not indexed");
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it("retries one missing read-only graph query response", () => {
+    vi.stubEnv("CODEBASE_MEMORY_MOCK_RETRY_QUERY", "1");
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      expect(
+        commandBackendQuery(["MATCH", "(f:Function)", "RETURN", "f.name"], {
+          projectRoot: workDir,
+        }),
+      ).toBe(0);
+
+      expect(readQueryCalls()).toHaveLength(2);
+      expect(codebaseMemoryFailureReason(workDir)).toBeNull();
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
   it("renders JSON-encoded query scalar cells without bracket noise", () => {
     vi.stubEnv("CODEBASE_MEMORY_MOCK_JSON_STRING_QUERY", "1");
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
@@ -908,6 +944,23 @@ describe("Codebase Memory integration", () => {
     }
   });
 
+  it("prints the provider reason when an index refresh fails", () => {
+    vi.stubEnv("CODEBASE_MEMORY_MOCK_ERROR_TOOL", "index_repository");
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      expect(commandBackendStatus({ projectRoot: workDir })).toBe(1);
+      const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+
+      expect(output).toContain("No Codebase Memory index for this project.");
+      expect(output).toContain("reason: Index refresh failed: project not found or not indexed");
+      expect(codebaseMemoryFailureReason(workDir)).toBe(
+        "Index refresh failed: project not found or not indexed",
+      );
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
   it("adds bounded backend function metrics without graph decoration", () => {
     mkdirSync(path.join(workDir, "src"), { recursive: true });
     writeFileSync(
@@ -926,6 +979,9 @@ describe("Codebase Memory integration", () => {
       expect(output).not.toContain("exported");
       expect(output).not.toContain("## Backend Graph");
       expect(output).toContain("# Ranked Source Metrics");
+      expect(readQueryCalls()[0]).toMatchObject({
+        max_rows: 100,
+      });
       expect(readIndexCalls()).toHaveLength(1);
     } finally {
       logSpy.mockRestore();
@@ -951,6 +1007,9 @@ describe("Codebase Memory integration", () => {
       const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
 
       expect(output).toContain("backend: unavailable");
+      expect(output).toContain(
+        "backend reason: Codebase Memory returned an unknown function-metrics payload.",
+      );
       expect(output).toContain("src/app.ts:1 localMetric");
       expect(output).toContain("lines=21, mentions=1");
     } finally {
@@ -993,6 +1052,44 @@ describe("Codebase Memory integration", () => {
       logSpy.mockRestore();
     }
   });
+
+  it("filters test-heavy backend candidates before applying the final row limit", () => {
+    vi.stubEnv("CODEBASE_MEMORY_MOCK_TEST_HEAVY_METRICS", "1");
+    mkdirSync(path.join(workDir, "src"), { recursive: true });
+    writeFileSync(
+      path.join(workDir, "src", "candidate.test.ts"),
+      "export function testCandidate() { return 'test'; }\n",
+      "utf8",
+    );
+    for (let index = 0; index < 20; index += 1) {
+      writeFileSync(
+        path.join(workDir, "src", `production${index}.ts`),
+        `export function production${index}() { return ${index}; }\n`,
+        "utf8",
+      );
+    }
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      expect(commandSignals("top", { json: true, projectRoot: workDir })).toBe(0);
+      const payload = JSON.parse(String(logSpy.mock.calls[0]?.[0] ?? "{}"));
+
+      expect(payload.functionMetrics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            name: "production0",
+            path: "src/production0.ts",
+          }),
+        ]),
+      );
+      expect(
+        payload.functionMetrics.some(
+          (row: Record<string, unknown>) => row.path === "src/candidate.test.ts",
+        ),
+      ).toBe(false);
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
 });
 
 /** Reads mock index_repository call records written by the MCP test server. */
@@ -1010,6 +1107,18 @@ function readIndexCalls(): unknown[] {
 /** Reads mock delete_project call records written by the MCP test server. */
 function readDeleteCalls(): unknown[] {
   const logPath = path.join(workDir, "delete-calls.jsonl");
+  if (!existsSync(logPath)) {
+    return [];
+  }
+  return readFileSync(logPath, "utf8")
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+}
+
+/** Reads mock query_graph call records written by the MCP test server. */
+function readQueryCalls(): unknown[] {
+  const logPath = path.join(workDir, "query-calls.jsonl");
   if (!existsSync(logPath)) {
     return [];
   }
@@ -1149,6 +1258,7 @@ const toolArgs = toolCall?.params?.arguments ?? {};
 const root = process.env.CODEBASE_MEMORY_MOCK_ROOT ?? ${JSON.stringify(workDir)};
 const indexLogPath = ${JSON.stringify(path.join(workDir, "index-calls.jsonl"))};
 const deleteLogPath = ${JSON.stringify(path.join(workDir, "delete-calls.jsonl"))};
+const queryLogPath = ${JSON.stringify(path.join(workDir, "query-calls.jsonl"))};
 const cwdLogPath = ${JSON.stringify(path.join(workDir, "child-cwds.jsonl"))};
 fs.appendFileSync(cwdLogPath, JSON.stringify(process.cwd()) + "\\n");
 const operationId = process.env.CODEBASE_MEMORY_MOCK_OPERATION_ID;
@@ -1537,7 +1647,32 @@ const payloads = {
 	        "is_exported",
 	        "is_test",
 	      ],
-	      rows: process.env.CODEBASE_MEMORY_MOCK_TWENTY_METRICS === "1"
+	      rows: process.env.CODEBASE_MEMORY_MOCK_TEST_HEAVY_METRICS === "1"
+	        ? [
+	            ...Array.from({ length: 80 }, (_, index) => [
+	              "testCandidate" + index,
+	              "src/candidate.test.ts",
+	              1,
+	              1,
+	              200 - index,
+	              300 - index,
+	              0,
+	              false,
+	              false,
+	            ]),
+	            ...Array.from({ length: 20 }, (_, index) => [
+	              "production" + index,
+	              "src/production" + index + ".ts",
+	              1,
+	              1,
+	              20 - index,
+	              30 - index,
+	              0,
+	              true,
+	              false,
+	            ]),
+	          ]
+	        : process.env.CODEBASE_MEMORY_MOCK_TWENTY_METRICS === "1"
 	        ? Array.from({ length: 20 }, (_, index) => [
 	            "backend" + index,
 	            "src/backend" + index + ".ts",
@@ -1598,6 +1733,13 @@ if (toolName === "index_repository") {
 if (toolName === "delete_project") {
   fs.appendFileSync(deleteLogPath, JSON.stringify(toolCall?.params?.arguments ?? {}) + "\\n");
 }
+if (toolName === "query_graph") {
+  fs.appendFileSync(queryLogPath, JSON.stringify(toolCall?.params?.arguments ?? {}) + "\\n");
+}
+const omitToolResponse =
+  process.env.CODEBASE_MEMORY_MOCK_RETRY_QUERY === "1" &&
+  toolName === "query_graph" &&
+  fs.readFileSync(queryLogPath, "utf8").split(/\\r?\\n/).filter(Boolean).length === 1;
 const payload =
   process.env.CODEBASE_MEMORY_MOCK_ERROR_TOOL === toolName
     ? { error: "project not found or not indexed" }
@@ -1635,10 +1777,12 @@ console.log(JSON.stringify({
     capabilities: { tools: {} },
   },
 }));
-console.log(JSON.stringify({
-  jsonrpc: "2.0",
-  id: 2,
-  result: toolResult,
-}));
+if (!omitToolResponse) {
+  console.log(JSON.stringify({
+    jsonrpc: "2.0",
+    id: 2,
+    result: toolResult,
+  }));
+}
 `;
 }

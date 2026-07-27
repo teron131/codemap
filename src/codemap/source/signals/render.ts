@@ -10,12 +10,38 @@ export function renderSignalText(payload: Record<string, unknown>, section: stri
   if (payload.freshness === "partial") {
     lines.push("backend: partial index", "");
   } else if (payload.freshness === "degraded") {
-    lines.push("backend: unavailable", "");
+    lines.push("backend: unavailable");
+    if (typeof payload.backendReason === "string" && payload.backendReason.length > 0) {
+      lines.push(`backend reason: ${payload.backendReason}`);
+    }
+    lines.push("");
+  } else if (payload.backendStatus === "skipped") {
+    lines.push("backend: skipped");
+    if (typeof payload.backendReason === "string" && payload.backendReason.length > 0) {
+      lines.push(`backend reason: ${payload.backendReason}`);
+    }
+    lines.push("");
+  }
+  const coverage = recordValue(payload.coverage);
+  if (coverage.mode === "bounded") {
+    lines.push(
+      `coverage: bounded current tree; parsed=${numberValue(coverage.parsedFiles)}, eligible=${numberValue(coverage.eligibleFiles)}`,
+      "",
+    );
   }
   if (section === "top") {
     appendTop(lines, payload);
-  } else if ("top" in payload) {
-    appendTop(lines, recordValue(payload.top));
+  } else if ("functionMetrics" in payload) {
+    const functionMetrics = arrayValue(payload.functionMetrics);
+    if (functionMetrics.length > 0) {
+      appendCompactSignalRows(
+        lines,
+        functionMetricRankingTitle(functionMetrics),
+        functionMetrics,
+        functionMetricFacts,
+      );
+      lines.push("");
+    }
   }
   if ("relationships" in payload) {
     appendRelationships(lines, recordValue(payload.relationships));
@@ -102,7 +128,9 @@ function appendTop(lines: string[], top: Record<string, unknown>): void {
 function functionMetricRankingTitle(rows: Row[]): string {
   const backendRows = rows.filter((row) => "cognitive" in row || "cyclomatic" in row).length;
   if (backendRows === 0) {
-    return "Function Metrics (length, then fewest mentions)";
+    return rows.some((row) => "mentions" in row)
+      ? "Function Metrics (length, then fewest mentions)"
+      : "Function Metrics (length)";
   }
   if (backendRows === rows.length) {
     return "Function Metrics (cognitive, cyclomatic, then length)";
@@ -221,10 +249,13 @@ function appendUsageDistribution(lines: string[], usage: Record<string, unknown>
 
 /** Appends function rankings to text output. */
 function appendFunctionSignals(lines: string[], payload: Record<string, unknown>): void {
+  const lengthRows = rankFunctionRowsByLength(languageRows(recordValue(payload.byLength)));
   appendDefinitionRows(
     lines,
-    "Functions by Length (longest, then fewest mentions)",
-    rankFunctionRowsByLength(languageRows(recordValue(payload.byLength))),
+    lengthRows.some((row) => "count" in row)
+      ? "Functions by Length (longest, then fewest mentions)"
+      : "Functions by Length (longest)",
+    lengthRows,
   );
   lines.push("");
   appendDefinitionRows(
@@ -353,10 +384,10 @@ function appendDefinitionRows(lines: string[], title: string, rows: Row[]): void
   }
   for (const item of rows) {
     const identifier = item.identifier || item.name;
-    const details =
-      "lines" in item
-        ? [`${item.lines} lines`, mentionsText(item.count ?? 0)]
-        : [mentionsText(item.count ?? 0)];
+    const details = "lines" in item ? [`${item.lines} lines`] : [];
+    if ("count" in item) {
+      details.push(mentionsText(item.count));
+    }
     if ("line" in item) {
       details.push(`line ${item.line}`);
     }

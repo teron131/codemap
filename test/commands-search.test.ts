@@ -337,6 +337,27 @@ describe("search command handler", () => {
     expect(output).not.toContain("[file]");
   });
 
+  it("resolves exact symbol intent to definitions before references", async () => {
+    writeFileSync(
+      path.join(workDir, "src", "consumer.ts"),
+      "import { AgentTarget } from './target.js';\nexport const instance = new AgentTarget();\n",
+      "utf8",
+    );
+    writeFileSync(path.join(workDir, "src", "target.ts"), "export class AgentTarget {}\n", "utf8");
+
+    await expect(
+      commandSearch(["AgentTarget"], {
+        projectRoot: workDir,
+        limit: "10",
+      }),
+    ).resolves.toBe(0);
+
+    const output = logLines().join("\n");
+    expect(output).toContain("src/target.ts");
+    expect(output).toContain("[symbol]");
+    expect(output).not.toContain("src/consumer.ts");
+  });
+
   it("keeps supported inferred languages when another language is unavailable", async () => {
     writeFileSync(path.join(workDir, "src", "mixed.ts"), "const value = true;\n", "utf8");
     writeFileSync(path.join(workDir, "src", "mixed.py"), "value = True\n", "utf8");
@@ -447,6 +468,153 @@ describe("search command handler", () => {
     expect(output).toContain("src/app.ts");
     expect(output).not.toContain("user-data");
     expect(output).not.toContain("Local State");
+  });
+
+  it("hides local test matches unless requested while preserving explicit test paths", async () => {
+    mkdirSync(path.join(workDir, "test"), { recursive: true });
+    writeFileSync(
+      path.join(workDir, "src", "feature.ts"),
+      "export const searchPolicyNeedle = 'production';\n",
+      "utf8",
+    );
+    writeFileSync(
+      path.join(workDir, "test", "feature.test.ts"),
+      "export const searchPolicyNeedle = 'test';\n",
+      "utf8",
+    );
+
+    await expect(
+      commandSearch(["searchPolicyNeedle"], {
+        projectRoot: workDir,
+        limit: "10",
+      }),
+    ).resolves.toBe(0);
+
+    const defaultOutput = logLines().join("\n");
+    expect(defaultOutput).toContain("src/feature.ts");
+    expect(defaultOutput).not.toContain("test/feature.test.ts");
+
+    logSpy.mockClear();
+
+    await expect(
+      commandSearch(["searchPolicyNeedle"], {
+        includeTests: true,
+        projectRoot: workDir,
+        limit: "10",
+      }),
+    ).resolves.toBe(0);
+
+    const includedOutput = logLines().join("\n");
+    expect(includedOutput).toContain("src/feature.ts");
+    expect(includedOutput).toContain("test/feature.test.ts");
+
+    logSpy.mockClear();
+
+    await expect(
+      commandSearch(["test/feature.test.ts"], {
+        projectRoot: workDir,
+        limit: "10",
+      }),
+    ).resolves.toBe(0);
+
+    expect(logLines().join("\n")).toContain("test/feature.test.ts [file]");
+  });
+
+  it("marks shortened local source excerpts", async () => {
+    writeFileSync(
+      path.join(workDir, "src", "long.ts"),
+      `export const longSearchExcerpt = "${"source-evidence-".repeat(30)}";\n`,
+      "utf8",
+    );
+
+    await expect(
+      commandSearch(["longSearchExcerpt"], {
+        projectRoot: workDir,
+        limit: "2",
+      }),
+    ).resolves.toBe(0);
+
+    const output = logLines().join("\n");
+    expect(output).toContain("src/long.ts");
+    expect(output).toContain("...");
+    expect(output).not.toContain("source-evidence-".repeat(30));
+  });
+
+  it("ranks concept matches by useful source-path affinity", async () => {
+    mkdirSync(path.join(workDir, "src", "config"), { recursive: true });
+    mkdirSync(path.join(workDir, "src", "talk"), { recursive: true });
+    writeFileSync(
+      path.join(workDir, "src", "config", "types.ts"),
+      "// Select the realtime voice provider.\n",
+      "utf8",
+    );
+    writeFileSync(
+      path.join(workDir, "src", "talk", "provider-registry.ts"),
+      "// Registry for each realtime voice provider.\n",
+      "utf8",
+    );
+
+    await expect(
+      commandSearch(["realtime", "voice", "provider"], {
+        projectRoot: workDir,
+        limit: "10",
+      }),
+    ).resolves.toBe(0);
+
+    const output = logLines().join("\n");
+    expect(output.indexOf("src/talk/provider-registry.ts")).toBeLessThan(
+      output.indexOf("src/config/types.ts"),
+    );
+  });
+
+  it("surfaces a concept owner path even when exact phrase matches exist elsewhere", async () => {
+    mkdirSync(path.join(workDir, "src", "tools"), { recursive: true });
+    writeFileSync(
+      path.join(workDir, "src", "tools", "registry.ts"),
+      "export const registeredTools = new Map();\n",
+      "utf8",
+    );
+    writeFileSync(
+      path.join(workDir, "src", "bootstrap.ts"),
+      "// Initialize the tool registry before startup.\n",
+      "utf8",
+    );
+
+    await expect(
+      commandSearch(["tool", "registry"], {
+        projectRoot: workDir,
+        limit: "5",
+      }),
+    ).resolves.toBe(0);
+
+    const output = logLines();
+    expect(output).toContain("  - src/tools/registry.ts [file]");
+    expect(output.indexOf("  - src/tools/registry.ts [file]")).toBeLessThan(
+      output.findIndex((line) => line.includes("Initialize the tool registry")),
+    );
+  });
+
+  it("ranks current concept matches before deprecated matches", async () => {
+    writeFileSync(
+      path.join(workDir, "src", "current.ts"),
+      "// Current tool calling implementation.\n",
+      "utf8",
+    );
+    writeFileSync(
+      path.join(workDir, "src", "legacy.ts"),
+      "// Deprecated tool calling implementation.\n",
+      "utf8",
+    );
+
+    await expect(
+      commandSearch(["tool", "calling"], {
+        projectRoot: workDir,
+        limit: "10",
+      }),
+    ).resolves.toBe(0);
+
+    const output = logLines().join("\n");
+    expect(output.indexOf("src/current.ts")).toBeLessThan(output.indexOf("src/legacy.ts"));
   });
 
   it("ranks exact paths before suffix matches without expanding a target card", async () => {

@@ -9,6 +9,8 @@ import {
   printCodebaseMemorySemanticSearch,
 } from "../search/codebase-memory.js";
 import {
+  conceptPathMatches,
+  definitionMatches,
   type GraphMatchOptions,
   pathMatches,
   renderGraphMatchLines,
@@ -73,7 +75,7 @@ export function addSearchParser(program: Command): void {
     )
     .option("--exclude-entry-points", "Exclude entry-point nodes from --graph results.")
     .option("--offset <count>", "Page --graph results from an offset.", parseIntegerOption)
-    .option("--include-tests", "Include backend test rows in search output.")
+    .option("--include-tests", "Include likely test rows in search output.")
     .action(async (searchText: string[], options: SearchOptions) => {
       const exitCode = await commandSearch(searchText, options, program.opts<RootOptions>());
       if (exitCode !== 0) {
@@ -114,6 +116,14 @@ export async function commandSearch(
       printSourceMatches(directPaths);
       return 0;
     }
+    const directDefinitions = definitionMatches(root, searchText, {
+      includeTests: Boolean(options.includeTests),
+      limit,
+    });
+    if (directDefinitions.length > 0) {
+      printSourceMatches(directDefinitions);
+      return 0;
+    }
   }
   if (
     options.semantic &&
@@ -147,13 +157,20 @@ export async function commandSearch(
     );
   } else {
     const textOnlySearch = runScan(root).files.length > DETAILED_ANALYSIS_FILE_LIMIT;
-    const matches = sourceMatches(root, searchText, {
-      limit,
+    const conceptPaths = conceptPathMatches(root, searchText, {
+      includeTests: Boolean(options.includeTests),
+      limit: Math.min(3, limit),
+    });
+    const textMatches = sourceMatches(root, searchText, {
+      includeTests: Boolean(options.includeTests),
+      limit: limit - conceptPaths.length,
       textOnly: textOnlySearch,
     });
+    const matches = [...conceptPaths, ...textMatches];
     const searchNote = textOnlySearch ? "Fallback: large repo; structural search skipped." : "";
     if (matches.length === 0) {
       const fallbackGroups = sourceFallbackMatches(root, searchText, {
+        includeTests: Boolean(options.includeTests),
         limit,
         textOnly: textOnlySearch,
       });

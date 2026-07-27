@@ -3,14 +3,12 @@ import { Command, CommanderError } from "commander";
 
 import { addBackendParsers, addIndexParser } from "./backend.js";
 import { addInspectParser } from "./inspect.js";
-import { PROJECT_ROOT_HELP } from "./options.js";
+import { BYTES_PER_ESTIMATED_TOKEN, OUTPUT_TOKEN_LIMIT, PROJECT_ROOT_HELP } from "./options.js";
 import { addSearchParser } from "./search.js";
 import { addSignalsParser } from "./signals.js";
 import { addSummaryParser } from "./summary.js";
 
 const COMMAND_NAMES = new Set(["backend", "index", "inspect", "search", "signals", "summary"]);
-const OUTPUT_TOKEN_LIMIT = 10_000;
-const BYTES_PER_ESTIMATED_TOKEN = 3;
 
 type OutputBudgetResult = {
   output: string;

@@ -1,6 +1,8 @@
 /** Re-exports source, structural, and graph search APIs. */
 export { type GraphMatchOptions, renderGraphMatchLines } from "./graph.js";
 export {
+  conceptPathMatches,
+  definitionMatches,
   pathMatches,
   type SourceFallbackGroup,
   type SourceMatch,
