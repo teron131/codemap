@@ -8,11 +8,11 @@ Codemap began as a compact, opinionated layer over `rg` and ast-grep. Those tool
 
 Codebase Memory later became the primary source for repository structure, symbol neighborhoods, semantic search, change impact, and function metrics. Codemap kept ownership of selection and presentation instead of exposing provider payloads directly. This made it possible to combine stronger graph evidence with stable, token-conscious output.
 
-Search and inspection settled into complementary lanes. Search starts from any clue and narrows toward source: path-shaped queries resolve from the current tree, concept queries use ranked backend evidence, graph and semantic modes stay explicit, and local ast-grep plus `rg` remain the verifiable fallback. Inspect starts from one known target and expands outward, using backend snippets and relationships only when the match is unambiguous and structurally recognized.
+Search and inspection settled into complementary lanes. Search starts from any clue and narrows toward source: paths and exact definitions resolve from the current tree, concept queries use ranked backend evidence, graph and semantic modes stay explicit, and local ast-grep plus `rg` remain the verifiable fallback. Inspect starts from one known target and expands outward, using backend snippets and relationships only when the match is unambiguous and structurally recognized.
 
 Signal provenance also became explicit. Backend `cognitive`, `cyclomatic`, and `linearScanInLoop` values are upstream Codebase Memory properties passed through after numeric normalization. Partial or degraded backend results may be completed with current-tree function rows containing source lines and lexical mentions. Function-mention and variable-name-length rankings also come from current-tree lexical analysis. Codemap owns path eligibility, deterministic ordering, field naming, and display limits; headings state the primary and tie-break criteria instead of labeling ranked definitions as problems.
 
-Upstream session auto-indexing proved unreliable across a working session. The current lifecycle therefore serializes graph-backed operations by project root, clears the matching operational cache entry, indexes once with `persistence: false`, and reuses that clean snapshot for every backend query in the operation. Short-lived MCP children start outside the target repository so upstream watching and auto-index behavior cannot race the explicit refresh.
+Upstream session auto-indexing proved unreliable across a working session. The current lifecycle therefore serializes graph-backed operations by project root, clears the matching operational cache entry, indexes once with `persistence: false`, and reuses that clean snapshot for every backend query in the operation. Short-lived MCP children start outside the target repository so upstream watching and auto-index behavior cannot race the explicit refresh. An explicit Codebase Memory cache path remains authoritative; an unwritable default user cache falls back to a private OS temporary cache.
 
 Once the command surface stabilized, Codemap became a globally installable npm CLI with a separate companion skill. The executable owns behavior and output; the skill owns when to use each command, how to interpret compact metrics, and which caveats matter to an agent. Repository development remains pnpm-based while `npm install -g .` provides the linked global command.
 
@@ -20,13 +20,18 @@ Once the command surface stabilized, Codemap became a globally installable npm C
 
 - Do not add persistent Codemap data to the inspected repository.
 - Treat Codebase Memory's system-cache storage as operational state, not a human-reviewed artifact or source of truth.
+- Preserve an explicit `CBM_CACHE_DIR`. Fall back from an unwritable default user cache to a private OS temporary cache, and surface the concrete provider or lifecycle reason when backend work still fails.
 - Keep explicit refresh as the default until upstream lifecycle behavior is demonstrably reliable.
 - Keep Codebase Memory, current-tree scanning, `rg`, and ast-grep as distinct evidence sources with clear labels.
+- Keep the detailed-graph threshold separate from signal availability. Above it, scan the 100 largest eligible source files and report parsed versus eligible counts for bounded function-length and file evidence without claiming complete relationship or mention coverage.
+- Skip default backend function-metric enrichment above 10,000 eligible source files. Keep the bounded current-tree signal useful and leave expensive graph work to explicit backend commands.
 - Keep `src/codemap/codebase-memory` responsible for transport, freshness, serialization, generic tool-result validation, and reusable diagnostic/query operations.
 - Let feature modules own provider arguments, payload projection, filtering, ranking, fallback, final composition, and compact output contracts.
 - Preserve upstream metric values as upstream facts and use explicit deterministic tie-breakers for Codemap-owned ordering.
+- Omit likely test rows by default across backend and local discovery. `--include-tests` opts in, while explicit paths and exact symbol definitions remain direct current-tree targets.
+- Keep backend function-metric queries at 100 rows. When source eligibility removes provider rows, append distinct current-tree rows before the final output budget instead of widening the provider payload.
 - Prefer readable compact text for agent use and object-row JSON for stable surfaces that benefit from `jq` or scripts. Token efficiency alone does not justify replacing either with a third public encoding.
-- Treat 10,000 conservatively estimated tokens as the overflow ceiling for every command, not a target commands should fill. Apply it once to final stdout and report total, shown, and truncated counts. Keep JSON valid and `jq`-compatible by reporting its truncation on stderr. Do not stack presentation caps. Bound expensive collection or enrichment separately only to limit work.
+- Treat 10,000 conservatively estimated tokens as the overflow ceiling for every command, not a target commands should fill. Apply it once to final stdout and report total, shown, and truncated counts. Keep JSON valid and `jq`-compatible by reporting its truncation on stderr. Do not stack presentation caps or repeat compact summary projections in broad detailed views. Bound expensive collection or enrichment separately only to limit work.
 - Emit measurements rather than prompts or recommendations. Ranking headings should state their criteria without classifying the rows as good, bad, or in need of refactoring.
 - Keep interpretation rules and metric caveats in the companion skill rather than repeating explanatory prose in every command result.
 - Keep the installed command as the behavior surface and the companion skill as a thin agent operating contract.
@@ -87,7 +92,9 @@ Do not expand language coverage by recognizing file extensions alone. A new lang
 
 ## Evaluation Standard
 
-The standing production corpus should include LangChain Python, LangChain JS, OpenClaw, and Hermes Agent when those repositories are available, alongside toy repositories with deliberately obvious expected answers.
+Design from the agent user's next action under the settled philosophy, then use repository evaluation to falsify that design. Do not average unrelated repository quirks into an incoherent default merely because the corpus is diverse.
+
+The standing production corpus should include Transformers, LangChain Python, LangChain JS, OpenClaw, and Hermes Agent when those repositories are available, alongside toy repositories with deliberately obvious expected answers.
 
 Before promoting an enhancement into the default surface:
 
@@ -98,7 +105,7 @@ Before promoting an enhancement into the default surface:
 5. Inspect readable output for noise rather than judging only test snapshots.
 6. Verify normalized JSON with direct parsing or `jq` when the command exposes it.
 7. Keep tests on public behavior and lifecycle invariants, not private helper structure.
-8. Record default row counts and approximate output tokens across the evaluation corpus so a larger cap cannot silently erase the wrapper's token advantage.
+8. Record the first useful target rank, result-source mix, default row count, output bytes and approximate tokens, elapsed time, and backend freshness across the corpus.
 9. Build and exercise the globally installed command from outside the repository, then confirm that companion-skill examples still match the live CLI.
 
 The useful stopping point is a compact default that gives enough evidence to choose a focused next inspection. More available backend data is not, by itself, a reason to print more data.

@@ -59,6 +59,28 @@ describe("signals CLI", () => {
     expect(output).not.toContain("cognitive, cyclomatic");
   });
 
+  it("explains when bounded signals skip backend enrichment", () => {
+    const output = renderSignalText(
+      {
+        backendStatus: "skipped",
+        backendReason: "eligible source files exceed 10000",
+        coverage: {
+          mode: "bounded",
+          eligibleFiles: 14_071,
+          parsedFiles: 100,
+        },
+        functionMetrics: [],
+        functionsByMentions: [],
+        variablesByNameLength: [],
+      },
+      "top",
+    );
+
+    expect(output).toContain("backend: skipped");
+    expect(output).toContain("backend reason: eligible source files exceed 10000");
+    expect(output).toContain("coverage: bounded current tree; parsed=100, eligible=14071");
+  });
+
   it("globally orders detailed function rows across languages", () => {
     const output = renderSignalText(
       {
@@ -135,10 +157,15 @@ describe("signals CLI", () => {
     );
 
     expect(fileRows(payload)).toEqual(["src/worker.py", "src/app.ts"]);
+    expect(payload.coverage).toEqual({
+      mode: "bounded",
+      eligibleFiles: 2,
+      parsedFiles: 0,
+    });
     expect(firstDenseRow(payload).total_label).toBe("lines");
-    expect(renderSignalText(payload.top as Record<string, unknown>, "top")).toContain(
-      "No ranked source rows.",
-    );
+    const output = renderSignalText(payload.top as Record<string, unknown>, "top");
+    expect(output).toContain("coverage: bounded current tree; parsed=0, eligible=2");
+    expect(output).toContain("No ranked source rows.");
 
     const withTests = buildLightweightSignalPayload(
       [scanEntry("src/app.ts", "typescript", 30), scanEntry("src/app.test.ts", "typescript", 500)],
@@ -182,6 +209,22 @@ describe("signals CLI", () => {
       exports: 1,
     });
     expect(first.samples).toEqual(expect.arrayContaining(["runLarge"]));
+    expect(payload.top).toMatchObject({
+      coverage: {
+        mode: "bounded",
+        eligibleFiles: 2,
+        parsedFiles: 2,
+      },
+      functionMetrics: expect.arrayContaining([
+        expect.objectContaining({
+          name: "runLarge",
+          path: "src/large.ts",
+        }),
+      ]),
+    });
+    expect(renderSignalText(payload.top as Record<string, unknown>, "top")).toContain(
+      "## Function Metrics (length)",
+    );
   });
 
   it("prints selected signal payload JSON", () => {
@@ -240,6 +283,35 @@ describe("signals CLI", () => {
         },
       ],
     });
+  });
+
+  it("omits duplicate top projections from the all-section payload", () => {
+    writeFileSync(
+      path.join(workDir, "src", "app.ts"),
+      [
+        "export function run(value: string) {",
+        "  return helper(value);",
+        "}",
+        "function helper(value: string) {",
+        "  return value;",
+        "}",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const result = spawnSync(
+      "pnpm",
+      ["exec", "tsx", "src/codemap/cli.ts", "signals", "--project-root", workDir, "--json", "all"],
+      { cwd: workspaceRoot, encoding: "utf8" },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe("");
+    const payload = JSON.parse(result.stdout);
+    expect(payload).not.toHaveProperty("top");
+    expect(payload).toHaveProperty("functionMetrics");
+    expect(payload.functions.byMentions.typescript).toHaveLength(2);
+    expect(payload.variables).toHaveProperty("byNameLength");
   });
 
   it("prints compact docstring signal text", () => {

@@ -5,6 +5,7 @@ import { canonicalPath } from "../codebase-memory/client.js";
 import {
   type CodebaseMemoryChangeOptions,
   codebaseMemoryChanges,
+  codebaseMemoryFailureReason,
   codebaseMemoryIndex,
   codebaseMemoryProjects,
   codebaseMemoryQuery,
@@ -131,9 +132,7 @@ export function commandBackendProjects(
     console.log(renderBackendProjects(result, root));
     return 0;
   }
-  console.log(
-    "No Codebase Memory projects available. Ensure `codebase-memory-mcp` is installed and reachable.",
-  );
+  console.log(backendFailureMessage(root, "No Codebase Memory projects available."));
   return 1;
 }
 
@@ -148,9 +147,7 @@ export function commandBackendStatus(
     console.log(renderBackendStatus(result));
     return 0;
   }
-  console.log(
-    "No Codebase Memory index for this project. Ensure `codebase-memory-mcp` is installed and reachable.",
-  );
+  console.log(backendFailureMessage(root, "No Codebase Memory index for this project."));
   return 1;
 }
 
@@ -165,9 +162,7 @@ export function commandBackendSchema(
     console.log(renderBackendSchema(result));
     return 0;
   }
-  console.log(
-    "No Codebase Memory schema for this project. Ensure `codebase-memory-mcp` is installed and reachable.",
-  );
+  console.log(backendFailureMessage(root, "No Codebase Memory schema for this project."));
   return 1;
 }
 
@@ -194,9 +189,7 @@ export function commandBackendQuery(
     console.log(options.json ? JSON.stringify(result, null, 2) : renderQueryRows(result));
     return 0;
   }
-  console.log(
-    "Could not run Codebase Memory query. Ensure `codebase-memory-mcp` is installed and reachable.",
-  );
+  console.log(backendFailureMessage(root, "Could not run Codebase Memory query."));
   return 1;
 }
 
@@ -211,9 +204,7 @@ export function commandBackendChanges(
     console.log(options.json ? JSON.stringify(result, null, 2) : renderBackendChanges(result));
     return 0;
   }
-  console.log(
-    "Could not read Codebase Memory change impact. Ensure `codebase-memory-mcp` is installed and reachable.",
-  );
+  console.log(backendFailureMessage(root, "Could not read Codebase Memory change impact."));
   return 1;
 }
 
@@ -233,10 +224,14 @@ export function commandIndex(options: BackendOptions, rootOptions: RootOptions =
     );
     return 0;
   }
-  console.log(
-    "Could not refresh Codebase Memory. Ensure `codebase-memory-mcp` is installed and reachable.",
-  );
+  console.log(backendFailureMessage(root, "Could not refresh Codebase Memory."));
   return 1;
+}
+
+/** Appends the concrete provider failure while keeping the command context visible. */
+function backendFailureMessage(root: string, summary: string): string {
+  const reason = codebaseMemoryFailureReason(root);
+  return reason === null ? summary : `${summary}\nreason: ${reason}`;
 }
 
 /** Detects Cypher clauses that can mutate the backend graph. */

@@ -35,6 +35,7 @@ type CodebaseMemoryProjectQueryResult = {
 };
 
 const JSON_FORMAT = { format: "json" } as const;
+const QUERY_REQUEST_TIMEOUT_MS = 30_000;
 
 /** Lists indexed Codebase Memory projects after refreshing the current root. */
 export function codebaseMemoryProjects(root: string): unknown | null {
@@ -71,12 +72,24 @@ export function codebaseMemoryQueryWithProject(
   maxRows: number | undefined,
 ): CodebaseMemoryProjectQueryResult | null {
   return withFreshCodebaseMemoryProject(root, (project) => {
-    const result = callCodebaseMemoryTool("query_graph", {
+    const args = {
       project: project.name,
       query,
       ...(maxRows !== undefined ? { max_rows: maxRows } : {}),
       ...JSON_FORMAT,
+    };
+    let result = callCodebaseMemoryTool("query_graph", args, {
+      timeoutMs: QUERY_REQUEST_TIMEOUT_MS,
     });
+    if (
+      !result.ok &&
+      (result.reason === "missing tool response" ||
+        /\b(?:ETIMEDOUT|timed out|timeout)\b/i.test(result.reason))
+    ) {
+      result = callCodebaseMemoryTool("query_graph", args, {
+        timeoutMs: QUERY_REQUEST_TIMEOUT_MS,
+      });
+    }
     return result.ok ? { freshness: project.status, value: result.value } : null;
   });
 }

@@ -4,6 +4,7 @@ export {
   type CodebaseMemoryToolResult,
   callCodebaseMemoryTool,
   codebaseMemoryEnabled,
+  codebaseMemoryFailureReason,
   withFreshCodebaseMemoryProject,
 } from "./client.js";
 export {

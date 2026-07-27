@@ -36,6 +36,7 @@ type CodebaseMemoryGraphRenderOptions = CodebaseMemoryRenderOptions &
   >;
 
 const MIN_SEMANTIC_SCORE = 0.2;
+const BACKEND_SEARCH_CANDIDATE_LIMIT = 100;
 const JSON_FORMAT = { format: "json" } as const;
 
 /** Reads graph-augmented backend source search results when available. */
@@ -515,7 +516,7 @@ function testLikeSearchRow(value: unknown): boolean {
   ]
     .filter((item) => item !== null)
     .join(" ");
-  return /(^|[./_-])(__tests__|tests|specs)([./_-]|$)|(^|[./_-])test_[^/]*|[._-](test|spec)\.[cm]?[jt]sx?$|(^|[._-])test[A-Z_]/i.test(
+  return /(^|[./_-])(__tests__|tests|specs|e2e|test-support|test_support)([./_-]|$)|(^|[./_-])test_[^/]*|[._-](test|spec|suite)\.[cm]?[jt]sx?$|[._-]test-support[._-]|(^|[._-])test[A-Z_]/i.test(
     text,
   );
 }
@@ -525,7 +526,7 @@ function backendFetchLimit(
   limit: number,
   { includeTests = false }: CodebaseMemoryRenderOptions,
 ): number {
-  return includeTests ? limit : Math.max(limit * 3, limit);
+  return includeTests ? limit : Math.max(limit, BACKEND_SEARCH_CANDIDATE_LIMIT);
 }
 
 /** Renders CodebaseMemory semantic graph search rows. */
