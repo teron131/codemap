@@ -1,28 +1,30 @@
 # Codemap
 
-Codemap is an opinionated, token-conscious wrapper around Codebase Memory MCP, `rg`, and ast-grep for Python and TypeScript/JavaScript codebases. Codebase Memory supplies indexed graph intelligence, `rg` remains the exact-text baseline, and ast-grep owns built-in JavaScript/TypeScript structural search.
+Codemap is an opinionated, token-conscious source-inspection CLI for Python and TypeScript/JavaScript. It orchestrates Codebase Memory MCP, `rg`, and ast-grep behind a compact command surface.
 
 ## Why Codemap
 
-Codemap combines Codebase Memory's graph intelligence, `rg` exact search, and ast-grep structural search in a smaller agent-oriented workflow.
+Codemap chooses the appropriate evidence source and shapes the results around an agent's next action.
 
-- Routes relationship and semantic questions to Codebase Memory, exact text to `rg`, and syntax patterns to ast-grep, with current-tree fallbacks when indexed evidence is unavailable.
-- Filters, ranks, deduplicates, and labels results around the next useful inspection.
+- Keeps graph, exact-text, and structural evidence clearly labeled.
+- Filters, ranks, and deduplicates results to surface the next useful inspection.
 - Keeps output compact and predictable instead of exposing provider payloads.
 - Falls back to local evidence when Codebase Memory is unavailable, partial, or stale.
-- Uses explicit non-persistent refreshes without adding graph artifacts to inspected repositories.
+- Refreshes graph data explicitly without adding persistent artifacts to inspected repositories.
 
 Use Codemap for normal repository navigation and change scoping. Use direct Codebase Memory queries when unrestricted graph exploration or provider-specific diagnostics matter more than compact defaults.
 
 ## Install
 
-Node.js 22+ is required. The examples use npm; equivalent pnpm commands also work. For full functionality:
+Node.js 22+ is required. Commands below use npm; equivalent pnpm commands also work.
 
-- [Codebase Memory MCP](https://github.com/DeusData/codebase-memory-mcp#installation) provides graph and semantic features through the `codebase-memory-mcp` binary.
-- [ripgrep](https://github.com/BurntSushi/ripgrep#installation) provides fast exact-text search through `rg`.
-- Codemap installs `@ast-grep/napi` for built-in JavaScript and TypeScript structural search. The optional [ast-grep CLI](https://github.com/ast-grep/ast-grep#installation) adds Python patterns and advanced structural operations.
+| Tool | Role | Setup |
+| --- | --- | --- |
+| [Codebase Memory MCP](https://github.com/DeusData/codebase-memory-mcp#installation) | Relationships, architecture, semantic search, and change impact | Install the external `codebase-memory-mcp` binary |
+| [ripgrep](https://github.com/BurntSushi/ripgrep#installation) | Exact-text search and fast file discovery | Install the external `rg` binary |
+| [ast-grep](https://github.com/ast-grep/ast-grep#installation) | Structural search and source parsing | JavaScript and TypeScript engine bundled; CLI optional for Python and advanced operations |
 
-Install the external tools on macOS:
+Install the external tools on macOS for full coverage:
 
 ```sh
 brew install ripgrep ast-grep
@@ -63,7 +65,7 @@ codemap --help
 
 ## Output
 
-Codemap estimates tokens conservatively as UTF-8 bytes divided by three and limits final stdout to approximately 10,000 tokens. Text output keeps complete lines and ends with `shown`, `total`, and `truncated` counts when shortened. JSON output remains one valid minified value, keeps complete array items in breadth-first order, and writes the same counts to stderr. Explicit `--limit` and `--max-rows` options can request smaller results; the broader default fetch safeguard exists only to prevent unbounded work before final presentation.
+Every command applies one final approximate 10,000-token ceiling after selection and rendering. Text keeps complete lines and reports `shown`, `total`, and `truncated` counts. JSON remains one valid minified value and reports truncation on stderr. Use `--limit` or `--max-rows` when a smaller result is preferable.
 
 ## Limits
 
