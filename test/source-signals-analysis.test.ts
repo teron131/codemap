@@ -6,9 +6,29 @@ import {
   fileProfileRow,
   functionLengthSection,
   functionUsageRows,
+  usageBins,
+  usageRows,
 } from "../src/codemap/source/signals/analysis.js";
 
 describe("signal analysis", () => {
+  it("uses automatic bins for lexical mentions", () => {
+    const rows = usageRows(
+      ["unused", "pair", "few", "many"],
+      new Map([
+        ["unused", 1],
+        ["pair", 2],
+        ["few", 5],
+        ["many", 8],
+      ]),
+    );
+
+    expect(usageBins(rows)).toEqual({
+      "1-3": 2,
+      "4-6": 1,
+      "7-8": 1,
+    });
+  });
+
   it("deduplicates repeated function spans by keeping the widest row", () => {
     const spans = [
       functionSpan("src/app.py::target", "target", 32, 20),
@@ -22,7 +42,14 @@ describe("signal analysis", () => {
     ]);
 
     const rows = functionUsageRows(
-      [pythonMetrics(spans)],
+      [
+        {
+          suffix: ".py",
+          relPath: "src/app.py",
+          exportedNames: [],
+          functionSpans: spans,
+        } as unknown as FileMetrics,
+      ],
       new Set([".py"]),
       new Map([
         ["target", 9],
@@ -77,13 +104,4 @@ function functionSpan(
     span,
     startLine,
   };
-}
-
-function pythonMetrics(functionSpans: FunctionSpan[]): FileMetrics {
-  return {
-    suffix: ".py",
-    relPath: "src/app.py",
-    exportedNames: [],
-    functionSpans,
-  } as unknown as FileMetrics;
 }

@@ -68,10 +68,10 @@ Use `inspect` after search identifies one likely target. Prefer a file or direct
 
 ```sh
 codemap signals --project-root <path>
-codemap signals --json --project-root <path> | jq '{functionMetrics, functionsByMentions, variablesByNameLength}'
+codemap signals --json --project-root <path> | jq '{stats, functionMetrics, functionsByMentions, variablesByNameLength}'
 ```
 
-Start with the default. Codemap sorts all measured rows before the shared final-output budget is applied; categories do not have separate presentation caps.
+Start with the default. Codemap sorts all measured rows before the shared final-output budget is applied; categories do not have separate presentation caps. Whole-population current-tree statistics precede the rankings with `count`, `mean`, sample `std`, percentiles through `p90`, extrema, and automatically sized `bins` spanning each observed population. Backend top-function rows do not contribute to those population statistics.
 
 - `functionMetrics`: backend rows sort by cognitive complexity, cyclomatic complexity, and length; current-tree fallback rows sort by length and mentions when available.
 - `functionsByMentions`: all function definitions sort by lexical mentions ascending, then length ascending.
@@ -87,7 +87,7 @@ Interpret compact fields directly:
 
 Upstream metrics remain provider facts. Fresh `functionMetrics` uses backend rows; partial results fill remaining capacity with distinct current-tree rows; degraded results use current-tree rows. Mention and name-length rankings always come from the current tree. The rows describe ordering criteria, not refactor instructions.
 
-Above the detailed-graph threshold, the fallback scans the 100 largest eligible source files and reports parsed versus eligible file counts. Treat its function-length and file rows as bounded current-tree evidence; relationship and mention coverage are not complete. Above 10,000 eligible files, default signals skip backend metric enrichment; use explicit backend commands only when that graph cost is justified.
+Above the detailed-graph threshold, the fallback scans the 100 largest eligible source files and reports parsed versus eligible file counts. Its statistics describe only parsed rows. Treat its function-length and file rows as bounded current-tree evidence; relationship and mention coverage are not complete. Above 10,000 eligible files, default signals skip backend metric enrichment; use explicit backend commands only when that graph cost is justified.
 
 Open a detailed lane only when the default points there:
 

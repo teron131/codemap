@@ -5,7 +5,7 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { renderSignalText } from "../src/codemap/source/signals/index.js";
+import { renderSignalText, selectPayloadSection } from "../src/codemap/source/signals/index.js";
 import { buildLightweightSignalPayload } from "../src/codemap/source/signals/lightweight.js";
 
 const workspaceRoot = process.cwd();
@@ -57,6 +57,40 @@ describe("signals CLI", () => {
 
     expect(output).toContain("## Function Metrics (length, then fewest mentions)");
     expect(output).not.toContain("cognitive, cyclomatic");
+  });
+
+  it("renders current-tree population statistics before ranked rows", () => {
+    const output = renderSignalText(
+      {
+        stats: {
+          source: "currentTree",
+          functions: {
+            lines: {
+              count: 4,
+              mean: 2.5,
+              std: 1.29,
+              min: 1,
+              p25: 1.75,
+              p50: 2.5,
+              p75: 3.25,
+              p90: 3.7,
+              max: 4,
+              bins: { "1-2": 2, "3-4": 2 },
+            },
+          },
+        },
+        functionMetrics: [{ name: "run", path: "src/app.ts", lines: 4 }],
+        functionsByMentions: [],
+        variablesByNameLength: [],
+      },
+      "top",
+    );
+
+    expect(output).toContain(
+      "- function lines: count=4, mean=2.5, std=1.29, min=1, p25=1.75, p50=2.5, p75=3.25, p90=3.7, max=4",
+    );
+    expect(output).toContain("  bins: 1-2=2, 3-4=2");
+    expect(output.indexOf("## Statistics")).toBeLessThan(output.indexOf("## Function Metrics"));
   });
 
   it("explains when bounded signals skip backend enrichment", () => {
@@ -163,7 +197,7 @@ describe("signals CLI", () => {
       parsedFiles: 0,
     });
     expect(firstDenseRow(payload).total_label).toBe("lines");
-    const output = renderSignalText(payload.top as Record<string, unknown>, "top");
+    const output = renderSignalText(selectPayloadSection(payload, "top"), "top");
     expect(output).toContain("coverage: bounded current tree; parsed=0, eligible=2");
     expect(output).toContain("No ranked source rows.");
 
@@ -209,7 +243,16 @@ describe("signals CLI", () => {
       exports: 1,
     });
     expect(first.samples).toEqual(expect.arrayContaining(["runLarge"]));
-    expect(payload.top).toMatchObject({
+    const top = selectPayloadSection(payload, "top");
+    expect(top).toMatchObject({
+      stats: {
+        source: "currentTree",
+        functions: {
+          lines: {
+            count: 2,
+          },
+        },
+      },
       coverage: {
         mode: "bounded",
         eligibleFiles: 2,
@@ -222,9 +265,9 @@ describe("signals CLI", () => {
         }),
       ]),
     });
-    expect(renderSignalText(payload.top as Record<string, unknown>, "top")).toContain(
-      "## Function Metrics (length)",
-    );
+    const output = renderSignalText(top, "top");
+    expect(output).toContain("## Statistics");
+    expect(output).toContain("## Function Metrics (length)");
   });
 
   it("prints selected signal payload JSON", () => {
@@ -309,6 +352,14 @@ describe("signals CLI", () => {
     expect(result.stderr).toBe("");
     const payload = JSON.parse(result.stdout);
     expect(payload).not.toHaveProperty("top");
+    expect(payload.stats).toMatchObject({
+      source: "currentTree",
+      functions: {
+        lines: {
+          count: 2,
+        },
+      },
+    });
     expect(payload).toHaveProperty("functionMetrics");
     expect(payload.functions.byMentions.typescript).toHaveLength(2);
     expect(payload.variables).toHaveProperty("byNameLength");
@@ -433,7 +484,7 @@ describe("signals CLI", () => {
     ]);
   });
 
-  it("applies one final JSON budget after building complete top buckets", () => {
+  it("applies one final JSON budget after building complete top rankings", () => {
     const functionBlocks = Array.from({ length: 400 }, (_, idx) =>
       [`function candidate${idx}(value: string) {`, "  return value.trim();", "}"].join("\n"),
     ).join("\n\n");
@@ -463,6 +514,19 @@ describe("signals CLI", () => {
     const payload = JSON.parse(result.stdout);
     expect(payload).toMatchObject({
       freshness: "degraded",
+      stats: {
+        source: "currentTree",
+        functions: {
+          lines: {
+            count: 400,
+          },
+        },
+        variables: {
+          characters: {
+            count: 400,
+          },
+        },
+      },
     });
     expect(payload.functionMetrics.length).toBeGreaterThan(20);
     expect(payload.functionsByMentions.length).toBeGreaterThan(20);
