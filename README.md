@@ -2,24 +2,48 @@
 
 Codemap is an opinionated, token-conscious wrapper around Codebase Memory MCP, `rg`, and ast-grep for Python and TypeScript/JavaScript codebases. Codebase Memory supplies indexed graph intelligence, `rg` remains the exact-text baseline, and ast-grep owns built-in JavaScript/TypeScript structural search.
 
-Codemap does not own a persistent graph store or rely on Codebase Memory's session auto-indexing. Every Codemap graph-backed operation serializes access to this root, clears its matching operational Codebase Memory cache entry when present, indexes once with `persistence: false`, reuses that clean snapshot for all backend queries in the operation, and falls back to current-tree evidence where a local answer exists. An explicit `CBM_CACHE_DIR` remains authoritative; when the normal user cache is not writable, Codemap uses a private OS temporary cache instead of disabling the backend.
+## Why Codemap
 
-## Product Contract
+Codemap combines Codebase Memory's graph intelligence, `rg` exact search, and ast-grep structural search in a smaller agent-oriented workflow.
 
-- Default text is the main agent-facing representation: compact, ranked, and evidence-only.
-- Stable row surfaces (`signals`, structural matches, and call matches) offer compact normalized JSON for `jq`; composed orientation and inspection stay text-only instead of maintaining a second noisy contract. Raw backend JSON is reserved for `backend query --json` and `backend changes --json`.
-- Every command applies one final conservative 10,000-token stdout ceiling after selection and rendering. Text keeps complete lines and prints truncation counts; JSON stays valid and minified, with truncation counts sent to stderr so `jq` pipelines remain intact.
-- Default search omits likely test rows consistently across backend and local evidence. `--include-tests` opts in, while explicit paths and exact symbol definitions resolve directly from the current tree.
-- `signals` ranks measured source facts without labeling the rows as problems or recommendations.
-- `search calls` never changes into a backend caller/callee trace; every row names its source matching engine.
-- Backend failures and unknown payloads fail closed so local fallbacks are not suppressed.
+- Routes relationship and semantic questions to Codebase Memory, exact text to `rg`, and syntax patterns to ast-grep, with current-tree fallbacks when indexed evidence is unavailable.
+- Filters, ranks, deduplicates, and labels results around the next useful inspection.
+- Keeps output compact and predictable instead of exposing provider payloads.
+- Falls back to local evidence when Codebase Memory is unavailable, partial, or stale.
+- Uses explicit non-persistent refreshes without adding graph artifacts to inspected repositories.
+
+Use Codemap for normal repository navigation and change scoping. Use direct Codebase Memory queries when unrestricted graph exploration or provider-specific diagnostics matter more than compact defaults.
 
 ## Install
 
+Node.js 22+ is required. The examples use npm; equivalent pnpm commands also work. For full functionality:
+
+- [Codebase Memory MCP](https://github.com/DeusData/codebase-memory-mcp#installation) provides graph and semantic features through the `codebase-memory-mcp` binary.
+- [ripgrep](https://github.com/BurntSushi/ripgrep#installation) provides fast exact-text search through `rg`.
+- Codemap installs `@ast-grep/napi` for built-in JavaScript and TypeScript structural search. The optional [ast-grep CLI](https://github.com/ast-grep/ast-grep#installation) adds Python patterns and advanced structural operations.
+
+Install the external tools on macOS:
+
 ```sh
-pnpm install
-pnpm run build
+brew install ripgrep ast-grep
+curl -fsSL https://raw.githubusercontent.com/DeusData/codebase-memory-mcp/main/scripts/setup.sh | bash
+```
+
+Build and link Codemap:
+
+```sh
+npm install
+npm run build
 npm install -g .
+```
+
+Verify the full setup:
+
+```sh
+codebase-memory-mcp --version
+rg --version
+ast-grep --version
+codemap --help
 ```
 
 ## Core Commands
@@ -37,46 +61,12 @@ npm install -g .
 | `backend ...` | Raw Codebase Memory diagnostics | Projects, status, schema, Cypher queries, and change impact. |
 | `index` | Codebase Memory indexing | Explicit refresh timing and status. |
 
-## Ranked Source Metrics
-
-Readable output is the default:
-
-```sh
-codemap signals --project-root <path>
-```
-
-The compact JSON surface contains the same facts:
-
-```sh
-codemap signals --json --project-root <path> | jq '{stats, functionMetrics, functionsByMentions, variablesByNameLength}'
-```
-
-The three default rankings describe their ordering criteria directly:
-
-- `functionMetrics`: backend rows ordered by cognitive complexity, cyclomatic complexity, and source length; current-tree fallback rows are ordered by length and mentions when available.
-- `functionsByMentions`: all scanned function definitions ordered by lexical mentions ascending, then source length ascending.
-- `variablesByNameLength`: all scanned variable definitions ordered by identifier length descending, then lexical mentions ascending.
-
-Population statistics precede the ranked rows: `count`, `mean`, sample `std`, `min`, `p25`, `p50`, `p75`, `p90`, `max`, and automatically sized `bins` spanning each observed population. They are computed from complete current-tree function and variable rows before the shared final-output budget is applied. Backend top-function samples enrich rankings but never stand in for a population. Generated paths and tests are omitted by default, and the ranking does not classify a long, rarely mentioned, or verbose definition as defective.
-
-Above the detailed-graph threshold, signals remain available through a bounded current-tree pass over the 100 largest eligible source files. Text and JSON report the parsed and eligible file counts, and statistics describe only the parsed rows. This preserves function-length and file evidence without claiming full-repository relationship or lexical-mention coverage. Above 10,000 eligible files, default signals skip backend metric enrichment; use explicit backend commands when that graph cost is justified.
-
-Function metric fields use compact standard names: `cognitive` is a unitless control-flow measurement that rises with nesting and branching; `cyclomatic` approximates independent control-flow paths; `lines` is the physical function span; and JSON's `linearScanInLoop` (rendered as `linear_scan_in_loop` in readable text) counts detected scan sites such as `find`, `filter`, or `some` inside loops. These are sorting facts, not correctness findings. A scan site may operate on a bounded collection, so it is not proof of a performance problem.
-
-Lexical mentions are not graph references and are labeled accordingly. A one-mention function may be a substantial, well-owned workflow; its position states only the measured frequency and tie-break order.
-
-Detailed sections remain explicit for narrower investigations: `relationships`, `files`, `lengths`, `functions`, `variables`, `usage`, `docstring-signals`, and `docstrings`. The `all` view adds provider function metrics without repeating the compact `top` projection.
-
-## Output Budget
+## Output
 
 Codemap estimates tokens conservatively as UTF-8 bytes divided by three and limits final stdout to approximately 10,000 tokens. Text output keeps complete lines and ends with `shown`, `total`, and `truncated` counts when shortened. JSON output remains one valid minified value, keeps complete array items in breadth-first order, and writes the same counts to stderr. Explicit `--limit` and `--max-rows` options can request smaller results; the broader default fetch safeguard exists only to prevent unbounded work before final presentation.
-
-## Backend Boundary
-
-`src/codemap/codebase-memory` owns MCP transport, manual clean-index lifecycle, cross-process root serialization, generic tool-result validation, and reusable diagnostic/query operations. Its short-lived MCP children start outside the target repository so upstream session auto-indexing and watching do not race the explicit lifecycle. Search, inspect, signals, summary, and backend commands own their provider arguments, payload projection, fallback eligibility, and presentation policy.
-
-The implementation journey, settled constraints, and evidence required for future enhancements are recorded in [`docs/IDEAS.md`](docs/IDEAS.md).
 
 ## Limits
 
 Codemap provides syntax-level and indexed relationship evidence, not compiler-grade reachability, framework-complete data flow, or proof that a symbol is dead. Verify consequential findings with focused reads, exact search, and the repository’s tests.
+
+Implementation constraints and future evaluation criteria are recorded in [`docs/IDEAS.md`](docs/IDEAS.md).
