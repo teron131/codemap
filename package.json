@@ -12,7 +12,7 @@
     "dist/codemap"
   ],
   "scripts": {
-    "build": "pnpm run clean && tsc -p tsconfig.build.json && chmod +x dist/codemap/cli.js",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json && chmod +x dist/codemap/cli.js",
     "check": "pnpm run typecheck && pnpm run format:check && pnpm run lint && pnpm run test",
     "clean": "rm -rf dist",
     "dev": "tsx src/codemap/cli.ts",
