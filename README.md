@@ -8,6 +8,7 @@ Codemap does not own a persistent graph store or rely on Codebase Memory's sessi
 
 - Default text is the main agent-facing representation: compact, ranked, and evidence-only.
 - Stable row surfaces (`signals`, structural matches, and call matches) offer compact normalized JSON for `jq`; composed orientation and inspection stay text-only instead of maintaining a second noisy contract. Raw backend JSON is reserved for `backend query --json` and `backend changes --json`.
+- Every command applies one final conservative 10,000-token stdout ceiling after selection and rendering. Text keeps complete lines and prints truncation counts; JSON stays valid and minified, with truncation counts sent to stderr so `jq` pipelines remain intact.
 - `signals` ranks measured source facts without labeling the rows as problems or recommendations.
 - `search calls` never changes into a backend caller/callee trace; every row names its source matching engine.
 - Backend failures and unknown payloads fail closed so local fallbacks are not suppressed.
@@ -28,10 +29,10 @@ npm install -g .
 | `search <text>` | Current-tree paths, then Codebase Memory ranked search, then ast-grep plus `rg` fallback | Broad path, concept, symbol, and text discovery. |
 | `search --graph <text>` | Codebase Memory graph search, then current-tree graph fallback | Relationship-aware discovery. |
 | `search --semantic <text>` | Codebase Memory semantic graph search, then current-tree fallback | Vocabulary-bridging discovery. |
-| `search calls <name>` | ast-grep, or labeled Python regex fallback | Call-shaped source matches, capped at 20 by default. |
+| `search calls <name>` | ast-grep, or labeled Python regex fallback | Call-shaped source matches. |
 | `search match` / `search rule` | ast-grep | Built-in JS/TS structural discovery; simple Python patterns require the ast-grep CLI. |
 | `inspect <target>` | Codebase Memory for symbols, current tree for paths and fallback | Focused in-to-out neighborhood inspection. |
-| `signals` | Codebase Memory function metrics plus current-tree definitions | Up to twenty rows in each nonempty ranked metric bucket. |
+| `signals` | Codebase Memory function metrics plus current-tree definitions | Ranked source metrics under the shared output ceiling. |
 | `backend ...` | Raw Codebase Memory diagnostics | Projects, status, schema, Cypher queries, and change impact. |
 | `index` | Codebase Memory indexing | Explicit refresh timing and status. |
 
@@ -55,13 +56,17 @@ The three default buckets describe their ordering criteria directly:
 - `functionsByMentions`: all scanned function definitions ordered by lexical mentions ascending, then source length ascending.
 - `variablesByNameLength`: all scanned variable definitions ordered by identifier length descending, then lexical mentions ascending.
 
-Each bucket is capped at twenty rows only to prevent overflow. Generated paths and tests are omitted by default, but the ranking does not classify a long, rarely mentioned, or verbose definition as defective. Detailed sections retain broader fifty-row views.
+Rows are sorted before the shared final-output budget is applied; there is no separate per-bucket presentation cap. Generated paths and tests are omitted by default, but the ranking does not classify a long, rarely mentioned, or verbose definition as defective.
 
 Function metric fields use compact standard names: `cognitive` is a unitless control-flow measurement that rises with nesting and branching; `cyclomatic` approximates independent control-flow paths; `lines` is the physical function span; and JSON's `linearScanInLoop` (rendered as `linear_scan_in_loop` in readable text) counts detected scan sites such as `find`, `filter`, or `some` inside loops. These are sorting facts, not correctness findings. A scan site may operate on a bounded collection, so it is not proof of a performance problem.
 
 Lexical mentions are not graph references and are labeled accordingly. A one-mention function may be a substantial, well-owned workflow; its position states only the measured frequency and tie-break order.
 
 Detailed sections remain explicit for narrower investigations: `relationships`, `files`, `lengths`, `functions`, `variables`, `usage`, `docstring-signals`, and `docstrings`.
+
+## Output Budget
+
+Codemap estimates tokens conservatively as UTF-8 bytes divided by three and limits final stdout to approximately 10,000 tokens. Text output keeps complete lines and ends with `shown`, `total`, and `truncated` counts when shortened. JSON output remains one valid minified value, keeps complete array items in breadth-first order, and writes the same counts to stderr. Explicit `--limit` and `--max-rows` options can request smaller results; the broader default fetch safeguard exists only to prevent unbounded work before final presentation.
 
 ## Backend Boundary
 

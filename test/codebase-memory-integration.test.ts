@@ -740,7 +740,7 @@ describe("Codebase Memory integration", () => {
       expect(output).toContain("nodes=12");
       expect(output).toContain("other projects:");
       expect(output).not.toContain("mock-work");
-      expect(output).toContain("- ... 1 more");
+      expect(output).toContain("other-8");
       expect(readIndexCalls()).toHaveLength(1);
     } finally {
       logSpy.mockRestore();
@@ -958,7 +958,7 @@ describe("Codebase Memory integration", () => {
     }
   });
 
-  it("caps partial backend and local function metrics after merging", () => {
+  it("merges partial backend and local function metrics before output budgeting", () => {
     vi.stubEnv("CODEBASE_MEMORY_MOCK_SKIPPED_COUNT", "1");
     vi.stubEnv("CODEBASE_MEMORY_MOCK_TWENTY_METRICS", "1");
     mkdirSync(path.join(workDir, "src"), { recursive: true });
@@ -985,10 +985,10 @@ describe("Codebase Memory integration", () => {
       const payload = JSON.parse(String(logSpy.mock.calls[0]?.[0] ?? "{}"));
 
       expect(payload.freshness).toBe("partial");
-      expect(payload.functionMetrics).toHaveLength(20);
+      expect(payload.functionMetrics.length).toBeGreaterThan(20);
       expect(
         payload.functionMetrics.some((row: Record<string, unknown>) => row.name === "localMetric"),
-      ).toBe(false);
+      ).toBe(true);
     } finally {
       logSpy.mockRestore();
     }
@@ -1522,6 +1522,7 @@ const payloads = {
 	  ? { message: "ok" }
 	  : toolArgs.query?.includes("f.cognitive") &&
 	toolArgs.max_rows === 100 &&
+	toolArgs.query?.includes("MATCH (f:Function)") &&
 	toolArgs.query?.includes("ORDER BY") &&
 	!toolArgs.query?.includes("LIMIT")
 	  ? {

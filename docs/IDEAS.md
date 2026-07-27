@@ -14,8 +14,6 @@ Signal provenance also became explicit. Backend `cognitive`, `cyclomatic`, and `
 
 Upstream session auto-indexing proved unreliable across a working session. The current lifecycle therefore serializes graph-backed operations by project root, clears the matching operational cache entry, indexes once with `persistence: false`, and reuses that clean snapshot for every backend query in the operation. Short-lived MCP children start outside the target repository so upstream watching and auto-index behavior cannot race the explicit refresh.
 
-The default signal summary originally favored a very small sample. In practice, two to four examples from many categories created a metric buffet that encouraged agents to reopen every section. The current design sorts eligible measurements first, then keeps up to twenty rows per bucket as overflow protection. Expensive lightweight syntax enrichment remains independently bounded so a broader display does not imply proportionally broader parsing.
-
 Once the command surface stabilized, Codemap became a globally installable npm CLI with a separate companion skill. The executable owns behavior and output; the skill owns when to use each command, how to interpret compact metrics, and which caveats matter to an agent. Repository development remains pnpm-based while `npm install -g .` provides the linked global command.
 
 ## Settled Direction
@@ -27,7 +25,8 @@ Once the command surface stabilized, Codemap became a globally installable npm C
 - Keep `src/codemap/codebase-memory` responsible for transport, freshness, serialization, generic tool-result validation, and reusable diagnostic/query operations.
 - Let feature modules own provider arguments, payload projection, filtering, ranking, fallback, final composition, and compact output contracts.
 - Preserve upstream metric values as upstream facts and use explicit deterministic tie-breakers for Codemap-owned ordering.
-- Prefer readable text for agent use. Add normalized JSON only for stable row surfaces that benefit from `jq` or scripts.
+- Prefer readable compact text for agent use and object-row JSON for stable surfaces that benefit from `jq` or scripts. Token efficiency alone does not justify replacing either with a third public encoding.
+- Treat 10,000 conservatively estimated tokens as the overflow ceiling for every command, not a target commands should fill. Apply it once to final stdout and report total, shown, and truncated counts. Keep JSON valid and `jq`-compatible by reporting its truncation on stderr. Do not stack presentation caps. Bound expensive collection or enrichment separately only to limit work.
 - Emit measurements rather than prompts or recommendations. Ranking headings should state their criteria without classifying the rows as good, bad, or in need of refactoring.
 - Keep interpretation rules and metric caveats in the companion skill rather than repeating explanatory prose in every command result.
 - Keep the installed command as the behavior surface and the companion skill as a thin agent operating contract.
@@ -45,7 +44,7 @@ New default rankings should expose a distinct measurable relationship rather tha
 - Exported definitions with weak usage evidence, clearly labeled as leads rather than dead-code proof.
 - Intersections between existing measurements, such as complex functions in dense files, when the intersection removes noise rather than merely restating both lists.
 
-A new bucket earns default placement only when its ranking is stable, its criteria are interpretable, and live output remains useful under the current per-bucket overflow caps. Otherwise it belongs in an explicit detailed section.
+A new bucket earns default placement only when its ranking is stable, its criteria are interpretable, and live output remains useful under the shared final-output ceiling. Otherwise it belongs in an explicit detailed section.
 
 ### Search Quality
 
@@ -68,6 +67,8 @@ Keep the current clean-index lifecycle simple. Revisit it only if one of these b
 
 Cold-build timing and incremental-update timing should remain separate measurements. Lifecycle changes must test additions, large edits, renames, and deletions rather than only unchanged re-indexing.
 
+Verify backend query shapes against the installed provider. Do not rely on unprobed label expressions because fallback rows can make a provider-query incompatibility look like ordinary metric absence.
+
 The current lock and child-supervision machinery is containment for an unreliable shared operational cache, not a general concurrency abstraction. Feature modules should never participate in that protocol, and an upstream atomic refresh primitive should replace it when equivalent freshness and orphan-process guarantees can be proven.
 
 ### Output Contracts
@@ -78,7 +79,7 @@ Provider-derived fields must retain their upstream meaning, while Codemap-derive
 
 Text and JSON do not need artificial parity everywhere. Row-oriented commands may support both from one normalized shape; composed orientation and inspection may remain text-only when a second public structure would add maintenance without improving use.
 
-A token-oriented encoding such as TOON should become public only when measured agent use shows a material token or parsing advantage for an existing normalized row surface. It should not replace JSON for `jq`, wrap internal MCP JSON transport, or create a third contract for composed text output merely because the format exists.
+TOON has been trialed and showed no material advantage over column-oriented compact JSON; both use the same schema-once, positional-row idea. Keep JSON output minified and object-oriented for `jq` and scripts, and keep compact text as the token-efficient agent surface. Do not add TOON as a third public encoding or wrap internal MCP JSON transport.
 
 ### Language Scope
 

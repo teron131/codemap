@@ -14,13 +14,7 @@ export {
 } from "./analysis.js";
 export { buildSignalExport, runSignalsExport } from "./build.js";
 export { buildSignalPayload, selectPayloadSection } from "./payload.js";
-export {
-  isGeneratedSignalPath,
-  isTestPath,
-  SIGNAL_OUTPUT_ROW_LIMIT,
-  SIGNAL_SECTION_CHOICES,
-  SIGNAL_TOP_ROW_LIMIT,
-} from "./policy.js";
+export { isGeneratedSignalPath, isTestPath, SIGNAL_SECTION_CHOICES } from "./policy.js";
 export { renderSignalText } from "./render.js";
 export type {
   DefinitionRow,

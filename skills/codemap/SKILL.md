@@ -5,7 +5,7 @@ description: Navigate and scope Python and TypeScript/JavaScript repositories, i
 
 # Codemap
 
-Use Codemap to navigate and scope Python or TypeScript/JavaScript changes. Prefer compact readable output for agent work; use normalized JSON only on stable row surfaces such as `signals`, `search calls`, `search match`, and `search rule`.
+Use Codemap to navigate and scope Python or TypeScript/JavaScript changes. Prefer compact readable output for agent work; use normalized JSON only on stable row surfaces such as `signals`, `search calls`, `search match`, and `search rule`. Every command applies one final conservative 10,000-token stdout ceiling; text reports truncation inline, while JSON remains valid for `jq` and reports truncation on stderr.
 
 Graph-backed commands serialize by project root, clear the matching operational cache entry, index once with `persistence: false`, and reuse that snapshot within the operation. Codemap does not write persistent graph data into the inspected repository. Local `rg`, ast-grep, and current-tree evidence remain independently verifiable fallbacks.
 
@@ -50,7 +50,7 @@ codemap search match --json --project-root <path> --lang <lang> --pattern "<patt
 codemap search rule --json --project-root <path> --rule <rule.yml> [paths...]
 ```
 
-Use `search calls` only for source call-shaped matches such as `print(...)`, `logger.info(...)`, or `console.log(...)`; backend availability never changes it into a caller/callee trace. The default cap is twenty. JSON returns compact `{total,matches}` data so truncation remains visible.
+Use `search calls` only for source call-shaped matches such as `print(...)`, `logger.info(...)`, or `console.log(...)`; backend availability never changes it into a caller/callee trace. JSON returns compact `{total,matches}` data. Add `--limit` only when a result smaller than the shared output ceiling is useful.
 
 Use `search match` for one structural pattern and `search rule` for a reusable YAML rule. Built-in matching covers JavaScript and TypeScript. Use raw ast-grep for rewrite previews, fixes, complex Python rules, interactive authoring, detailed parse dumps, or engine options Codemap does not expose.
 
@@ -71,7 +71,7 @@ codemap signals --project-root <path>
 codemap signals --json --project-root <path> | jq '{functionMetrics, functionsByMentions, variablesByNameLength}'
 ```
 
-Start with the default. Codemap sorts measured rows before keeping up to twenty in each nonempty bucket; the cap prevents overflow rather than defining good or bad code.
+Start with the default. Codemap sorts all measured rows before the shared final-output budget is applied; categories do not have separate presentation caps.
 
 - `functionMetrics`: backend rows sort by cognitive complexity, cyclomatic complexity, and length; current-tree fallback rows sort by length and mentions.
 - `functionsByMentions`: all function definitions sort by lexical mentions ascending, then length ascending.
@@ -99,7 +99,7 @@ codemap signals --project-root <path> <section>
 - `docstring-signals` or `docstrings`: documentation coverage or full docstring rows.
 - `all`: every section only when a broad audit justifies the larger output.
 
-Detailed row surfaces are capped at fifty and filter generated or bundled paths where source-specific. Add `--include-tests` only when tests are the target. Text and JSON expose the same normalized facts; compact JSON is intended for `jq` and pipelines.
+Detailed row surfaces filter generated or bundled paths where source-specific and use the same final-output budget. Add `--include-tests` only when tests are the target. Text and JSON expose the same normalized facts; compact JSON is intended for `jq` and pipelines.
 
 ## Work In Python
 

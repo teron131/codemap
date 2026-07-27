@@ -85,7 +85,7 @@ describe("signals CLI", () => {
     expect(byMentions.indexOf("typescriptRare")).toBeLessThan(byMentions.indexOf("pythonFrequent"));
   });
 
-  it("keeps full docstring text output bounded", () => {
+  it("renders complete docstring rows before the shared output boundary", () => {
     const output = renderSignalText(
       {
         docstrings: {
@@ -114,10 +114,10 @@ describe("signals CLI", () => {
     );
 
     expect(output).toContain("## Docstring Files");
-    expect(output).toContain("- ... 1 more files");
-    expect(output).toContain("  - ... 1 more functions");
-    expect(output).not.toContain("src/file20.ts");
-    expect(output).not.toContain("fn8");
+    expect(output).toContain("src/file20.ts");
+    expect(output).toContain("fn8");
+    expect(output).not.toContain("more files");
+    expect(output).not.toContain("more functions");
   });
 
   it("filters tests, bundles, and non-source files in lightweight signal rows", () => {
@@ -361,12 +361,12 @@ describe("signals CLI", () => {
     ]);
   });
 
-  it("caps useful top buckets only at the overflow boundary", () => {
-    const functionBlocks = Array.from({ length: 24 }, (_, idx) =>
+  it("applies one final JSON budget after building complete top buckets", () => {
+    const functionBlocks = Array.from({ length: 400 }, (_, idx) =>
       [`function candidate${idx}(value: string) {`, "  return value.trim();", "}"].join("\n"),
     ).join("\n\n");
     const variableRows = Array.from(
-      { length: 24 },
+      { length: 400 },
       (_, idx) => `const candidateVariableIdentifierForLengthRanking${idx} = ${idx};`,
     ).join("\n");
     writeFileSync(
@@ -388,25 +388,27 @@ describe("signals CLI", () => {
     );
 
     expect(result.status).toBe(0);
-    expect(result.stderr).toBe("");
     const payload = JSON.parse(result.stdout);
     expect(payload).toMatchObject({
       freshness: "degraded",
     });
-    expect(payload.functionMetrics).toHaveLength(20);
-    expect(payload.functionsByMentions).toHaveLength(20);
-    expect(payload.variablesByNameLength).toHaveLength(20);
+    expect(payload.functionMetrics.length).toBeGreaterThan(20);
+    expect(payload.functionsByMentions.length).toBeGreaterThan(20);
+    expect(payload.variablesByNameLength.length).toBeGreaterThan(20);
+    expect(payload.functionMetrics.length).toBeLessThan(400);
+    expect(Buffer.byteLength(result.stdout, "utf8")).toBeLessThanOrEqual(30_000);
+    expect(result.stderr).toContain("codemap: output truncated:");
     expect(
       new Set(payload.functionsByMentions.map((row: Record<string, unknown>) => row.name)).size,
-    ).toBe(20);
+    ).toBe(payload.functionsByMentions.length);
     expect(
       new Set(payload.variablesByNameLength.map((row: Record<string, unknown>) => row.name)).size,
-    ).toBe(20);
+    ).toBe(payload.variablesByNameLength.length);
     const output = renderSignalText(payload, "top");
     expect(output).toContain(payload.functionsByMentions[0].name);
-    expect(output).toContain(payload.functionsByMentions[19].name);
+    expect(output).toContain(payload.functionsByMentions.at(-1).name);
     expect(output).toContain(payload.variablesByNameLength[0].name);
-    expect(output).toContain(payload.variablesByNameLength[19].name);
+    expect(output).toContain(payload.variablesByNameLength.at(-1).name);
     expect(output).not.toContain("should");
   });
 
