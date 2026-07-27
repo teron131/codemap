@@ -1,6 +1,6 @@
 /** Builds JSON signal payload sections for CLI output. */
 import { PY_SUFFIXES, TYPESCRIPT_SUFFIXES } from "../scanner/index.js";
-import { isGeneratedSignalPath, isTestPath, SIGNAL_TOP_ROW_LIMIT } from "./policy.js";
+import { isGeneratedSignalPath, isTestPath } from "./policy.js";
 import type { FunctionLengthSection, LanguageRows, SignalRow } from "./schema.js";
 
 const STRUCTURAL_SUFFIXES = new Set([...PY_SUFFIXES, ...TYPESCRIPT_SUFFIXES]);
@@ -19,7 +19,7 @@ type TopSignalPayload = {
 /** Selects and shapes signal sections for JSON output. */
 export function buildSignalPayload(
   signalExport: SignalExport,
-  { limit, includeTests }: { limit: number; includeTests: boolean },
+  { includeTests }: { includeTests: boolean },
 ): Record<string, unknown> {
   const sections = recordValue(signalExport.sections);
   const usage = recordValue(sections.usage_signals);
@@ -30,32 +30,26 @@ export function buildSignalPayload(
   }).filter((row) => isStructuralFileRow(row));
 
   const lengthRows = {
-    python: limitedLengthSection(recordValue(functionLengths.python), limit, {
+    python: lengthSection(recordValue(functionLengths.python), {
       includeTests,
     }),
-    typescript: limitedLengthSection(recordValue(functionLengths.typescript), limit, {
+    typescript: lengthSection(recordValue(functionLengths.typescript), {
       includeTests,
     }),
   };
   const payload: Record<string, unknown> = {
     relationships: sections.relationships ?? {},
-    files: limitedRows(fileRows, limit),
+    files: fileRows,
     lengths: lengthRows,
     usage: { distribution: recordValue(usage.distribution) },
-    functions: functionPayload(usageTables, limit, { includeTests }),
-    variables: variablePayload(usageTables, limit, { includeTests }),
+    functions: functionPayload(usageTables, { includeTests }),
+    variables: variablePayload(usageTables, { includeTests }),
   };
   if ("docstring_signals" in sections) {
     payload.docstring_signals = sections.docstring_signals ?? {};
   }
   return {
-    top: topPayload(
-      {
-        ...payload,
-        files: fileRows,
-      },
-      Math.min(limit, SIGNAL_TOP_ROW_LIMIT),
-    ),
+    top: topPayload(payload),
     ...payload,
   };
 }
@@ -63,7 +57,6 @@ export function buildSignalPayload(
 /** Builds JSON payload rows for function usage signals. */
 function functionPayload(
   usageTables: Record<string, unknown>,
-  limit: number,
   { includeTests }: { includeTests: boolean },
 ): Record<string, LanguageRows> {
   const pythonDefinitions = fileScopedRows(arrayValue(usageTables.python_function_definitions), {
@@ -75,12 +68,12 @@ function functionPayload(
   );
   return {
     byLength: {
-      python: functionLengthRows(pythonDefinitions, limit),
-      typescript: functionLengthRows(typescriptDefinitions, limit),
+      python: rankFunctionRowsByLength(pythonDefinitions),
+      typescript: rankFunctionRowsByLength(typescriptDefinitions),
     },
     byMentions: {
-      python: mentionCountRows(pythonDefinitions, limit),
-      typescript: mentionCountRows(typescriptDefinitions, limit),
+      python: rankDefinitionRowsByMentions(pythonDefinitions),
+      typescript: rankDefinitionRowsByMentions(typescriptDefinitions),
     },
   };
 }
@@ -88,7 +81,6 @@ function functionPayload(
 /** Builds JSON payload rows for variable usage signals. */
 function variablePayload(
   usageTables: Record<string, unknown>,
-  limit: number,
   { includeTests }: { includeTests: boolean },
 ): Record<string, unknown> {
   const pythonDefinitions = fileScopedRows(arrayValue(usageTables.python_variable_definitions), {
@@ -100,19 +92,16 @@ function variablePayload(
   );
   return {
     byMentions: {
-      python: mentionCountRows(pythonDefinitions, limit),
-      typescript: mentionCountRows(typescriptDefinitions, limit),
+      python: rankDefinitionRowsByMentions(pythonDefinitions),
+      typescript: rankDefinitionRowsByMentions(typescriptDefinitions),
     },
-    byNameLength: variableNameLengthRows(
-      [
-        ...pythonDefinitions.map((row) => ({ language: "python", ...row })),
-        ...typescriptDefinitions.map((row) => ({
-          language: "typescript",
-          ...row,
-        })),
-      ],
-      limit,
-    ),
+    byNameLength: variableNameLengthRows([
+      ...pythonDefinitions.map((row) => ({ language: "python", ...row })),
+      ...typescriptDefinitions.map((row) => ({
+        language: "typescript",
+        ...row,
+      })),
+    ]),
   };
 }
 
@@ -131,10 +120,9 @@ function isStructuralFileRow(row: Row): boolean {
   return [...STRUCTURAL_SUFFIXES].some((suffix) => filePath.endsWith(suffix));
 }
 
-/** Builds a capped table for the longest scanned code blocks. */
-function limitedLengthSection(
+/** Builds a table for the longest scanned code blocks. */
+function lengthSection(
   section: Record<string, unknown>,
-  limit: number,
   { includeTests }: { includeTests: boolean },
 ): FunctionLengthSection<Row> {
   const rows = fileScopedRows(arrayValue(section.items), { includeTests });
@@ -151,7 +139,7 @@ function limitedLengthSection(
     median: counts[Math.floor(counts.length / 2)] ?? 0,
     p90: counts[p90Index] ?? 0,
     max: counts.at(-1) ?? 0,
-    items: limitedRows(rows, limit),
+    items: rows,
   };
 }
 
@@ -174,25 +162,21 @@ function rowFile(row: Row): string {
 }
 
 /** Builds the top-signal payload section for summary output. */
-function topPayload(payload: Record<string, unknown>, limit: number): TopSignalPayload {
+function topPayload(payload: Record<string, unknown>): TopSignalPayload {
   const functions = recordValue(payload.functions);
   const variables = recordValue(payload.variables);
   return {
-    functionMetrics: compactFunctionMetricRows(
-      languageRows(recordValue(functions.byLength)),
-      limit,
-    ),
+    functionMetrics: compactFunctionMetricRows(languageRows(recordValue(functions.byLength))),
     functionsByMentions: compactFunctionMentionRows(
       languageRows(recordValue(functions.byMentions)),
-      limit,
     ),
-    variablesByNameLength: compactVariableNameLengthRows(arrayValue(variables.byNameLength), limit),
+    variablesByNameLength: compactVariableNameLengthRows(arrayValue(variables.byNameLength)),
   };
 }
 
 /** Compacts locally ranked function metrics for backend fallback. */
-function compactFunctionMetricRows(rows: Row[], limit: number): Row[] {
-  return limitedRows(rankFunctionRowsByLength(rows), limit).map((row) => ({
+function compactFunctionMetricRows(rows: Row[]): Row[] {
+  return rankFunctionRowsByLength(rows).map((row) => ({
     name: String(row.name ?? ""),
     path: String(row.file ?? ""),
     ...(Number(row.line ?? 0) > 0 ? { line: Number(row.line) } : {}),
@@ -203,8 +187,8 @@ function compactFunctionMetricRows(rows: Row[], limit: number): Row[] {
 }
 
 /** Compacts functions already ranked by mentions and then length. */
-function compactFunctionMentionRows(rows: Row[], limit: number): Row[] {
-  return limitedRows(rankDefinitionRowsByMentions(rows), limit).map((row) => ({
+function compactFunctionMentionRows(rows: Row[]): Row[] {
+  return rankDefinitionRowsByMentions(rows).map((row) => ({
     name: String(row.name ?? ""),
     path: String(row.file ?? ""),
     ...(Number(row.line ?? 0) > 0 ? { line: Number(row.line) } : {}),
@@ -215,23 +199,20 @@ function compactFunctionMentionRows(rows: Row[], limit: number): Row[] {
 }
 
 /** Sorts variable definitions by identifier length and then mentions. */
-function variableNameLengthRows(rows: Row[], limit: number): Row[] {
-  return limitedRows(
-    rows
-      .slice()
-      .sort(
-        (left, right) =>
-          String(right.name ?? "").length - String(left.name ?? "").length ||
-          Number(left.count ?? 0) - Number(right.count ?? 0) ||
-          compareText(String(left.identifier ?? ""), String(right.identifier ?? "")),
-      ),
-    limit,
-  );
+function variableNameLengthRows(rows: Row[]): Row[] {
+  return rows
+    .slice()
+    .sort(
+      (left, right) =>
+        String(right.name ?? "").length - String(left.name ?? "").length ||
+        Number(left.count ?? 0) - Number(right.count ?? 0) ||
+        compareText(String(left.identifier ?? ""), String(right.identifier ?? "")),
+    );
 }
 
 /** Compacts variable-name rows to location and measured facts. */
-function compactVariableNameLengthRows(rows: Row[], limit: number): Row[] {
-  return limitedRows(rows, limit).map((row) => ({
+function compactVariableNameLengthRows(rows: Row[]): Row[] {
+  return rows.map((row) => ({
     name: String(row.name ?? ""),
     path: String(row.file ?? ""),
     ...(Number(row.line ?? 0) > 0 ? { line: Number(row.line) } : {}),
@@ -249,24 +230,6 @@ export function languageRows(payload: Record<string, unknown>): Row[] {
     }
   }
   return rows;
-}
-
-/** Sorts and caps metric rows for compact signal payload sections. */
-function limitedRows(rows: Row[], limit: number): Row[] {
-  if (limit <= 0) {
-    return rows;
-  }
-  return rows.slice(0, limit);
-}
-
-/** Ranks functions by length and then lexical mentions. */
-function functionLengthRows(rows: Row[], limit: number): Row[] {
-  return limitedRows(rankFunctionRowsByLength(rows), limit);
-}
-
-/** Sorts definitions by lexical mention count. */
-function mentionCountRows(rows: Row[], limit: number): Row[] {
-  return limitedRows(rankDefinitionRowsByMentions(rows), limit);
 }
 
 /** Orders function definitions by length, mentions, and stable identity. */

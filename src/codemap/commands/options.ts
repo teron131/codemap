@@ -1,6 +1,7 @@
 /** Defines shared CLI options and option parsers. */
 import { type Command, InvalidArgumentError } from "commander";
 
+export const DEFAULT_ROW_LIMIT = 1_000;
 export const PROJECT_ROOT_HELP = "Target project root override. Defaults to the nearest git root.";
 
 /** Adds the shared project-root option to a command parser. */

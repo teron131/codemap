@@ -9,7 +9,7 @@ import {
 } from "../ast-grep/index.js";
 import { resolveProjectRoot } from "../common.js";
 import { callMatches, resolveTargetPaths, searchRuleMatches } from "../search/structural.js";
-import { addProjectRootArgument, parseIntegerOption } from "./options.js";
+import { addProjectRootArgument, DEFAULT_ROW_LIMIT, parseIntegerOption } from "./options.js";
 
 type SearchMatchOptions = {
   projectRoot?: string | undefined;
@@ -65,7 +65,7 @@ export function addSearchCallsParser(command: Command): void {
     .option("--lang <lang>")
     .argument("<name>", "Function or dotted method being called, such as print or console.log.")
     .argument("[paths...]", "Project-relative target paths.")
-    .option("--limit <count>", "Maximum call sites.", parseIntegerOption, 20)
+    .option("--limit <count>", "Maximum call sites.", parseIntegerOption)
     .option("--json")
     .action(
       (name: string, paths: string[], options: Omit<SearchCallsOptions, "name" | "paths">) => {
@@ -137,7 +137,7 @@ export function commandSearchMatch(options: SearchMatchOptions): number {
 
 /** Runs structural call-site search and prints matches. */
 export function commandSearchCalls(options: SearchCallsOptions): number {
-  const limit = options.limit ?? 20;
+  const limit = options.limit ?? DEFAULT_ROW_LIMIT;
   if (!Number.isInteger(limit) || limit < 1) {
     console.log("Call-site limit must be a positive integer.");
     return 2;

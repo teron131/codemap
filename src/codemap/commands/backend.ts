@@ -291,19 +291,15 @@ function renderBackendProjects(value: unknown, currentRoot: string): string {
   );
   const hiddenEphemeral =
     projects.length - otherProjects.length - (currentProject === undefined ? 0 : 1);
-  const shownOthers = otherProjects.slice(0, 8);
   const lines = [
     `CodebaseMemory projects: ${projects.length}${hiddenEphemeral > 0 ? ` (hidden work: ${hiddenEphemeral})` : ""}`,
   ];
   if (currentProject !== undefined) {
     lines.push(`current: ${projectRow(currentProject)}`);
   }
-  if (shownOthers.length > 0) {
+  if (otherProjects.length > 0) {
     lines.push("other projects:");
-    lines.push(...shownOthers.map((project) => `- ${projectRow(project)}`));
-  }
-  if (otherProjects.length > shownOthers.length) {
-    lines.push(`- ... ${otherProjects.length - shownOthers.length} more`);
+    lines.push(...otherProjects.map((project) => `- ${projectRow(project)}`));
   }
   return lines.join("\n");
 }
@@ -463,14 +459,10 @@ function renderBackendChanges(value: unknown): string {
   return lines.join("\n");
 }
 
-/** Appends a bounded list of backend rows. */
+/** Appends backend rows for the shared final-output budget. */
 function appendRows<T>(lines: string[], rows: T[], render: (row: T) => string): void {
-  const shown = rows.slice(0, 20);
-  for (const row of shown) {
+  for (const row of rows) {
     lines.push(`- ${render(row)}`);
-  }
-  if (rows.length > shown.length) {
-    lines.push("- ...");
   }
 }
 

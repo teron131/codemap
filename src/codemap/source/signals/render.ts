@@ -4,9 +4,6 @@ import type { SignalRow } from "./schema.js";
 
 type Row = SignalRow;
 
-const DOCSTRING_REPORT_TEXT_LIMIT = 20;
-const DOCSTRING_DEFINITION_TEXT_LIMIT = 8;
-
 /** Renders selected signal payload sections as text. */
 export function renderSignalText(payload: Record<string, unknown>, section: string): string {
   const lines = [signalTitle(section), ""];
@@ -278,7 +275,7 @@ function appendLengths(lines: string[], lengths: Record<string, unknown>): void 
     lines.push(
       `- ${label}: count=${valueOrDefault(section.count, 0)}, max=${valueOrDefault(section.max, 0)}`,
     );
-    for (const item of items.slice(0, 10)) {
+    for (const item of items) {
       lines.push(`  - ${item.identifier}: ${item.count} lines`);
     }
   }
@@ -333,8 +330,7 @@ function appendDocstrings(lines: string[], payload: Record<string, unknown>): vo
     lines.push("");
     return;
   }
-  const shownReports = reports.slice(0, DOCSTRING_REPORT_TEXT_LIMIT);
-  for (const report of shownReports) {
+  for (const report of reports) {
     const file = String(report.file ?? "");
     const preview = previewText(report.file_docstring_preview);
     lines.push(`- ${file}: file=${preview}`);
@@ -344,11 +340,6 @@ function appendDocstrings(lines: string[], payload: Record<string, unknown>): vo
     appendDefinitionPreviewChildren(lines, arrayValue(report.classes), {
       prefix: "class",
     });
-  }
-  if (reports.length > shownReports.length) {
-    lines.push(
-      `- ... ${reports.length - shownReports.length} more files (use --json for full docstring payload)`,
-    );
   }
   lines.push("");
 }
@@ -406,8 +397,7 @@ function appendDefinitionPreviewChildren(
   rows: Row[],
   { prefix }: { prefix: string },
 ): void {
-  const shownRows = rows.slice(0, DOCSTRING_DEFINITION_TEXT_LIMIT);
-  for (const row of shownRows) {
+  for (const row of rows) {
     const name = String(row.qualified_name ?? row.name ?? "").trim();
     const line = row.line ? `:${row.line}` : "";
     lines.push(`  - ${prefix} ${name}${line}: ${previewText(row.docstring_preview)}`);
@@ -424,20 +414,12 @@ function appendDefinitionPreviewChildren(
       });
     }
   }
-  if (rows.length > shownRows.length) {
-    lines.push(`  - ... ${rows.length - shownRows.length} more ${definitionPlural(prefix)}`);
-  }
 }
 
 /** Formats a compact docstring preview fallback. */
 function previewText(value: unknown): string {
   const text = String(value ?? "").trim();
   return text || "none";
-}
-
-/** Pluralizes one compact definition label for truncated docstring output. */
-function definitionPlural(prefix: string): string {
-  return prefix === "class" ? "classes" : `${prefix}s`;
 }
 
 /** Formats the dense-file counters shared by signals and inspect output. */
