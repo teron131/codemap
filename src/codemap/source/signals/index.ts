@@ -7,8 +7,7 @@ export {
   IDENTIFIER_RE,
   topHubs,
   topInheritanceHubs,
-  usageBucket,
-  usageDistribution,
+  usageBins,
   usageRows,
   variableUsageRows,
 } from "./analysis.js";

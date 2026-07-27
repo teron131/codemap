@@ -1,4 +1,6 @@
 /** Defines shared row shapes for signal payload construction and rendering. */
+import type { NumericStats } from "../../math-utils.js";
+
 export type SignalRow = Record<string, unknown>;
 
 export type SignalLanguage = "python" | "typescript";
@@ -55,11 +57,7 @@ export type FunctionLengthItem = SignalRow & {
   count: number;
 };
 
-export type FunctionLengthSection<TItem extends SignalRow = FunctionLengthItem> = SignalRow & {
-  count: number;
-  median: number;
-  p90: number;
-  max: number;
+export type FunctionLengthSection<TItem extends SignalRow = FunctionLengthItem> = NumericStats & {
   items: TItem[];
 };
 

@@ -5,7 +5,7 @@ import { type FileMetrics, PY_SUFFIXES, TYPESCRIPT_SUFFIXES } from "../scanner/i
 import {
   countIdentifierOccurrences,
   functionUsageRows,
-  usageDistribution,
+  usageBins,
   usageRows,
   variableUsageRows,
 } from "./analysis.js";
@@ -35,16 +35,16 @@ export function metricNames(
   return names;
 }
 
-/** Builds usage distributions and measured definition tables. */
+/** Builds usage bins and measured definition tables. */
 export function buildUsageSection(allFiles: string[], scannedFiles: FileMetrics[]): Row {
   const python = buildLanguageUsageRows(allFiles, scannedFiles, PY_SUFFIXES);
   const typescript = buildLanguageUsageRows(allFiles, scannedFiles, TYPESCRIPT_SUFFIXES);
   return {
-    distribution: {
-      typescript_functions: usageDistribution(typescript.functionRows),
-      typescript_variables: usageDistribution(typescript.variableRows),
-      python_functions: usageDistribution(python.functionRows),
-      python_variables: usageDistribution(python.variableRows),
+    bins: {
+      typescript_functions: usageBins(typescript.functionRows),
+      typescript_variables: usageBins(typescript.variableRows),
+      python_functions: usageBins(python.functionRows),
+      python_variables: usageBins(python.variableRows),
     },
     tables: {
       typescript_function_definitions: typescript.functionDefinitions,

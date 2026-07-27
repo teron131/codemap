@@ -1,6 +1,7 @@
 /** Builds lightweight signal payloads from scan rows when full analysis is unavailable. */
 import path from "node:path";
 
+import { describeNumbers } from "../../math-utils.js";
 import {
   ENTRYPOINT_BASENAMES,
   type FileMetrics,
@@ -61,8 +62,17 @@ export function buildLightweightSignalPayload(
       Number(right.lines ?? 0) - Number(left.lines ?? 0) ||
       compareText(String(left.identifier ?? ""), String(right.identifier ?? "")),
   );
+  const stats = {
+    source: "currentTree",
+    ...(functionRows.length === 0
+      ? {}
+      : {
+          functions: {
+            lines: describeNumbers(functionRows.map((row) => Number(row.lines))),
+          },
+        }),
+  };
   const top = {
-    coverage,
     functionMetrics: functionRows.map((row) => ({
       name: row.name,
       path: row.file,
@@ -73,6 +83,7 @@ export function buildLightweightSignalPayload(
     variablesByNameLength: [],
   };
   return {
+    stats,
     coverage,
     top,
     relationships: {
@@ -104,7 +115,7 @@ export function buildLightweightSignalPayload(
       ),
     },
     usage: {
-      distribution: {},
+      bins: {},
     },
     functions: {
       byLength: { python: pythonFunctions, typescript: typescriptFunctions },

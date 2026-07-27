@@ -29,6 +29,9 @@ export function renderSignalText(payload: Record<string, unknown>, section: stri
       "",
     );
   }
+  if ("stats" in payload) {
+    appendSignalStats(lines, recordValue(payload.stats));
+  }
   if (section === "top") {
     appendTop(lines, payload);
   } else if ("functionMetrics" in payload) {
@@ -47,7 +50,7 @@ export function renderSignalText(payload: Record<string, unknown>, section: stri
     appendRelationships(lines, recordValue(payload.relationships));
   }
   if ("usage" in payload) {
-    appendUsageDistribution(lines, recordValue(payload.usage));
+    appendUsageBins(lines, recordValue(payload.usage));
   }
   if ("docstring_signals" in payload) {
     appendDocstringSignals(lines, recordValue(payload.docstring_signals));
@@ -138,7 +141,7 @@ function functionMetricRankingTitle(rows: Row[]): string {
   return "Function Metrics (backend complexity, then local length fallback)";
 }
 
-/** Appends one compact evidence bucket with one line per source target. */
+/** Appends one compact evidence group with one line per source target. */
 function appendCompactSignalRows(
   lines: string[],
   title: string,
@@ -229,20 +232,18 @@ function appendRelationships(lines: string[], relationships: Record<string, unkn
   lines.push("");
 }
 
-/** Appends usage bucket summaries to text output. */
-function appendUsageDistribution(lines: string[], usage: Record<string, unknown>): void {
-  lines.push("## Usage Distribution");
-  const distribution = recordValue(usage.distribution);
+/** Appends usage-bin summaries to text output. */
+function appendUsageBins(lines: string[], usage: Record<string, unknown>): void {
+  lines.push("## Usage Bins");
+  const binsByMetric = recordValue(usage.bins);
   for (const key of [
     "python_functions",
     "python_variables",
     "typescript_functions",
     "typescript_variables",
   ]) {
-    const buckets = recordValue(distribution[key]);
-    lines.push(
-      `- ${key}: 0-1=${valueOrDefault(buckets["0_1"], 0)}, 2=${valueOrDefault(buckets["2"], 0)}, 3-5=${valueOrDefault(buckets["3_5"], 0)}, 6+=${valueOrDefault(buckets["6_plus"], 0)}`,
-    );
+    const bins = recordValue(binsByMetric[key]);
+    lines.push(`- ${key}: ${binsText(bins) || "none"}`);
   }
   lines.push("");
 }
@@ -303,14 +304,69 @@ function appendLengths(lines: string[], lengths: Record<string, unknown>): void 
     if (items.length === 0) {
       continue;
     }
-    lines.push(
-      `- ${label}: count=${valueOrDefault(section.count, 0)}, max=${valueOrDefault(section.max, 0)}`,
-    );
+    lines.push(`- ${label}: ${numericStatsText(section)}`);
+    const bins = binsText(recordValue(section.bins));
+    if (bins) {
+      lines.push(`  bins: ${bins}`);
+    }
     for (const item of items) {
       lines.push(`  - ${item.identifier}: ${item.count} lines`);
     }
   }
   lines.push("");
+}
+
+/** Appends whole-population statistics before ranked signal rows. */
+function appendSignalStats(lines: string[], stats: Record<string, unknown>): void {
+  const groups = [
+    ["function", recordValue(stats.functions)],
+    ["variable", recordValue(stats.variables)],
+  ] as const;
+  const rows: Array<[string, Record<string, unknown>]> = [];
+  for (const [groupLabel, group] of groups) {
+    for (const [metric, value] of Object.entries(group)) {
+      const metricStats = recordValue(value);
+      if (Object.keys(metricStats).length > 0) {
+        rows.push([`${groupLabel} ${metric}`, metricStats]);
+      }
+    }
+  }
+  if (rows.length === 0) {
+    return;
+  }
+  lines.push("## Statistics");
+  for (const [label, metricStats] of rows) {
+    lines.push(`- ${label}: ${numericStatsText(metricStats)}`);
+    const bins = binsText(recordValue(metricStats.bins));
+    if (bins) {
+      lines.push(`  bins: ${bins}`);
+    }
+  }
+  lines.push("");
+}
+
+/** Formats pandas-like numeric statistics in stable field order. */
+function numericStatsText(stats: Record<string, unknown>): string {
+  return [
+    ["count", stats.count],
+    ["mean", stats.mean],
+    ["std", stats.std],
+    ["min", stats.min],
+    ["p25", stats.p25],
+    ["p50", stats.p50],
+    ["p75", stats.p75],
+    ["p90", stats.p90],
+    ["max", stats.max],
+  ]
+    .map(([key, value]) => `${key}=${numberValue(value)}`)
+    .join(", ");
+}
+
+/** Formats named numeric bins without implying chart output. */
+function binsText(bins: Record<string, unknown>): string {
+  return Object.entries(bins)
+    .map(([label, count]) => `${label}=${numberValue(count)}`)
+    .join(", ");
 }
 
 /** Appends file path rows to text signal output. */
