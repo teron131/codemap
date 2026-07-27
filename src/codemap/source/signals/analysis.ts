@@ -1,6 +1,7 @@
 /** Builds ranked source rows from file metrics and identifier usage. */
 import { readFileSync } from "node:fs";
 
+import { describeNumbers } from "../../math-utils.js";
 import type { FileMetrics, FunctionSpan } from "../scanner/index.js";
 import type {
   DefinitionRow,
@@ -141,33 +142,9 @@ export function buildSignalFocusEntries(
   return entries;
 }
 
-/** Counts usage rows by lexical-mention bucket. */
-export function usageDistribution(rows: DefinitionRow[]): Record<string, number> {
-  const buckets = new Map<string, number>();
-  for (const row of rows) {
-    const bucket = usageBucket(numberValue(row.count));
-    buckets.set(bucket, (buckets.get(bucket) ?? 0) + 1);
-  }
-  return {
-    "0_1": buckets.get("0_1") ?? 0,
-    "2": buckets.get("2") ?? 0,
-    "3_5": buckets.get("3_5") ?? 0,
-    "6_plus": buckets.get("6_plus") ?? 0,
-  };
-}
-
-/** Maps a lexical-mention count to a usage distribution bucket. */
-export function usageBucket(count: number): string {
-  if (count <= 1) {
-    return "0_1";
-  }
-  if (count === 2) {
-    return "2";
-  }
-  if (count <= 5) {
-    return "3_5";
-  }
-  return "6_plus";
+/** Counts usage rows by lexical-mention bin. */
+export function usageBins(rows: DefinitionRow[]): Record<string, number> {
+  return describeNumbers(rows.map((row) => numberValue(row.count))).bins;
 }
 
 /** Counts identifier occurrences across source files. */
@@ -283,19 +260,8 @@ export function functionLengthSection(items: FunctionSpan[]): FunctionLengthSect
       compareText(String(left.identifier), String(right.identifier)),
   );
   const counts = rows.map((row) => numberValue(row.count));
-  if (counts.length === 0) {
-    return { count: 0, median: 0, p90: 0, max: 0, items: [] };
-  }
-  const sortedCounts = counts.slice().sort((left, right) => left - right);
-  const p90Index = Math.max(
-    0,
-    Math.min(sortedCounts.length - 1, Math.floor((sortedCounts.length * 9 + 9) / 10) - 1),
-  );
   return {
-    count: rows.length,
-    median: sortedCounts[Math.floor(sortedCounts.length / 2)] ?? 0,
-    p90: sortedCounts[p90Index] ?? 0,
-    max: sortedCounts.at(-1) ?? 0,
+    ...describeNumbers(counts),
     items: rows,
   };
 }

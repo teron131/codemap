@@ -49,7 +49,7 @@ New default rankings should expose a distinct measurable relationship rather tha
 - Exported definitions with weak usage evidence, clearly labeled as leads rather than dead-code proof.
 - Intersections between existing measurements, such as complex functions in dense files, when the intersection removes noise rather than merely restating both lists.
 
-A new bucket earns default placement only when its ranking is stable, its criteria are interpretable, and live output remains useful under the shared final-output ceiling. Otherwise it belongs in an explicit detailed section.
+A new ranking earns default placement only when its ordering is stable, its criteria are interpretable, and live output remains useful under the shared final-output ceiling. Otherwise it belongs in an explicit detailed section.
 
 ### Search Quality
 
@@ -81,6 +81,8 @@ The current lock and child-supervision machinery is containment for an unreliabl
 Additional fields should improve ranking, interpretation, or verification. Provider metadata, duplicate labels, verbose explanations, and values that do not change an agent's next inspection should stay out of normal output.
 
 Provider-derived fields must retain their upstream meaning, while Codemap-derived fields must be identifiable from the owning command or skill. Composite ranking scores should remain internal unless they become independently interpretable evidence rather than merely ordering machinery.
+
+Add automatic pandas-like statistics only to homogeneous numeric populations already owned by a command. Use `count`, `mean`, sample `std`, `min`, `p25`, `p50`, `p75`, `p90`, `max`, and data-derived `bins`, computed before final presentation truncation. Bin ranges must adapt from the observed extent through one shared heuristic: Sturges-sized, at most ten equal-width ranges, with no metric-specific thresholds. Do not summarize arbitrary numeric fields such as source line numbers, and do not treat a backend top-N result as a population. Bounded scans must keep their coverage explicit.
 
 Text and JSON do not need artificial parity everywhere. Row-oriented commands may support both from one normalized shape; composed orientation and inspection may remain text-only when a second public structure would add maintenance without improving use.
 

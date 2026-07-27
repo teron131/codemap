@@ -1,4 +1,5 @@
 /** Builds JSON signal payload sections for CLI output. */
+import { describeNumbers } from "../../math-utils.js";
 import { PY_SUFFIXES, TYPESCRIPT_SUFFIXES } from "../scanner/index.js";
 import { isGeneratedSignalPath, isTestPath } from "./policy.js";
 import type { FunctionLengthSection, LanguageRows, SignalRow } from "./schema.js";
@@ -10,11 +11,6 @@ type SignalExport = {
 };
 
 type Row = SignalRow;
-type TopSignalPayload = {
-  functionMetrics: Row[];
-  functionsByMentions: Row[];
-  variablesByNameLength: Row[];
-};
 
 /** Selects and shapes signal sections for JSON output. */
 export function buildSignalPayload(
@@ -37,19 +33,48 @@ export function buildSignalPayload(
       includeTests,
     }),
   };
+  const functions = functionPayload(usageTables, { includeTests });
+  const variables = variablePayload(usageTables, { includeTests });
   const payload: Record<string, unknown> = {
     relationships: sections.relationships ?? {},
     files: fileRows,
     lengths: lengthRows,
-    usage: { distribution: recordValue(usage.distribution) },
-    functions: functionPayload(usageTables, { includeTests }),
-    variables: variablePayload(usageTables, { includeTests }),
+    usage: { bins: recordValue(usage.bins) },
+    functions,
+    variables,
   };
   if ("docstring_signals" in sections) {
     payload.docstring_signals = sections.docstring_signals ?? {};
   }
+
+  const functionRows = languageRows(recordValue(functions.byMentions));
+  const variableRows = arrayValue(variables.byNameLength);
+  const stats = {
+    source: "currentTree",
+    ...(functionRows.length === 0
+      ? {}
+      : {
+          functions: {
+            lines: describeNumbers(functionRows.map((row) => Number(row.lines))),
+            mentions: describeNumbers(functionRows.map((row) => Number(row.count))),
+          },
+        }),
+    ...(variableRows.length === 0
+      ? {}
+      : {
+          variables: {
+            characters: describeNumbers(variableRows.map((row) => String(row.name ?? "").length)),
+            mentions: describeNumbers(variableRows.map((row) => Number(row.count))),
+          },
+        }),
+  };
   return {
-    top: topPayload(payload),
+    stats,
+    top: {
+      functionMetrics: compactFunctionMetricRows(languageRows(recordValue(functions.byLength))),
+      functionsByMentions: compactFunctionMentionRows(functionRows),
+      variablesByNameLength: compactVariableNameLengthRows(variableRows),
+    },
     ...payload,
   };
 }
@@ -126,19 +151,8 @@ function lengthSection(
   { includeTests }: { includeTests: boolean },
 ): FunctionLengthSection<Row> {
   const rows = fileScopedRows(arrayValue(section.items), { includeTests });
-  const counts = rows.map((row) => Number(row.count ?? 0)).sort((a, b) => a - b);
-  if (counts.length === 0) {
-    return { count: 0, median: 0, p90: 0, max: 0, items: [] };
-  }
-  const p90Index = Math.max(
-    0,
-    Math.min(counts.length - 1, Math.floor((counts.length * 9 + 9) / 10) - 1),
-  );
   return {
-    count: rows.length,
-    median: counts[Math.floor(counts.length / 2)] ?? 0,
-    p90: counts[p90Index] ?? 0,
-    max: counts.at(-1) ?? 0,
+    ...describeNumbers(rows.map((row) => Number(row.count ?? 0))),
     items: rows,
   };
 }
@@ -159,19 +173,6 @@ function rowFile(row: Row): string {
   }
   const identifier = String(row.identifier ?? "");
   return identifier.split("::", 1)[0] ?? "";
-}
-
-/** Builds the top-signal payload section for summary output. */
-function topPayload(payload: Record<string, unknown>): TopSignalPayload {
-  const functions = recordValue(payload.functions);
-  const variables = recordValue(payload.variables);
-  return {
-    functionMetrics: compactFunctionMetricRows(languageRows(recordValue(functions.byLength))),
-    functionsByMentions: compactFunctionMentionRows(
-      languageRows(recordValue(functions.byMentions)),
-    ),
-    variablesByNameLength: compactVariableNameLengthRows(arrayValue(variables.byNameLength)),
-  };
 }
 
 /** Compacts locally ranked function metrics for backend fallback. */
@@ -271,7 +272,13 @@ export function selectPayloadSection(
     return Object.fromEntries(Object.entries(payload).filter(([key]) => key !== "top"));
   }
   if (section === "top") {
-    return recordValue(payload.top);
+    const stats = recordValue(payload.stats);
+    const coverage = recordValue(payload.coverage);
+    return {
+      ...(Object.keys(stats).length === 0 ? {} : { stats }),
+      ...(Object.keys(coverage).length === 0 ? {} : { coverage }),
+      ...recordValue(payload.top),
+    };
   }
   const key = payloadKeyForSection(section);
   const coverage = recordValue(payload.coverage);

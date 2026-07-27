@@ -48,18 +48,18 @@ codemap signals --project-root <path>
 The compact JSON surface contains the same facts:
 
 ```sh
-codemap signals --json --project-root <path> | jq '{functionMetrics, functionsByMentions, variablesByNameLength}'
+codemap signals --json --project-root <path> | jq '{stats, functionMetrics, functionsByMentions, variablesByNameLength}'
 ```
 
-The three default buckets describe their ordering criteria directly:
+The three default rankings describe their ordering criteria directly:
 
 - `functionMetrics`: backend rows ordered by cognitive complexity, cyclomatic complexity, and source length; current-tree fallback rows are ordered by length and mentions when available.
 - `functionsByMentions`: all scanned function definitions ordered by lexical mentions ascending, then source length ascending.
 - `variablesByNameLength`: all scanned variable definitions ordered by identifier length descending, then lexical mentions ascending.
 
-Rows are sorted before the shared final-output budget is applied; there is no separate per-bucket presentation cap. Generated paths and tests are omitted by default, but the ranking does not classify a long, rarely mentioned, or verbose definition as defective.
+Population statistics precede the ranked rows: `count`, `mean`, sample `std`, `min`, `p25`, `p50`, `p75`, `p90`, `max`, and automatically sized `bins` spanning each observed population. They are computed from complete current-tree function and variable rows before the shared final-output budget is applied. Backend top-function samples enrich rankings but never stand in for a population. Generated paths and tests are omitted by default, and the ranking does not classify a long, rarely mentioned, or verbose definition as defective.
 
-Above the detailed-graph threshold, signals remain available through a bounded current-tree pass over the 100 largest eligible source files. Text and JSON report the parsed and eligible file counts. This preserves function-length and file evidence without claiming full-repository relationship or lexical-mention coverage. Above 10,000 eligible files, default signals skip backend metric enrichment; use explicit backend commands when that graph cost is justified.
+Above the detailed-graph threshold, signals remain available through a bounded current-tree pass over the 100 largest eligible source files. Text and JSON report the parsed and eligible file counts, and statistics describe only the parsed rows. This preserves function-length and file evidence without claiming full-repository relationship or lexical-mention coverage. Above 10,000 eligible files, default signals skip backend metric enrichment; use explicit backend commands when that graph cost is justified.
 
 Function metric fields use compact standard names: `cognitive` is a unitless control-flow measurement that rises with nesting and branching; `cyclomatic` approximates independent control-flow paths; `lines` is the physical function span; and JSON's `linearScanInLoop` (rendered as `linear_scan_in_loop` in readable text) counts detected scan sites such as `find`, `filter`, or `some` inside loops. These are sorting facts, not correctness findings. A scan site may operate on a bounded collection, so it is not proof of a performance problem.
 
