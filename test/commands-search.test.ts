@@ -1,4 +1,5 @@
 /** Checks search command handler output and backend search fallback status. */
+import { spawnSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
@@ -83,7 +84,7 @@ describe("search command handler", () => {
     expect(logLines()).toEqual(["src/calls.ts:2:1: console.log( ..."]);
   });
 
-  it("bounds default call-site output", async () => {
+  it("keeps default call-site rows for the shared output boundary", async () => {
     writeFileSync(
       path.join(workDir, "src", "many-calls.ts"),
       Array.from({ length: 25 }, (_, index) => `helper(${index});`).join("\n"),
@@ -104,11 +105,11 @@ describe("search command handler", () => {
     ).resolves.toBe(0);
 
     const output = logLines();
-    expect(output).toHaveLength(21);
-    expect(output.at(-1)).toBe("... 5 more call sites");
+    expect(output).toHaveLength(25);
+    expect(output.at(-1)).toContain("helper(24)");
   });
 
-  it("keeps call-site totals in bounded JSON output", async () => {
+  it("keeps call-site totals in JSON output", async () => {
     writeFileSync(
       path.join(workDir, "src", "many-calls.ts"),
       Array.from({ length: 25 }, (_, index) => `helper(${index});`).join("\n"),
@@ -131,8 +132,37 @@ describe("search command handler", () => {
 
     const payload = JSON.parse(logLines().join(""));
     expect(payload.total).toBe(25);
-    expect(payload.matches).toHaveLength(20);
+    expect(payload.matches).toHaveLength(25);
     expect(payload.matches[0]).toMatchObject({ engine: "ast-grep" });
+  });
+
+  it("applies one final text budget after collecting default call sites", () => {
+    writeFileSync(
+      path.join(workDir, "src", "many-calls.ts"),
+      Array.from({ length: 1_200 }, (_, index) => `helper(${index});`).join("\n"),
+      "utf8",
+    );
+
+    const result = spawnSync(
+      "pnpm",
+      [
+        "exec",
+        "tsx",
+        "src/codemap/cli.ts",
+        "search",
+        "calls",
+        "--project-root",
+        workDir,
+        "helper",
+        "src/many-calls.ts",
+      ],
+      { cwd: workspaceRoot, encoding: "utf8" },
+    );
+
+    expect(result.status).toBe(0);
+    expect(Buffer.byteLength(result.stdout, "utf8")).toBeLessThanOrEqual(30_000);
+    expect(result.stdout).toContain("helper(20)");
+    expect(result.stdout).toContain("... output truncated:");
   });
 
   it("rejects nonpositive call-site limits", async () => {

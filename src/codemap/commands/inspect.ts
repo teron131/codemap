@@ -8,7 +8,7 @@ import {
   renderCodebaseMemoryInspect,
   renderCurrentTreeInspection,
 } from "../source/inspection/index.js";
-import { addProjectRootArgument, parseIntegerOption } from "./options.js";
+import { addProjectRootArgument, DEFAULT_ROW_LIMIT, parseIntegerOption } from "./options.js";
 
 type InspectOptions = {
   projectRoot?: string;
@@ -27,7 +27,7 @@ export function addInspectParser(program: Command): void {
     .command("inspect")
     .description("Inspect one known file, function, class, variable, or symbol target.")
     .argument("<target>")
-    .option("--limit <count>", "Maximum rows per section.", parseIntegerOption, 8)
+    .option("--limit <count>", "Maximum rows per section.", parseIntegerOption)
     .option("--backend", "Use Codebase Memory backend inspection only.")
     .option("--local", "Use current-tree local inspection only.")
     .action((target: string, options: InspectOptions) => {
@@ -84,8 +84,8 @@ export function commandInspect(
 /** Parses the inspect output limit option. */
 function inspectLimit(value: string | number | undefined): number {
   if (value === undefined) {
-    return 8;
+    return DEFAULT_ROW_LIMIT;
   }
   const parsed = typeof value === "number" ? value : Number.parseInt(String(value), 10);
-  return Number.isNaN(parsed) ? 8 : parsed;
+  return Number.isNaN(parsed) ? DEFAULT_ROW_LIMIT : parsed;
 }

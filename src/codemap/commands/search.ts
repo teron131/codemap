@@ -19,7 +19,7 @@ import {
 } from "../search/index.js";
 import { runScan } from "../source/extraction/index.js";
 import { currentTreeGraph } from "../source/graph/index.js";
-import { addProjectRootArgument, parseIntegerOption } from "./options.js";
+import { addProjectRootArgument, DEFAULT_ROW_LIMIT, parseIntegerOption } from "./options.js";
 import {
   addSearchCallsParser,
   addSearchMatchParser,
@@ -275,8 +275,8 @@ function backendOutputOptions(options: SearchOptions): {
 /** Parses the search result limit option. */
 function searchLimit(value: string | number | undefined): number {
   if (value === undefined) {
-    return 5;
+    return DEFAULT_ROW_LIMIT;
   }
   const parsed = typeof value === "number" ? value : Number.parseInt(String(value), 10);
-  return Number.isNaN(parsed) ? 5 : parsed;
+  return Number.isNaN(parsed) ? DEFAULT_ROW_LIMIT : parsed;
 }

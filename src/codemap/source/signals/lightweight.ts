@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { ENTRYPOINT_BASENAMES, scanFile } from "../scanner/index.js";
 import { fileProfileRow } from "./analysis.js";
-import { isGeneratedSignalPath, isTestPath, SIGNAL_OUTPUT_ROW_LIMIT } from "./policy.js";
+import { isGeneratedSignalPath, isTestPath } from "./policy.js";
 import type { DenseFileRow, FunctionLengthSection, SignalRow } from "./schema.js";
 
 export type LightweightSignalFile = {
@@ -19,7 +19,7 @@ type LightweightSignalPayloadOptions = {
 };
 
 const LIGHTWEIGHT_SIGNAL_LANGUAGES = new Set(["javascript", "jsx", "python", "tsx", "typescript"]);
-/** Limits syntax parsing independently from the larger display overflow cap. */
+/** Limits syntax parsing independently from final output budgeting. */
 const LIGHTWEIGHT_SIGNAL_ENRICHMENT_LIMIT = 4;
 /** Builds a compact signal payload when full analysis is absent. */
 export function buildLightweightSignalPayload(
@@ -85,7 +85,6 @@ function buildLightweightDenseFiles(
         -Number(left.sizeLines ?? 0) - -Number(right.sizeLines ?? 0) ||
         compareText(left.path, right.path),
     )
-    .slice(0, SIGNAL_OUTPUT_ROW_LIMIT)
     .map((entry, index) =>
       buildLightweightSignalRow(entry, {
         root,

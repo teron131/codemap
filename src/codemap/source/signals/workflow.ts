@@ -11,12 +11,7 @@ import { runScan } from "../extraction/index.js";
 import { buildSignalExport, runSignalsExport } from "./build.js";
 import { buildLightweightSignalPayload } from "./lightweight.js";
 import { buildSignalPayload, selectPayloadSection } from "./payload.js";
-import {
-  isGeneratedSignalPath,
-  isTestPath,
-  SIGNAL_OUTPUT_ROW_LIMIT,
-  SIGNAL_TOP_ROW_LIMIT,
-} from "./policy.js";
+import { isGeneratedSignalPath, isTestPath } from "./policy.js";
 
 type SignalViewOptions = {
   includeTests?: boolean;
@@ -28,8 +23,7 @@ type BackendFunctionMetrics = {
 };
 
 const BACKEND_FUNCTION_METRICS_QUERY = [
-  "MATCH (f)",
-  "WHERE (f:Function OR f:Method)",
+  "MATCH (f:Function)",
   "RETURN f.name AS name, f.file_path AS file_path, f.start_line AS start_line, f.lines AS lines, f.complexity AS complexity, f.cognitive AS cognitive, f.linear_scan_in_loop AS linear_scan_in_loop, f.is_test AS is_test",
   "ORDER BY coalesce(f.cognitive, 0) DESC, coalesce(f.complexity, 0) DESC, coalesce(f.lines, 0) DESC, f.file_path, f.name",
 ].join(" ");
@@ -44,7 +38,7 @@ const BACKEND_FUNCTION_METRICS_COLUMNS = [
   "linear_scan_in_loop",
   "is_test",
 ];
-const BACKEND_FUNCTION_METRICS_QUERY_LIMIT = SIGNAL_TOP_ROW_LIMIT * 5;
+const BACKEND_FUNCTION_METRICS_QUERY_LIMIT = 100;
 
 /** Builds the selected signal payload with backend metrics layered over local evidence. */
 export function buildSignalView(
@@ -58,7 +52,7 @@ export function buildSignalView(
   });
 }
 
-/** Adds bounded backend function metrics to compact top output. */
+/** Adds backend function metrics to compact top output. */
 function addBackendFunctionMetrics(
   payload: Record<string, unknown>,
   section: string,
@@ -96,10 +90,7 @@ function mergedFunctionMetrics(
   if (backend.freshness === "fresh") {
     return backend.rows;
   }
-  const rows = backend.rows.slice(0, SIGNAL_TOP_ROW_LIMIT);
-  if (rows.length >= SIGNAL_TOP_ROW_LIMIT) {
-    return rows;
-  }
+  const rows = backend.rows.slice();
   const seen = new Set(rows.map(functionMetricKey));
   for (const row of localRows) {
     const key = functionMetricKey(row);
@@ -108,9 +99,6 @@ function mergedFunctionMetrics(
     }
     seen.add(key);
     rows.push(row);
-    if (rows.length >= SIGNAL_TOP_ROW_LIMIT) {
-      break;
-    }
   }
   return rows;
 }
@@ -140,8 +128,7 @@ function backendFunctionMetrics(
   const rows = queryRows
     .map((row) => functionMetricRow(root, row, { includeTests }))
     .filter((row) => row !== null)
-    .sort(compareFunctionMetrics)
-    .slice(0, SIGNAL_TOP_ROW_LIMIT);
+    .sort(compareFunctionMetrics);
   return {
     freshness: result.freshness === "partial" ? "partial" : "fresh",
     rows,
@@ -232,7 +219,6 @@ function buildCurrentTreeSignalPayload(
     throw new Error(`Signals unavailable: ${String(signalExport.message ?? "unknown error")}`);
   }
   const payload = buildSignalPayload(signalExport, {
-    limit: SIGNAL_OUTPUT_ROW_LIMIT,
     includeTests: Boolean(options.includeTests),
   });
   if (section === "all") {
