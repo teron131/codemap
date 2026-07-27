@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 
 import {
+  codebaseMemoryFailureReason,
   codebaseMemoryQueryRows,
   codebaseMemoryQueryWithProject,
 } from "../../codebase-memory/index.js";
@@ -11,7 +12,7 @@ import { runScan } from "../extraction/index.js";
 import { buildSignalExport, runSignalsExport } from "./build.js";
 import { buildLightweightSignalPayload } from "./lightweight.js";
 import { buildSignalPayload, selectPayloadSection } from "./payload.js";
-import { isGeneratedSignalPath, isTestPath } from "./policy.js";
+import { isGeneratedSignalPath, isSupportedSignalPath, isTestPath } from "./policy.js";
 
 type SignalViewOptions = {
   includeTests?: boolean;
@@ -19,14 +20,9 @@ type SignalViewOptions = {
 
 type BackendFunctionMetrics = {
   freshness: "fresh" | "partial" | "degraded";
+  reason: string | null;
   rows: Record<string, unknown>[];
 };
-
-const BACKEND_FUNCTION_METRICS_QUERY = [
-  "MATCH (f:Function)",
-  "RETURN f.name AS name, f.file_path AS file_path, f.start_line AS start_line, f.lines AS lines, f.complexity AS complexity, f.cognitive AS cognitive, f.linear_scan_in_loop AS linear_scan_in_loop, f.is_test AS is_test",
-  "ORDER BY coalesce(f.cognitive, 0) DESC, coalesce(f.complexity, 0) DESC, coalesce(f.lines, 0) DESC, f.file_path, f.name",
-].join(" ");
 
 const BACKEND_FUNCTION_METRICS_COLUMNS = [
   "name",
@@ -38,7 +34,8 @@ const BACKEND_FUNCTION_METRICS_COLUMNS = [
   "linear_scan_in_loop",
   "is_test",
 ];
-const BACKEND_FUNCTION_METRICS_QUERY_LIMIT = 100;
+const BACKEND_FUNCTION_METRICS_LIMIT = 100;
+const BACKEND_FUNCTION_METRICS_FILE_LIMIT = 10_000;
 
 /** Builds the selected signal payload with backend metrics layered over local evidence. */
 export function buildSignalView(
@@ -62,32 +59,38 @@ function addBackendFunctionMetrics(
   if (section !== "top" && section !== "all") {
     return payload;
   }
+  const coverage = recordValue(payload.coverage);
+  if (numericField(coverage.eligibleFiles) > BACKEND_FUNCTION_METRICS_FILE_LIMIT) {
+    return {
+      ...payload,
+      backendStatus: "skipped",
+      backendReason: `eligible source files exceed ${BACKEND_FUNCTION_METRICS_FILE_LIMIT}`,
+    };
+  }
   const backend = backendFunctionMetrics(root, { includeTests });
   if (section === "top") {
     const functionMetrics = mergedFunctionMetrics(backend, arrayValue(payload.functionMetrics));
     return {
       ...payload,
       freshness: backend.freshness,
+      ...(backend.reason === null ? {} : { backendReason: backend.reason }),
       functionMetrics,
     };
   }
-  const top = recordValue(payload.top);
   return {
     ...payload,
     freshness: backend.freshness,
-    top: {
-      ...top,
-      functionMetrics: mergedFunctionMetrics(backend, arrayValue(top.functionMetrics)),
-    },
+    ...(backend.reason === null ? {} : { backendReason: backend.reason }),
+    functionMetrics: backend.rows,
   };
 }
 
-/** Keeps local metrics on degraded or partial indexes without duplicate rows. */
+/** Fills filtered, partial, or degraded backend rows with distinct current-tree metrics. */
 function mergedFunctionMetrics(
   backend: BackendFunctionMetrics,
   localRows: Record<string, unknown>[],
 ): Record<string, unknown>[] {
-  if (backend.freshness === "fresh") {
+  if (backend.freshness === "fresh" && backend.rows.length >= BACKEND_FUNCTION_METRICS_LIMIT) {
     return backend.rows;
   }
   const rows = backend.rows.slice();
@@ -116,24 +119,40 @@ function backendFunctionMetrics(
   const result = codebaseMemoryQueryWithProject(
     root,
     BACKEND_FUNCTION_METRICS_QUERY,
-    BACKEND_FUNCTION_METRICS_QUERY_LIMIT,
+    BACKEND_FUNCTION_METRICS_LIMIT,
   );
   if (result === null) {
-    return { freshness: "degraded", rows: [] };
+    return {
+      freshness: "degraded",
+      reason: codebaseMemoryFailureReason(root),
+      rows: [],
+    };
   }
   const queryRows = codebaseMemoryQueryRows(result.value, BACKEND_FUNCTION_METRICS_COLUMNS);
   if (queryRows === null) {
-    return { freshness: "degraded", rows: [] };
+    return {
+      freshness: "degraded",
+      reason: "Codebase Memory returned an unknown function-metrics payload.",
+      rows: [],
+    };
   }
   const rows = queryRows
     .map((row) => functionMetricRow(root, row, { includeTests }))
     .filter((row) => row !== null)
-    .sort(compareFunctionMetrics);
+    .sort(compareFunctionMetrics)
+    .slice(0, BACKEND_FUNCTION_METRICS_LIMIT);
   return {
     freshness: result.freshness === "partial" ? "partial" : "fresh",
+    reason: null,
     rows,
   };
 }
+
+const BACKEND_FUNCTION_METRICS_QUERY = [
+  "MATCH (f:Function)",
+  "RETURN f.name AS name, f.file_path AS file_path, f.start_line AS start_line, f.lines AS lines, f.complexity AS complexity, f.cognitive AS cognitive, f.linear_scan_in_loop AS linear_scan_in_loop, f.is_test AS is_test",
+  "ORDER BY coalesce(f.cognitive, 0) DESC, coalesce(f.complexity, 0) DESC, coalesce(f.lines, 0) DESC, f.file_path, f.name",
+].join(" ");
 
 /** Compacts one backend function row after verifying its current source path. */
 function functionMetricRow(
@@ -147,6 +166,7 @@ function functionMetricRow(
     return null;
   }
   if (
+    !isSupportedSignalPath(filePath) ||
     isGeneratedSignalPath(filePath) ||
     (!includeTests && (booleanField(row.is_test) || isTestPath(filePath)))
   ) {

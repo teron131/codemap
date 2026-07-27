@@ -7,7 +7,7 @@ description: Navigate and scope Python and TypeScript/JavaScript repositories, i
 
 Use Codemap to navigate and scope Python or TypeScript/JavaScript changes. Prefer compact readable output for agent work; use normalized JSON only on stable row surfaces such as `signals`, `search calls`, `search match`, and `search rule`. Every command applies one final conservative 10,000-token stdout ceiling; text reports truncation inline, while JSON remains valid for `jq` and reports truncation on stderr.
 
-Graph-backed commands serialize by project root, clear the matching operational cache entry, index once with `persistence: false`, and reuse that snapshot within the operation. Codemap does not write persistent graph data into the inspected repository. Local `rg`, ast-grep, and current-tree evidence remain independently verifiable fallbacks.
+Graph-backed commands serialize by project root, clear the matching operational cache entry, index once with `persistence: false`, and reuse that snapshot within the operation. Codemap does not write persistent graph data into the inspected repository. It preserves an explicit `CBM_CACHE_DIR` and otherwise falls back to a private OS temporary cache when the normal user cache is unwritable. Local `rg`, ast-grep, and current-tree evidence remain independently verifiable fallbacks.
 
 ## Orient Before Substantial Work
 
@@ -25,7 +25,7 @@ codemap search --graph --project-root <path> "<concept>"
 codemap search --semantic --project-root <path> "<concept>"
 ```
 
-Use default search for paths, exact names, and ordinary concepts. Path-shaped queries resolve from the current tree without indexing; other queries use backend-ranked matches and fall back to local ast-grep plus fixed-string, case-insensitive `rg`.
+Use default search for paths, exact names, and ordinary concepts. Paths and exact symbol definitions resolve from the current tree without indexing; other queries use backend-ranked matches and fall back to local ast-grep plus fixed-string, case-insensitive `rg`. Likely test rows are omitted across backend and local evidence unless `--include-tests` is set.
 
 Use `--graph` when the result needs BM25-ranked relationship context. Add graph filters only in this lane:
 
@@ -73,7 +73,7 @@ codemap signals --json --project-root <path> | jq '{functionMetrics, functionsBy
 
 Start with the default. Codemap sorts all measured rows before the shared final-output budget is applied; categories do not have separate presentation caps.
 
-- `functionMetrics`: backend rows sort by cognitive complexity, cyclomatic complexity, and length; current-tree fallback rows sort by length and mentions.
+- `functionMetrics`: backend rows sort by cognitive complexity, cyclomatic complexity, and length; current-tree fallback rows sort by length and mentions when available.
 - `functionsByMentions`: all function definitions sort by lexical mentions ascending, then length ascending.
 - `variablesByNameLength`: all variable definitions sort by identifier length descending, then lexical mentions ascending.
 
@@ -87,6 +87,8 @@ Interpret compact fields directly:
 
 Upstream metrics remain provider facts. Fresh `functionMetrics` uses backend rows; partial results fill remaining capacity with distinct current-tree rows; degraded results use current-tree rows. Mention and name-length rankings always come from the current tree. The rows describe ordering criteria, not refactor instructions.
 
+Above the detailed-graph threshold, the fallback scans the 100 largest eligible source files and reports parsed versus eligible file counts. Treat its function-length and file rows as bounded current-tree evidence; relationship and mention coverage are not complete. Above 10,000 eligible files, default signals skip backend metric enrichment; use explicit backend commands only when that graph cost is justified.
+
 Open a detailed lane only when the default points there:
 
 ```sh
@@ -97,7 +99,7 @@ codemap signals --project-root <path> <section>
 - `files` or `lengths`: density and size measurements.
 - `functions`, `variables`, or `usage`: definition and lexical-usage tables.
 - `docstring-signals` or `docstrings`: documentation coverage or full docstring rows.
-- `all`: every section only when a broad audit justifies the larger output.
+- `all`: every detailed section plus provider function metrics, without repeating the compact `top` projection.
 
 Detailed row surfaces filter generated or bundled paths where source-specific and use the same final-output budget. Add `--include-tests` only when tests are the target. Text and JSON expose the same normalized facts; compact JSON is intended for `jq` and pipelines.
 
