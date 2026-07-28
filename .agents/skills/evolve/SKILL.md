@@ -5,108 +5,54 @@ description: Improve Codemap through realistic agent use, compact output design,
 
 # Evolve Codemap
 
-Act as Codemap's user and owner. Find one material friction point, improve it under the settled philosophy, and try to falsify the result on real repositories.
+Use Codemap as its user and owner. Find one material friction point, make the smallest useful improvement, and try to disprove it on real repositories.
 
-## Loop
+## Workflow
 
-1. Read `README.md`, `docs/IDEAS.md`, `skills/codemap/SKILL.md`, and only the source and tests relevant to the behavior.
-2. Use the public commands on a real navigation, diagnosis, or refactor task before inspecting their implementation.
-3. Notice where Codemap hides the useful target, requires unnecessary follow-up reads, prints useless data, obscures freshness or coverage, fails without the backend, or spends too much time or context.
-4. Choose the smallest coherent change that most improves the agent's next action. Do not wait for the user to prescribe its details.
-5. State the intended public behavior and what evidence would disprove it.
-6. Implement, test, review the whole diff, and stop after one proven high-leverage slice.
+1. Read `README.md`, `docs/IDEAS.md`, `skills/codemap/SKILL.md`, and only the relevant source and tests.
+2. Choose a realistic agent task with a source-verified expected next target.
+3. Run the public workflow before reading its implementation. Record where it hides the target, wastes time or context, obscures evidence, or fails under degradation.
+4. Compare only the affected current-tree, Codebase Memory code, graph, semantic, or structural lanes.
+5. State the intended public behavior, one control that must remain true, and evidence that would reject the change.
+6. Implement one coherent slice at the owning boundary, rerun the same cases, review the whole diff, and stop when the slice is proven.
 
-Prefer:
+## Choose Evidence by Risk
 
-- Current-tree correctness.
-- Useful targets appearing earlier.
-- Clear evidence source, freshness, scope, and truncation.
-- Compact defaults that lead naturally to one focused inspection.
-- Useful local evidence when Codebase Memory is unavailable or partial.
-- Deterministic and explainable ordering.
+Use the smallest matrix that can falsify the change:
 
-Avoid:
+- A toy repository with one obvious answer.
+- One normal repository in the affected language.
+- A second language only for shared extraction, ranking, or rendering.
+- A large or mixed repository only for latency, bounds, traversal order, or truncation.
+- Codemap itself when self-hosting is a useful control.
 
-- More output or fields because they are available.
-- Metrics that restate existing rankings.
-- Opaque composite scores.
-- Provider payloads in public contracts.
-- Repository-specific thresholds presented as generic behavior.
-- New persistence or lifecycle machinery without measured need.
-- New languages supported only by file extension.
-- New public formats without a measured agent-use advantage.
+Use Transformers, LangChain Python, LangChain JS, OpenClaw, and Hermes Agent as a candidate pool, not a checklist. Substitute freely when the task still has an independently verifiable answer. Expand only when results disagree or the change crosses language, backend, lifecycle, or output-format boundaries.
 
-## Keep Ownership Clear
+For each case, keep one compact record: task, expected target, affected lanes, falsifier, first useful target and rank, evidence mix, output size, elapsed time, freshness, and next action. Add one adversarial case discovered during the work.
+
+Run special probes only when relevant: disable the backend for fallback work; add, edit, rename, and delete toy code for lifecycle work; parse JSON directly and with `jq`; run the installed command outside the repository when the executable or companion skill changes.
+
+## Judge the Change
+
+Prefer current-tree correctness and freshness, earlier useful targets, explicit provenance and coverage, deterministic ordering, compact defaults, and useful degraded behavior. Do not assume one evidence lane should always rank first.
+
+Reject changes that add noise, opaque scores, provider payloads, repository-specific policy, unmeasured lifecycle machinery, extension-only language support, or new formats without changing the agent's next action. Revise changes that work only on one repository, hide evidence behind truncation, misstate freshness, break JSON, or suppress useful fallback results.
+
+## Keep Boundaries Clear
 
 - Keep Codebase Memory transport, refresh, serialization, and generic validation in `src/codemap/codebase-memory`.
-- Keep provider arguments, projection, eligibility, ranking, fallback, composition, and rendering with the owning feature.
-- Centralize policy only when it applies across commands. Keep work limits local to the expensive operation they bound.
-- Keep executable output factual. Put usage and interpretation in `skills/codemap/SKILL.md`, public behavior in `README.md`, and durable decisions in `docs/IDEAS.md`.
-- Replace changed surfaces directly; do not retain compatibility aliases or duplicate contracts.
+- Keep provider arguments, eligibility, ranking, fallback, composition, and rendering with the owning feature.
+- Keep work bounds local to the expensive operation. Centralize only shared policy.
+- Change the full public boundary when needed: parser, implementation, renderer, exports, docs, skill, and public tests.
+- Keep executable output factual and compact. Put usage in `skills/codemap/SKILL.md`, public behavior in `README.md`, and durable decisions in `docs/IDEAS.md`.
+- Preserve the established output and truncation contracts. Do not duplicate detailed product rules here.
 
-## Keep Output Useful and Small
+## Log the Work
 
-Use compact readable text for agents. Use minified object-row JSON only for stable surfaces that benefit from `jq` or scripts.
+Keep a concise `LOGBOOK.md` while evolving Codemap. Record material tasks, expectations, evidence, decisions, results, edge cases, limitations, and verification. Do not dump raw command transcripts or repeated probes.
 
-For every command:
+## Verify and Finish
 
-- Put evidence that determines the next action first.
-- Remove fields, headings, repeated labels, metadata, and explanations that do not change interpretation.
-- Emit measurements and provenance, not advice.
-- Sort the eligible results before presentation truncation.
-- Apply one final conservative 10,000-token estimate to stdout as overflow protection, not as a target.
-- Do not stack category, renderer, transport, and final-output caps.
-- Bound expensive collection or enrichment separately only to control work.
-- Report total, shown, and truncated counts.
-- Keep truncated JSON valid and report its truncation on stderr.
-- State when a bounded scan or backend top-N result is not the full population.
+Test public behavior and lifecycle invariants rather than private helper shape. Run formatting, lint, typecheck, focused tests, build, and live commands in proportion to the change. Confirm the companion skill matches the live CLI when relevant.
 
-Use a simple conservative token heuristic. Predictable protection matters more than exact tokenizer agreement.
-
-Do not add TOON, TSV, column JSON, or another positional format merely to save whitespace. TOON and column JSON have already shown no material advantage over compact text; keep object-row JSON for `jq`.
-
-Add statistics only for a homogeneous numeric population when they help orient the agent:
-
-- Use `count`, `mean`, sample `std`, `min`, `p25`, `p50`, `p75`, `p90`, and `max`.
-- Derive bins from the data with one Sturges-sized heuristic, at most ten equal-width ranges.
-- Compute the summary before final output truncation and state coverage.
-- Do not predefine metric-specific bins, summarize arbitrary numeric fields, treat backend top-N rows as a population, replace useful rankings, or add a chart without a clearer decision.
-
-## Implement Simply
-
-Change the full public boundary when needed: parser, implementation, renderer, export, documentation, skill, and public tests.
-
-Keep main flows top-to-bottom. Inline shallow one-use wrappers, remove duplicate checks and impossible branches, and extract a helper only when it owns a reusable rule.
-
-Test public behavior and lifecycle invariants rather than private helper shape. Run the formatter, linter, typecheck, focused tests, build, and live commands in proportion to the change.
-
-## Test Realistically
-
-Use a toy repository with an obvious answer, a medium production repository, one unusually large repository, and each affected language lane.
-
-Use the available standing corpus:
-
-- Transformers.
-- LangChain Python.
-- LangChain JS.
-- OpenClaw.
-- Hermes Agent.
-
-Exercise the public workflow, not only renderers:
-
-- Follow the default result to the next target.
-- Compare current-tree and backend-enriched behavior when relevant.
-- Confirm backend failure leaves useful local evidence.
-- For lifecycle work, add, edit, rename, and delete code in a disposable toy repository and verify stale symbols disappear.
-- Parse JSON directly and with `jq`.
-- Inspect text for noise.
-- Build and run the globally installed command outside the Codemap repository.
-- Confirm `skills/codemap/SKILL.md` still matches the live CLI.
-
-Record the first useful target and rank, evidence-source mix, rows, bytes, approximate tokens, elapsed time, backend freshness, and the next action.
-
-Revise or reject a change when it gives the wrong obvious answer, hides useful evidence behind truncation, misstates freshness or coverage, breaks JSON, suppresses local evidence after backend failure, adds data that does not change the next action, or only works well on one repository.
-
-## Finish
-
-Report the friction, chosen improvement, material contracts changed, before-and-after evidence, verification, and any remaining evidence-backed limitation. Keep the report compact.
+Report the friction, improvement, changed contracts, before-and-after evidence, verification, and remaining evidence-backed limitation. Remove temporary evolution artifacts and stop after one proven high-leverage slice.
