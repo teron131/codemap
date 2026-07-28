@@ -55,25 +55,56 @@ export type SourceMatch = {
 
 /** Checks whether a match points to supported, non-generated implementation source. */
 export function isImplementationSourceMatch(match: SourceMatch): boolean {
-  const suffix = path.extname(match.filePath).toLowerCase();
+  return isImplementationSourcePath(match.filePath);
+}
+
+/** Checks whether a path belongs to supported, non-generated implementation source. */
+export function isImplementationSourcePath(filePath: string): boolean {
+  const suffix = path.extname(filePath).toLowerCase();
   return (
-    (PY_SUFFIXES.has(suffix) || TYPESCRIPT_SUFFIXES.has(suffix)) &&
-    !isGeneratedSignalPath(match.filePath)
+    (PY_SUFFIXES.has(suffix) || TYPESCRIPT_SUFFIXES.has(suffix)) && !isGeneratedSignalPath(filePath)
   );
 }
 
-export type SourceFallbackGroup = {
-  term: string;
-  matches: SourceMatch[];
-  truncated: boolean;
+type FallbackCandidate = {
+  filePath: string;
+  matchedTerms: string[];
+  sourceMatchedTerms: string[];
 };
 
-type SourceFallbackSearch = {
-  groups: SourceFallbackGroup[];
-  scanTruncated: boolean;
+type FallbackAnchor = Pick<SourceMatch, "column" | "line" | "text">;
+
+type FallbackCandidateInspection = {
+  anchors: FallbackAnchor[];
+  cohesive: boolean;
+};
+
+type FallbackLineWindow = {
+  endIndex: number;
+  startIndex: number;
+};
+
+type SourceFallbackCandidate = Omit<FallbackCandidate, "sourceMatchedTerms"> & {
+  anchors: FallbackAnchor[];
+};
+
+type ScanStatus = "complete" | "failed" | "truncated";
+
+export type SourceFallbackSearch = {
+  candidates: SourceFallbackCandidate[];
+  fullCoverage: boolean;
+  hasPathSupplementedCoverage: boolean;
+  queryTerms: string[];
+  scanStatus: ScanStatus;
+  totalCandidates: number;
 };
 
 type JsonMatchParser = (payload: Record<string, unknown>) => SourceMatch | null;
+
+type FallbackQueryTerm = {
+  label: string;
+  variants: string[];
+};
 
 type RipgrepMatchOptions = {
   includeTests?: boolean;
@@ -85,9 +116,22 @@ type SourceMatchCollection = {
   scanTruncated: boolean;
 };
 
+type FallbackFileCollection = {
+  filePaths: string[];
+  scanStatus: ScanStatus;
+};
+
+type FallbackTermCollection = FallbackFileCollection & {
+  term: FallbackQueryTerm;
+};
+
 const FALLBACK_TERM_LIMIT = 8;
-const FALLBACK_MATCHES_PER_TERM = 2;
-const FALLBACK_CANDIDATE_LIMIT = 100;
+const FALLBACK_ANCHORS_PER_CANDIDATE = 2;
+const FALLBACK_COHESION_LINE_LIMIT = 50;
+const FAST_PATH_CANDIDATE_LIMIT = 3;
+const MULTI_TERM_CANDIDATE_LIMIT = 8;
+const SINGLE_TERM_CANDIDATE_LIMIT = 2;
+const SOURCE_CODE_GLOBS = [...PY_SUFFIXES, ...TYPESCRIPT_SUFFIXES].map((suffix) => `*${suffix}`);
 
 const SEARCH_STOP_WORDS = new Set([
   "about",
@@ -279,140 +323,361 @@ function pathExactness(filePath: string, queryLower: string): number {
   return 2;
 }
 
-/** Finds partial source matches when a full phrase has no direct hits. */
+/** Finds file-oriented partial candidates and detects complete multi-term source evidence. */
 export function sourceFallbackMatches(
   root: string,
   searchText: string,
   {
     includeTests = false,
     limit,
-    textOnly = false,
   }: {
     includeTests?: boolean;
     limit: number;
-    textOnly?: boolean;
   },
 ): SourceFallbackSearch {
-  const terms = fallbackTerms(searchText).slice(0, FALLBACK_TERM_LIMIT);
-  const pathRankText = [...new Set(terms.map(normalizedFallbackTerm))].join(" ");
-  const collectedCandidates = terms.map((term) => {
-    if (textOnly) {
-      const collection = ripgrepMatches(root, term, {
-        includeTests,
-        limit: Number.MAX_SAFE_INTEGER,
-      });
-      return {
-        term,
-        matches: collection.matches,
-        scanTruncated: collection.scanTruncated,
-      };
-    }
+  const queryTerms = fallbackQueryTerms(searchText);
+  const scannedTerms = queryTerms.slice(0, FALLBACK_TERM_LIMIT);
+  if (scannedTerms.length === 0 || limit <= 0) {
     return {
-      term,
-      matches: sourceMatches(root, term, {
-        includeTests,
-        limit: FALLBACK_CANDIDATE_LIMIT,
-      }),
-      scanTruncated: false,
+      candidates: [],
+      fullCoverage: false,
+      hasPathSupplementedCoverage: false,
+      queryTerms: queryTerms.map((term) => term.label),
+      scanStatus: "complete",
+      totalCandidates: 0,
     };
-  });
-  const hasImplementationCandidate = collectedCandidates.some((candidate) =>
-    candidate.matches.some(isImplementationSourceMatch),
-  );
-  const candidatesByTerm = hasImplementationCandidate
-    ? collectedCandidates.map((candidate) => ({
-        ...candidate,
-        matches: candidate.matches.filter(isImplementationSourceMatch),
-      }))
-    : collectedCandidates;
-  const coverageByFile = fallbackTermCoverage(candidatesByTerm);
-  const groups: SourceFallbackGroup[] = [];
-  const seenMatches = new Set<string>();
-  for (const { term, matches: candidatesForTerm } of candidatesByTerm) {
-    const matches: SourceMatch[] = [];
-    const candidates = rankFallbackMatches(candidatesForTerm, pathRankText, coverageByFile);
-    for (const match of candidates) {
-      appendMatch(matches, seenMatches, match, {
-        limit: FALLBACK_MATCHES_PER_TERM,
-      });
-      if (matches.length >= FALLBACK_MATCHES_PER_TERM) {
-        break;
-      }
-    }
-    if (matches.length === 0) {
-      continue;
-    }
-    groups.push({
-      term,
-      matches,
-      truncated: candidates.length > matches.length,
-    });
-    if (groups.length >= limit) {
-      break;
-    }
   }
+  const implementationCollections = collectFallbackFiles(root, scannedTerms, {
+    includeTests,
+    sourceOnly: true,
+  });
+  const hasImplementationCandidate = implementationCollections.some(
+    (collection) => collection.filePaths.length > 0,
+  );
+  const collections = hasImplementationCandidate
+    ? implementationCollections
+    : collectFallbackFiles(root, scannedTerms, {
+        includeTests,
+        sourceOnly: false,
+      });
+  const scanStatus = collections.some((collection) => collection.scanStatus === "failed")
+    ? "failed"
+    : collections.some((collection) => collection.scanStatus === "truncated")
+      ? "truncated"
+      : "complete";
+  const allCandidates = fallbackCandidates(scannedTerms, collections, searchText);
+  const strongestCoverage = allCandidates[0]?.matchedTerms.length ?? 0;
+  const strongestCandidates = allCandidates.filter(
+    (candidate) => candidate.matchedTerms.length === strongestCoverage,
+  );
+  const completeSourceCandidates = allCandidates.filter(
+    (candidate) => candidate.sourceMatchedTerms.length === scannedTerms.length,
+  );
+  const hasPathSupplementedCoverage = allCandidates.some(
+    (candidate) =>
+      candidate.matchedTerms.length === scannedTerms.length &&
+      candidate.sourceMatchedTerms.length < scannedTerms.length,
+  );
+  const hasCompleteSourceCoverage =
+    queryTerms.length >= 2 &&
+    queryTerms.length === scannedTerms.length &&
+    scanStatus === "complete" &&
+    completeSourceCandidates.length > 0;
+  const pathAlignedSourceCandidates = hasCompleteSourceCoverage
+    ? completeSourceCandidates.filter((candidate) =>
+        scannedTerms.every((term) => fallbackTermMatchesPath(candidate.filePath, term)),
+      )
+    : [];
+  let fastPathCandidates: FallbackCandidate[] = [];
+  if (pathAlignedSourceCandidates.length === 1) {
+    fastPathCandidates = pathAlignedSourceCandidates;
+  } else if (
+    hasCompleteSourceCoverage &&
+    !hasPathSupplementedCoverage &&
+    completeSourceCandidates.length <= FAST_PATH_CANDIDATE_LIMIT
+  ) {
+    fastPathCandidates = completeSourceCandidates;
+  }
+  const candidateLimit =
+    scannedTerms.length === 1
+      ? Math.min(limit, SINGLE_TERM_CANDIDATE_LIMIT)
+      : Math.min(limit, MULTI_TERM_CANDIDATE_LIMIT);
+  const inspectedFastPathCandidates = inspectFallbackCandidates(
+    root,
+    fastPathCandidates,
+    scannedTerms,
+    true,
+  );
+  const cohesiveCandidates = inspectedFastPathCandidates.filter((candidate) => candidate.cohesive);
+  const fullCoverage = cohesiveCandidates.length > 0;
+  const selectedCandidates = fullCoverage
+    ? cohesiveCandidates.slice(0, Math.min(limit, FAST_PATH_CANDIDATE_LIMIT))
+    : inspectFallbackCandidates(
+        root,
+        strongestCandidates.slice(0, candidateLimit),
+        scannedTerms,
+        false,
+      );
   return {
-    groups,
-    scanTruncated: candidatesByTerm.some((candidate) => candidate.scanTruncated),
+    candidates: selectedCandidates.map(({ candidate }) => candidate),
+    fullCoverage,
+    hasPathSupplementedCoverage,
+    queryTerms: queryTerms.map((term) => term.label),
+    scanStatus,
+    totalCandidates: fullCoverage ? completeSourceCandidates.length : strongestCandidates.length,
   };
 }
 
-/** Counts the distinct normalized query terms supported by each candidate file. */
-function fallbackTermCoverage(
-  candidatesByTerm: { term: string; matches: SourceMatch[] }[],
-): Map<string, number> {
-  const termsByFile = new Map<string, Set<string>>();
-  for (const { term, matches } of candidatesByTerm) {
-    const termKey = normalizedFallbackTerm(term);
-    for (const match of matches) {
-      const terms = termsByFile.get(match.filePath) ?? new Set<string>();
-      terms.add(termKey);
-      termsByFile.set(match.filePath, terms);
+/** Collects the files containing each query term from one bounded ripgrep lane. */
+function collectFallbackFiles(
+  root: string,
+  terms: FallbackQueryTerm[],
+  {
+    includeTests,
+    sourceOnly,
+  }: {
+    includeTests: boolean;
+    sourceOnly: boolean;
+  },
+): FallbackTermCollection[] {
+  return terms.map((term) => ({
+    term,
+    ...ripgrepFilesWithMatches(root, term.variants, {
+      includeTests,
+      sourceOnly,
+    }),
+  }));
+}
+
+/** Composes and ranks file candidates from per-term path collections. */
+function fallbackCandidates(
+  terms: FallbackQueryTerm[],
+  collections: FallbackTermCollection[],
+  searchText: string,
+): FallbackCandidate[] {
+  const termLabelsByFile = new Map<string, Set<string>>();
+  for (const { filePaths, term } of collections) {
+    for (const filePath of filePaths) {
+      const labels = termLabelsByFile.get(filePath) ?? new Set<string>();
+      labels.add(term.label);
+      termLabelsByFile.set(filePath, labels);
     }
   }
-  return new Map([...termsByFile].map(([filePath, terms]) => [filePath, terms.size]));
+  return [...termLabelsByFile]
+    .map(([filePath, matchedLabels]) => {
+      const sourceMatchedTerms = terms
+        .filter((term) => matchedLabels.has(term.label))
+        .map((term) => term.label);
+      const matchedTerms = terms
+        .filter((term) => matchedLabels.has(term.label) || fallbackTermMatchesPath(filePath, term))
+        .map((term) => term.label);
+      return { filePath, matchedTerms, sourceMatchedTerms };
+    })
+    .sort((left, right) => compareFallbackCandidates(left, right, searchText));
 }
 
-/** Collapses simple inflection variants to one ranking key. */
-function normalizedFallbackTerm(term: string): string {
-  return fallbackTermVariants(term)[0]?.toLowerCase() ?? term.toLowerCase();
+/** Adds concrete anchors and optional cohesion evidence to ranked fallback candidates. */
+function inspectFallbackCandidates(
+  root: string,
+  candidates: FallbackCandidate[],
+  terms: FallbackQueryTerm[],
+  requireCohesion: boolean,
+): Array<{ candidate: SourceFallbackCandidate; cohesive: boolean }> {
+  return candidates.map((candidate) => {
+    const inspection = inspectFallbackCandidate(
+      root,
+      candidate.filePath,
+      terms,
+      new Set(candidate.sourceMatchedTerms),
+      requireCohesion,
+    );
+    return {
+      candidate: {
+        anchors: inspection.anchors,
+        filePath: candidate.filePath,
+        matchedTerms: candidate.matchedTerms,
+      },
+      cohesive: inspection.cohesive,
+    };
+  });
 }
 
-/** Builds meaningful fallback terms from a phrase. */
-function fallbackTerms(searchText: string): string[] {
-  const terms: string[] = [];
+/** Reads one candidate once to find display anchors and bounded term cohesion. */
+function inspectFallbackCandidate(
+  root: string,
+  filePath: string,
+  terms: FallbackQueryTerm[],
+  matchedLabels: Set<string>,
+  requireCohesion: boolean,
+): FallbackCandidateInspection {
+  let source: string;
+  try {
+    source = readFileSync(path.resolve(root, filePath), "utf8");
+  } catch {
+    return { anchors: [], cohesive: false };
+  }
+  const lines = source.split(/\r?\n/);
+  const cohesionWindow = requireCohesion
+    ? fallbackCohesionWindow(lines, terms, matchedLabels)
+    : null;
+  return {
+    anchors: fallbackAnchors(lines, terms, matchedLabels, cohesionWindow ?? undefined),
+    cohesive: cohesionWindow !== null,
+  };
+}
+
+/** Finds the narrowest bounded source window with complete and locally dense term evidence. */
+function fallbackCohesionWindow(
+  lines: string[],
+  terms: FallbackQueryTerm[],
+  matchedLabels: Set<string>,
+): FallbackLineWindow | null {
+  const matchedTerms = terms.filter((term) => matchedLabels.has(term.label));
+  const lastSeenLines = new Array<number>(matchedTerms.length).fill(-1);
+  let latestDenseLine = -1;
+  let narrowestWindow: FallbackLineWindow | null = null;
+  for (const [lineIndex, line] of lines.entries()) {
+    const lowerLine = line.toLowerCase();
+    let lineTermCount = 0;
+    for (const [termIndex, term] of matchedTerms.entries()) {
+      if (term.variants.some((variant) => lowerLine.includes(variant))) {
+        lastSeenLines[termIndex] = lineIndex;
+        lineTermCount += 1;
+      }
+    }
+    if (lineTermCount >= 2) {
+      latestDenseLine = lineIndex;
+    }
+    const startIndex = Math.min(...lastSeenLines);
+    if (
+      startIndex < 0 ||
+      lineIndex - startIndex + 1 > FALLBACK_COHESION_LINE_LIMIT ||
+      latestDenseLine < startIndex
+    ) {
+      continue;
+    }
+    const window = { endIndex: lineIndex, startIndex };
+    if (
+      narrowestWindow === null ||
+      window.endIndex - window.startIndex < narrowestWindow.endIndex - narrowestWindow.startIndex
+    ) {
+      narrowestWindow = window;
+    }
+  }
+  return narrowestWindow;
+}
+
+/** Finds at most two concrete source anchors for one file-oriented candidate. */
+function fallbackAnchors(
+  lines: string[],
+  terms: FallbackQueryTerm[],
+  matchedLabels: Set<string>,
+  window?: FallbackLineWindow,
+): FallbackAnchor[] {
+  const anchors: FallbackAnchor[] = [];
+  const seenLines = new Set<number>();
+  for (const term of terms) {
+    if (!matchedLabels.has(term.label)) {
+      continue;
+    }
+    const anchor = firstFallbackAnchor(lines, term, window);
+    if (anchor === null || seenLines.has(anchor.line)) {
+      continue;
+    }
+    anchors.push(anchor);
+    seenLines.add(anchor.line);
+    if (anchors.length >= FALLBACK_ANCHORS_PER_CANDIDATE) {
+      break;
+    }
+  }
+  return anchors.sort(
+    (left, right) =>
+      left.line - right.line || left.column - right.column || compareText(left.text, right.text),
+  );
+}
+
+/** Finds the first case-insensitive literal occurrence for one query term. */
+function firstFallbackAnchor(
+  lines: string[],
+  term: FallbackQueryTerm,
+  window?: FallbackLineWindow,
+): FallbackAnchor | null {
+  const startIndex = window?.startIndex ?? 0;
+  const endIndex = Math.min(window?.endIndex ?? lines.length - 1, lines.length - 1);
+  for (let index = startIndex; index <= endIndex; index += 1) {
+    const line = lines[index] ?? "";
+    const lowerLine = line.toLowerCase();
+    const columns = term.variants
+      .map((variant) => lowerLine.indexOf(variant))
+      .filter((column) => column >= 0);
+    if (columns.length === 0) {
+      continue;
+    }
+    return {
+      line: index + 1,
+      column: Math.min(...columns) + 1,
+      text: compactSourceMatchText(line),
+    };
+  }
+  return null;
+}
+
+/** Checks whether one normalized term is represented by a candidate path. */
+function fallbackTermMatchesPath(filePath: string, term: FallbackQueryTerm): boolean {
+  const lowerPath = filePath.toLowerCase();
+  return term.variants.some((variant) => lowerPath.includes(variant));
+}
+
+/** Ranks broader term coverage before ordinary source usefulness. */
+function compareFallbackCandidates(
+  left: FallbackCandidate,
+  right: FallbackCandidate,
+  searchText: string,
+): number {
+  const coverageDifference = right.matchedTerms.length - left.matchedTerms.length;
+  if (coverageDifference !== 0) {
+    return coverageDifference;
+  }
+  return (
+    sourcePathRank(left.filePath, searchText) - sourcePathRank(right.filePath, searchText) ||
+    right.sourceMatchedTerms.length - left.sourceMatchedTerms.length ||
+    compareText(left.filePath, right.filePath)
+  );
+}
+
+/** Builds unique meaningful query terms while retaining simple inflection variants. */
+function fallbackQueryTerms(searchText: string): FallbackQueryTerm[] {
+  const terms: FallbackQueryTerm[] = [];
   const seen = new Set<string>();
   for (const token of searchText.match(/[A-Za-z0-9_$]+/g) ?? []) {
-    for (const term of fallbackTermVariants(token)) {
-      const key = term.toLowerCase();
-      if (seen.has(key)) {
-        continue;
-      }
-      seen.add(key);
-      terms.push(term);
+    const variants = fallbackTermVariants(token);
+    const label = variants[0];
+    if (label === undefined || seen.has(label)) {
+      continue;
     }
+    seen.add(label);
+    terms.push({ label, variants });
   }
   return terms;
 }
 
 /** Expands one fallback term into simple source-search variants. */
 function fallbackTermVariants(token: string): string[] {
-  const normalized = token.trim();
-  const lower = normalized.toLowerCase();
-  if (normalized.length < 3 || SEARCH_STOP_WORDS.has(lower)) {
+  const normalized = token.trim().toLowerCase();
+  if (normalized.length < 3 || SEARCH_STOP_WORDS.has(normalized)) {
     return [];
   }
-  if (lower.endsWith("ies") && normalized.length > 4) {
+  if (normalized.endsWith("ies") && normalized.length > 4) {
     return [`${normalized.slice(0, -3)}y`, normalized];
   }
-  if (/[cs]hes$|xes$|zes$|ses$/.test(lower) && normalized.length > 4) {
+  if (/[cs]hes$|xes$|zes$|ses$/.test(normalized) && normalized.length > 4) {
     return [normalized.slice(0, -2), normalized];
   }
   if (
-    lower.endsWith("s") &&
-    !lower.endsWith("ss") &&
-    !lower.endsWith("is") &&
-    !lower.endsWith("us") &&
+    normalized.endsWith("s") &&
+    !normalized.endsWith("ss") &&
+    !normalized.endsWith("is") &&
+    !normalized.endsWith("us") &&
     normalized.length > 4
   ) {
     return [normalized.slice(0, -1), normalized];
@@ -423,19 +688,6 @@ function fallbackTermVariants(token: string): string[] {
 /** Ranks matches toward definitions and source code over config, docs, and tests. */
 function rankSourceMatches(matches: SourceMatch[], searchText: string): SourceMatch[] {
   return matches.slice().sort((left, right) => compareSourceMatches(left, right, searchText));
-}
-
-/** Ranks partial matches by file-level term coverage before ordinary source usefulness. */
-function rankFallbackMatches(
-  matches: SourceMatch[],
-  searchText: string,
-  coverageByFile: Map<string, number>,
-): SourceMatch[] {
-  return matches.slice().sort((left, right) => {
-    const coverageDifference =
-      (coverageByFile.get(right.filePath) ?? 0) - (coverageByFile.get(left.filePath) ?? 0);
-    return coverageDifference || compareSourceMatches(left, right, searchText);
-  });
 }
 
 /** Applies the deterministic source-match tie breakers shared by normal and partial search. */
@@ -452,8 +704,20 @@ function compareSourceMatches(left: SourceMatch, right: SourceMatch, searchText:
 
 /** Scores one match by how useful it is as a next code-reading lead. */
 function sourceMatchRank(match: SourceMatch, searchText: string): number {
-  const filePath = match.filePath.replace(/^\.\//, "");
-  const lower = filePath.toLowerCase();
+  let rank = sourcePathRank(match.filePath, searchText);
+  if (/\bdeprecated\b/i.test(match.text)) {
+    rank += 4;
+  }
+  if (match.engine === "ast-grep" || match.kind === "symbol") {
+    rank -= 1;
+  }
+  return rank;
+}
+
+/** Scores a source path independently of match-row details. */
+function sourcePathRank(filePath: string, searchText: string): number {
+  const normalizedPath = filePath.replace(/^\.\//, "");
+  const lower = normalizedPath.toLowerCase();
   let rank = 0;
   if (!lower.startsWith("src/")) {
     rank += 4;
@@ -470,14 +734,8 @@ function sourceMatchRank(match: SourceMatch, searchText: string): number {
   ) {
     rank += 5;
   }
-  if (isGeneratedSignalPath(filePath)) {
+  if (isGeneratedSignalPath(normalizedPath)) {
     rank += 8;
-  }
-  if (/\bdeprecated\b/i.test(match.text)) {
-    rank += 4;
-  }
-  if (match.engine === "ast-grep" || match.kind === "symbol") {
-    rank -= 1;
   }
   const pathTermMatches = searchTerms(searchText).filter((term) => lower.includes(term)).length;
   rank -= Math.min(pathTermMatches, 3) * 2;
@@ -648,6 +906,52 @@ function astGrepMatch(match: SyntaxMatch): SourceMatch {
     column: match.column,
     text: compactSourceMatchText(match.lines || match.text),
   };
+}
+
+/** Finds all candidate file paths for one term without collecting repeated match rows. */
+function ripgrepFilesWithMatches(
+  root: string,
+  variants: string[],
+  {
+    includeTests,
+    sourceOnly,
+  }: {
+    includeTests: boolean;
+    sourceOnly: boolean;
+  },
+): FallbackFileCollection {
+  const command = [
+    "rg",
+    "--files-with-matches",
+    "--fixed-strings",
+    "--ignore-case",
+    ...(sourceOnly ? SOURCE_CODE_GLOBS.flatMap((glob) => ["--glob", glob]) : []),
+    ...ripgrepExcludeArgs(),
+    ...variants.flatMap((variant) => ["-e", variant]),
+    ".",
+  ];
+  const result = spawnSync(command[0] ?? "", command.slice(1), {
+    cwd: root,
+    encoding: "utf8",
+    maxBuffer: SOURCE_SEARCH_BUFFER_LIMIT,
+  });
+  const scanTruncated = (result.error as NodeJS.ErrnoException | undefined)?.code === "ENOBUFS";
+  const scanStatus = scanTruncated
+    ? "truncated"
+    : result.error !== undefined ||
+        result.status === null ||
+        (result.status !== 0 && result.status !== 1)
+      ? "failed"
+      : "complete";
+  if (!result.stdout) {
+    return { filePaths: [], scanStatus };
+  }
+  const filePaths = [...new Set(result.stdout.split(/\r?\n/).filter(Boolean))].filter(
+    (filePath) =>
+      (!sourceOnly || isImplementationSourcePath(filePath)) &&
+      (includeTests || !isTestPath(filePath)),
+  );
+  return { filePaths, scanStatus };
 }
 
 /** Runs ripgrep and converts output to source match rows. */

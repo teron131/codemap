@@ -3,9 +3,10 @@ export { type GraphMatchOptions, renderGraphMatchLines } from "./graph.js";
 export {
   conceptPathMatches,
   definitionMatches,
+  isImplementationSourcePath,
   isImplementationSourceMatch,
   pathMatches,
-  type SourceFallbackGroup,
+  type SourceFallbackSearch,
   type SourceMatch,
   sourceFallbackMatches,
   sourceMatches,
