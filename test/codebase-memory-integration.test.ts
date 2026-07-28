@@ -360,11 +360,16 @@ describe("Codebase Memory integration", () => {
     }
   });
 
-  it("prioritizes backend code search over ordinary current-tree evidence", async () => {
+  it("keeps backend priority when current-tree query terms are scattered", async () => {
     mkdirSync(path.join(workDir, "src"), { recursive: true });
     writeFileSync(
       path.join(workDir, "src", "approval-policy.ts"),
-      "export const commandApprovalPolicy = true;\n",
+      "export const approvalPolicy = true;\n",
+      "utf8",
+    );
+    writeFileSync(
+      path.join(workDir, "src", "command.ts"),
+      "export const command = true;\n",
       "utf8",
     );
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
@@ -380,6 +385,375 @@ describe("Codebase Memory integration", () => {
       expect(output).toContain("CodebaseMemory code matches:");
       expect(output).toContain("- needle");
       expect(output).not.toContain("src/approval-policy.ts");
+      expect(output).not.toContain("src/command.ts");
+      expect(readIndexCalls()).toHaveLength(1);
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it("uses complete current-tree term coverage before backend search", async () => {
+    mkdirSync(path.join(workDir, "src"), { recursive: true });
+    writeFileSync(
+      path.join(workDir, "src", "cohesive.ts"),
+      [
+        "export const command = true;",
+        ...Array.from({ length: 48 }, (_, index) => `const filler${index} = ${index};`),
+        "export const approvalPolicy = true;",
+      ].join("\n"),
+      "utf8",
+    );
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      await expect(
+        commandSearch(["command", "approval", "policy"], {
+          projectRoot: workDir,
+          limit: "3",
+        }),
+      ).resolves.toBe(0);
+
+      const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+      expect(output).toContain("Current-tree source candidates:");
+      expect(output).toContain("src/cohesive.ts");
+      expect(output).toContain("[terms 3/3: command, approval, policy]");
+      expect(output).toContain("1:14 export const command = true;");
+      expect(output).toContain("50:14 export const approvalPolicy = true;");
+      expect(output.indexOf("1:14")).toBeLessThan(output.indexOf("50:14"));
+      expect(output).not.toContain("CodebaseMemory code matches:");
+      expect(readIndexCalls()).toHaveLength(0);
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it("keeps fast-path eligibility independent from a smaller display limit", async () => {
+    mkdirSync(path.join(workDir, "src"), { recursive: true });
+    for (let index = 0; index < 3; index += 1) {
+      writeFileSync(
+        path.join(workDir, "src", `candidate-${index}.ts`),
+        `export const commandApprovalPolicy${index} = true;\n`,
+        "utf8",
+      );
+    }
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      await expect(
+        commandSearch(["command", "approval", "policy"], {
+          projectRoot: workDir,
+          limit: "1",
+        }),
+      ).resolves.toBe(0);
+
+      const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+      expect(output).toContain("Current-tree source candidates:");
+      expect(output.match(/\[terms 3\/3: command, approval, policy]/g)).toHaveLength(1);
+      expect(output).toContain("... 2 more candidates");
+      expect(readIndexCalls()).toHaveLength(0);
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it("uses one source-backed path owner despite broader complete candidates", async () => {
+    mkdirSync(path.join(workDir, "src", "tool", "retry"), { recursive: true });
+    writeFileSync(
+      path.join(workDir, "src", "tool", "retry", "middleware.ts"),
+      "export const toolRetryMiddleware = true;\n",
+      "utf8",
+    );
+    writeFileSync(
+      path.join(workDir, "src", "tool", "retry", "middleware-path-only.ts"),
+      "export const tool = true;\n",
+      "utf8",
+    );
+    for (let index = 0; index < 4; index += 1) {
+      writeFileSync(
+        path.join(workDir, "src", `generic-${index}.ts`),
+        `export const toolRetryMiddleware${index} = true;\n`,
+        "utf8",
+      );
+    }
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      await expect(
+        commandSearch(["tool", "retry", "middleware"], {
+          projectRoot: workDir,
+          limit: "3",
+        }),
+      ).resolves.toBe(0);
+
+      const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+      expect(output).toContain("Current-tree source candidates:");
+      expect(output).toContain("src/tool/retry/middleware.ts");
+      expect(output).not.toContain("src/generic-");
+      expect(output).toContain("... 4 more candidates");
+      expect(readIndexCalls()).toHaveLength(0);
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it("uses bounded exact implementation text before backend search", async () => {
+    mkdirSync(path.join(workDir, "src"), { recursive: true });
+    writeFileSync(
+      path.join(workDir, "src", "exact.ts"),
+      "// Apply command approval policy before execution.\n",
+      "utf8",
+    );
+    for (let index = 0; index < 3; index += 1) {
+      writeFileSync(
+        path.join(workDir, "src", `scattered-${index}.ts`),
+        `export const commandApprovalPolicy${index} = true;\n`,
+        "utf8",
+      );
+    }
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      await expect(
+        commandSearch(["command", "approval", "policy"], {
+          projectRoot: workDir,
+          limit: "3",
+        }),
+      ).resolves.toBe(0);
+
+      const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+      expect(output).toContain("Source matches:");
+      expect(output).toContain("src/exact.ts");
+      expect(output).not.toContain("Current-tree source candidates:");
+      expect(readIndexCalls()).toHaveLength(0);
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it("uses the narrowest cohesive source window for fast-path anchors", async () => {
+    mkdirSync(path.join(workDir, "src"), { recursive: true });
+    writeFileSync(
+      path.join(workDir, "src", "cohesive-owner.ts"),
+      [
+        "export const command = true;",
+        ...Array.from({ length: 18 }, (_, index) => `const early${index} = ${index};`),
+        "export const approvalPolicy = true;",
+        ...Array.from({ length: 39 }, (_, index) => `const later${index} = ${index};`),
+        "export const commandApprovalPolicy = true;",
+      ].join("\n"),
+      "utf8",
+    );
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      await expect(
+        commandSearch(["command", "approval", "policy"], {
+          projectRoot: workDir,
+          limit: "3",
+        }),
+      ).resolves.toBe(0);
+
+      const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+      expect(output).toContain("Current-tree source candidates:");
+      expect(output).toContain("60:14 export const commandApprovalPolicy = true;");
+      expect(output).not.toContain("1:14 export const command = true;");
+      expect(readIndexCalls()).toHaveLength(0);
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it("keeps backend priority when path text supplies missing query terms", async () => {
+    mkdirSync(path.join(workDir, "src", "callbacks"), { recursive: true });
+    writeFileSync(
+      path.join(workDir, "src", "callbacks", "base.ts"),
+      "export const config = true;\n",
+      "utf8",
+    );
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      await expect(
+        commandSearch(["callback", "config"], {
+          projectRoot: workDir,
+          limit: "3",
+        }),
+      ).resolves.toBe(0);
+
+      const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+      expect(output).toContain("CodebaseMemory code matches:");
+      expect(output).not.toContain("Current-tree source candidates:");
+      expect(readIndexCalls()).toHaveLength(1);
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it("keeps backend priority for complete terms split across incidental lines", async () => {
+    mkdirSync(path.join(workDir, "src"), { recursive: true });
+    writeFileSync(
+      path.join(workDir, "src", "imports.ts"),
+      [
+        "import { commitments } from './commitments.js';",
+        "import { sqlite } from './sqlite.js';",
+      ].join("\n"),
+      "utf8",
+    );
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      await expect(
+        commandSearch(["commitments", "sqlite"], {
+          projectRoot: workDir,
+          limit: "3",
+        }),
+      ).resolves.toBe(0);
+
+      const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+      expect(output).toContain("CodebaseMemory code matches:");
+      expect(output).not.toContain("Current-tree source candidates:");
+      expect(readIndexCalls()).toHaveLength(1);
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it("keeps backend priority when complete source coverage exceeds the fast-path bound", async () => {
+    mkdirSync(path.join(workDir, "src"), { recursive: true });
+    for (let index = 0; index < 4; index += 1) {
+      writeFileSync(
+        path.join(workDir, "src", `candidate-${index}.ts`),
+        `export const commandApprovalPolicy${index} = true;\n`,
+        "utf8",
+      );
+    }
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      await expect(
+        commandSearch(["command", "approval", "policy"], {
+          projectRoot: workDir,
+          limit: "3",
+        }),
+      ).resolves.toBe(0);
+
+      const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+      expect(output).toContain("CodebaseMemory code matches:");
+      expect(output).not.toContain("Current-tree source candidates:");
+      expect(readIndexCalls()).toHaveLength(1);
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it("bounds ambiguous multi-term fallback after an empty backend search", async () => {
+    vi.stubEnv("CODEBASE_MEMORY_MOCK_EMPTY_SEARCH", "1");
+    mkdirSync(path.join(workDir, "src"), { recursive: true });
+    for (let index = 0; index < 10; index += 1) {
+      writeFileSync(
+        path.join(workDir, "src", `candidate-${index}.ts`),
+        `export const alphaBeta${index} = true;\n`,
+        "utf8",
+      );
+    }
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      await expect(
+        commandSearch(["alpha", "beta"], {
+          projectRoot: workDir,
+        }),
+      ).resolves.toBe(0);
+
+      const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+      expect(output).toContain("No whole-query source match; partial candidates:");
+      expect(output.match(/\[terms 2\/2: alpha, beta]/g)).toHaveLength(8);
+      expect(output).toContain("... 2 more candidates");
+      expect(readIndexCalls()).toHaveLength(1);
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it("keeps backend priority when same-file query terms are far apart", async () => {
+    mkdirSync(path.join(workDir, "src"), { recursive: true });
+    writeFileSync(
+      path.join(workDir, "src", "mixed-concerns.ts"),
+      [
+        "export const command = true;",
+        ...Array.from({ length: 60 }, (_, index) => `const filler${index} = ${index};`),
+        "export const approvalPolicy = true;",
+      ].join("\n"),
+      "utf8",
+    );
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      await expect(
+        commandSearch(["command", "approval", "policy"], {
+          projectRoot: workDir,
+          limit: "3",
+        }),
+      ).resolves.toBe(0);
+
+      const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+      expect(output).toContain("CodebaseMemory code matches:");
+      expect(output).not.toContain("Current-tree source candidates:");
+      expect(readIndexCalls()).toHaveLength(1);
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it("keeps backend priority when the query exceeds the preflight term bound", async () => {
+    mkdirSync(path.join(workDir, "src"), { recursive: true });
+    writeFileSync(
+      path.join(workDir, "src", "bounded-terms.ts"),
+      "export const terms = 'alpha beta gamma delta epsilon zeta theta kappa';\n",
+      "utf8",
+    );
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      await expect(
+        commandSearch(
+          ["alpha", "beta", "gamma", "delta", "epsilon", "zeta", "theta", "kappa", "missingterm"],
+          {
+            projectRoot: workDir,
+            limit: "3",
+          },
+        ),
+      ).resolves.toBe(0);
+
+      const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+      expect(output).toContain("CodebaseMemory code matches:");
+      expect(output).not.toContain("Current-tree source candidates:");
+      expect(readIndexCalls()).toHaveLength(1);
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it("keeps backend priority when the current-tree scan fails with partial output", async () => {
+    mkdirSync(path.join(workDir, "src"), { recursive: true });
+    writeFileSync(
+      path.join(workDir, "src", "partial.ts"),
+      "export const partial = 'alpha beta';\n",
+      "utf8",
+    );
+    const rgPath = path.join(workDir, "rg");
+    writeFileSync(
+      rgPath,
+      [
+        "#!/usr/bin/env node",
+        'process.stdout.write("./src/partial.ts\\n");',
+        "process.exitCode = 2;",
+      ].join("\n"),
+      "utf8",
+    );
+    chmodSync(rgPath, 0o755);
+    vi.stubEnv("PATH", `${workDir}${path.delimiter}${process.env.PATH ?? ""}`);
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      await expect(
+        commandSearch(["alpha", "beta"], {
+          projectRoot: workDir,
+          limit: "3",
+        }),
+      ).resolves.toBe(0);
+
+      const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+      expect(output).toContain("CodebaseMemory code matches:");
+      expect(output).not.toContain("Current-tree source candidates:");
       expect(readIndexCalls()).toHaveLength(1);
     } finally {
       logSpy.mockRestore();
