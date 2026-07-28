@@ -31,6 +31,7 @@ import {
   commandBackendStatus,
   commandIndex,
   commandInspect,
+  commandSearch,
   commandSignals,
   commandSummary,
 } from "../src/codemap/commands/index.js";
@@ -329,6 +330,57 @@ describe("Codebase Memory integration", () => {
       expect(output).toContain("results: 1");
       expect(output).toContain("- needle");
       expect(output).not.toContain('"results"');
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it("keeps documentation-only evidence when backend code search has no answer", async () => {
+    vi.stubEnv("CODEBASE_MEMORY_MOCK_EMPTY_SEARCH", "1");
+    writeFileSync(
+      path.join(workDir, "README.md"),
+      "The zzzzDocumentationOnlyConcept is documented here.\n",
+      "utf8",
+    );
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      await expect(
+        commandSearch(["zzzzDocumentationOnlyConcept"], {
+          projectRoot: workDir,
+          limit: "1",
+        }),
+      ).resolves.toBe(0);
+
+      const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+      expect(output).toContain("README.md");
+      expect(output).not.toContain("CodebaseMemory code matches:");
+      expect(readIndexCalls()).toHaveLength(1);
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it("prioritizes backend code search over ordinary current-tree evidence", async () => {
+    mkdirSync(path.join(workDir, "src"), { recursive: true });
+    writeFileSync(
+      path.join(workDir, "src", "approval-policy.ts"),
+      "export const commandApprovalPolicy = true;\n",
+      "utf8",
+    );
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      await expect(
+        commandSearch(["command", "approval", "policy"], {
+          projectRoot: workDir,
+          limit: "3",
+        }),
+      ).resolves.toBe(0);
+
+      const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+      expect(output).toContain("CodebaseMemory code matches:");
+      expect(output).toContain("- needle");
+      expect(output).not.toContain("src/approval-policy.ts");
+      expect(readIndexCalls()).toHaveLength(1);
     } finally {
       logSpy.mockRestore();
     }
