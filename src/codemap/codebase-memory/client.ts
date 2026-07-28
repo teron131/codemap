@@ -541,7 +541,7 @@ export function callCodebaseMemoryTool(
       params: {
         protocolVersion: PROTOCOL_VERSION,
         capabilities: {},
-        clientInfo: { name: "codemap", version: "0.7.0" },
+        clientInfo: { name: "codemap", version: "0.8.0" },
       },
     },
     {

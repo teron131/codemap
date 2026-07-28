@@ -3,6 +3,7 @@ export { type GraphMatchOptions, renderGraphMatchLines } from "./graph.js";
 export {
   conceptPathMatches,
   definitionMatches,
+  isImplementationSourceMatch,
   pathMatches,
   type SourceFallbackGroup,
   type SourceMatch,

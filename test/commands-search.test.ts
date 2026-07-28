@@ -654,10 +654,15 @@ describe("search command handler", () => {
     writeFileSync(path.join(workDir, "package.json"), '{ "manifest": true }\n', "utf8");
     writeFileSync(path.join(workDir, "README.md"), "manifest docs\n", "utf8");
     writeFileSync(
+      path.join(workDir, "src", "a-manifest.ts"),
+      "export const manifest = true;\n",
+      "utf8",
+    );
+    writeFileSync(
       path.join(workDir, "src", "pdf.ts"),
       [
         "export function writeManifest() {",
-        "  return 'manifest source path';",
+        "  return 'source path';",
         "}",
         "",
         "export function matchRows() {",
@@ -680,11 +685,56 @@ describe("search command handler", () => {
     expect(output).toContain("\nNo matches, fallback to partial matches:");
     expect(output).toContain("  manifest:");
     expect(output).toContain("src/pdf.ts");
+    expect(output.indexOf("src/pdf.ts")).toBeLessThan(output.indexOf("src/a-manifest.ts"));
     expect(output).not.toContain("package.json");
-    expect(output).toContain("manifest source path");
-    expect(output).toContain("    ...");
+    expect(output).toContain("writeManifest");
     expect(output).toContain("  match:");
     expect(output).not.toContain("  matche:");
+  });
+
+  it("does not let a documentation phrase suppress implementation fallback evidence", async () => {
+    writeFileSync(
+      path.join(workDir, "README.md"),
+      "The command approval policy is documented here.\n",
+      "utf8",
+    );
+    writeFileSync(
+      path.join(workDir, "src", "approval-policy.ts"),
+      "export const approvalPolicy = 'ask';\n",
+      "utf8",
+    );
+    writeFileSync(
+      path.join(workDir, "src", "command.ts"),
+      "export const command = 'run';\n",
+      "utf8",
+    );
+
+    await expect(
+      commandSearch(["command", "approval", "policy"], {
+        projectRoot: workDir,
+        limit: "5",
+      }),
+    ).resolves.toBe(0);
+
+    const output = logLines().join("\n");
+    expect(output).toContain("No matches, fallback to partial matches:");
+    expect(output).toContain("src/approval-policy.ts");
+    expect(output).not.toContain("README.md");
+  });
+
+  it("does not treat singular words ending in s as plural variants", async () => {
+    writeFileSync(path.join(workDir, "src", "registry.ts"), "export class Registry {}\n", "utf8");
+
+    await expect(
+      commandSearch(["automatic", "model", "class", "registration"], {
+        projectRoot: workDir,
+        limit: "5",
+      }),
+    ).resolves.toBe(0);
+
+    const output = logLines().join("\n");
+    expect(output).toContain("  class:");
+    expect(output).not.toContain("  clas:");
   });
 
   it("prints graph search relationships without internal edge syntax", async () => {

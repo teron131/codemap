@@ -12,6 +12,7 @@ import {
   conceptPathMatches,
   definitionMatches,
   type GraphMatchOptions,
+  isImplementationSourceMatch,
   pathMatches,
   renderGraphMatchLines,
   type SourceFallbackGroup,
@@ -19,8 +20,8 @@ import {
   type SourceMatch,
   sourceMatches,
 } from "../search/index.js";
-import { runScan } from "../source/extraction/index.js";
 import { currentTreeGraph } from "../source/graph/index.js";
+import { discoverFiles } from "../source/scanner/index.js";
 import { addProjectRootArgument, DEFAULT_ROW_LIMIT, parseIntegerOption } from "./options.js";
 import {
   addSearchCallsParser,
@@ -47,6 +48,14 @@ type SearchOptions = {
 
 type RootOptions = {
   projectRoot?: string;
+};
+
+type CurrentTreeSourceSearch = {
+  fallbackGroups: SourceFallbackGroup[];
+  fallbackScanTruncated: boolean;
+  matches: SourceMatch[];
+  preferFallback: boolean;
+  textOnly: boolean;
 };
 
 /** Registers backend-ranked source, graph, semantic, and structural search commands. */
@@ -88,7 +97,7 @@ export function addSearchParser(program: Command): void {
   addSearchRuleParser(search.command("rule"));
 }
 
-/** Runs backend-ranked source or graph search with local fallback. */
+/** Runs backend-ranked source or graph search with current-tree fallback. */
 export async function commandSearch(
   searchArgs: string[],
   options: SearchOptions,
@@ -140,13 +149,6 @@ export async function commandSearch(
   ) {
     return 0;
   }
-  if (
-    !options.graph &&
-    !options.semantic &&
-    printCodebaseMemorySearch(root, searchText, limit, backendOutputOptions(options))
-  ) {
-    return 0;
-  }
   if (options.graph) {
     const graph = currentTreeGraph(root);
     console.log(
@@ -155,43 +157,92 @@ export async function commandSearch(
     console.log(
       renderGraphMatchLines(graph, searchText, limit, graphMatchOptions(options)).join("\n"),
     );
-  } else {
-    const textOnlySearch = runScan(root).files.length > DETAILED_ANALYSIS_FILE_LIMIT;
-    const conceptPaths = conceptPathMatches(root, searchText, {
-      includeTests: Boolean(options.includeTests),
-      limit: Math.min(3, limit),
-    });
-    const textMatches = sourceMatches(root, searchText, {
-      includeTests: Boolean(options.includeTests),
-      limit: limit - conceptPaths.length,
-      textOnly: textOnlySearch,
-    });
-    const matches = [...conceptPaths, ...textMatches];
-    const searchNote = textOnlySearch ? "Fallback: large repo; structural search skipped." : "";
-    if (matches.length === 0) {
-      const fallbackGroups = sourceFallbackMatches(root, searchText, {
-        includeTests: Boolean(options.includeTests),
-        limit,
-        textOnly: textOnlySearch,
-      });
-      if (fallbackGroups.length > 0) {
-        printSourceFallbackMatches(fallbackGroups, {
-          note: textOnlySearch ? "Fallback: large repo; structural partial search skipped." : "",
-        });
-      } else {
-        printSourceMatches(matches, { note: searchNote });
-      }
-    } else {
-      printSourceMatches(matches, { note: searchNote });
-    }
+    return 0;
   }
+  if (
+    !options.semantic &&
+    printCodebaseMemorySearch(root, searchText, limit, backendOutputOptions(options))
+  ) {
+    return 0;
+  }
+  const currentTree = currentTreeSourceSearch(root, searchText, limit, options);
   if (options.semantic) {
+    printCurrentTreeSourceSearch(currentTree);
     console.log("\nSemantic graph matches:");
     console.log(
       "  unavailable: Codebase Memory semantic search returned no answer; used current-tree search fallback.",
     );
+    return 0;
   }
+  printCurrentTreeSourceSearch(currentTree);
   return 0;
+}
+
+/** Collects one bounded current-tree source result without refreshing the optional backend. */
+function currentTreeSourceSearch(
+  root: string,
+  searchText: string,
+  limit: number,
+  options: SearchOptions,
+): CurrentTreeSourceSearch {
+  const filePaths = discoverFiles(root);
+  const textOnly = filePaths.length > DETAILED_ANALYSIS_FILE_LIMIT;
+  const includeTests = Boolean(options.includeTests);
+  const conceptPaths = conceptPathMatches(root, searchText, {
+    filePaths,
+    includeTests,
+    limit: Math.min(3, limit),
+  });
+  const textMatches = sourceMatches(root, searchText, {
+    includeTests,
+    limit: limit - conceptPaths.length,
+    textOnly,
+  });
+  const matches = [...conceptPaths, ...textMatches];
+  const directUseful = matches.some(
+    (match) => match.engine === "path" || isImplementationSourceMatch(match),
+  );
+  const fallback = directUseful
+    ? { groups: [], scanTruncated: false }
+    : sourceFallbackMatches(root, searchText, {
+        includeTests,
+        limit,
+        textOnly,
+      });
+  const fallbackUseful = fallback.groups.some((group) =>
+    group.matches.some(isImplementationSourceMatch),
+  );
+  return {
+    fallbackGroups: fallback.groups,
+    fallbackScanTruncated: fallback.scanTruncated,
+    matches,
+    preferFallback: fallbackUseful || matches.length === 0,
+    textOnly,
+  };
+}
+
+/** Prints current-tree source or partial fallback results with large-repository status. */
+function printCurrentTreeSourceSearch(result: CurrentTreeSourceSearch): void {
+  const notes = [];
+  if (result.textOnly) {
+    notes.push(
+      result.preferFallback && result.fallbackGroups.length > 0
+        ? "Fallback: large repo; structural partial search skipped."
+        : "Fallback: large repo; structural search skipped.",
+    );
+  }
+  if (result.fallbackScanTruncated) {
+    notes.push("Collection bound reached; ranking uses the available prefix.");
+  }
+  if (result.preferFallback && result.fallbackGroups.length > 0) {
+    printSourceFallbackMatches(result.fallbackGroups, {
+      note: notes.join(" "),
+    });
+    return;
+  }
+  printSourceMatches(result.matches, {
+    note: notes.join(" "),
+  });
 }
 
 /** Detects filters whose meaning exists only in graph search. */
