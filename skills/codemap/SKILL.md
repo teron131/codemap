@@ -25,7 +25,9 @@ codemap search --graph --project-root <path> "<concept>"
 codemap search --semantic --project-root <path> "<concept>"
 ```
 
-Use default search for paths, exact names, and ordinary concepts. Paths and exact symbol definitions resolve from the current tree without indexing; other queries use backend-ranked matches and fall back to local ast-grep plus fixed-string, case-insensitive `rg`. Likely test rows are omitted across backend and local evidence unless `--include-tests` is set.
+Use default search for paths, exact names, and ordinary concepts. Direct paths and exact symbol definitions resolve from the current tree; other queries prioritize backend code search and fall back to local ast-grep plus fixed-string, case-insensitive `rg` when the backend has no usable answer. Likely test rows are omitted across backend and local evidence unless `--include-tests` is set.
+
+In the local fallback, a multi-term phrase with no useful whole-query implementation match prefers supported source files and ranks them by distinct normalized query-term coverage before isolated hits while retaining the per-term source lines. Incidental documentation, configuration, and generated-only text hits do not suppress this source-oriented partial pass; Codemap retains them when no supported source candidate emerges.
 
 Use `--graph` when the result needs BM25-ranked relationship context. Add graph filters only in this lane:
 
