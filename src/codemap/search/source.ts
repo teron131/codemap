@@ -6,6 +6,7 @@ import path from "node:path";
 import type { NapiConfig } from "@ast-grep/napi";
 
 import { contextLines, ruleMatches, type SyntaxMatch, targetFiles } from "../ast-grep/index.js";
+import { arrayValue, recordValue } from "../json-utils.js";
 import {
   categoryForPath,
   CONFIG_BASENAMES,
@@ -14,11 +15,13 @@ import {
 import {
   discoverFiles,
   IGNORED_DIR_NAMES,
+  isGeneratedPath,
+  isTestPath,
   PY_SUFFIXES,
   relativePath,
   TYPESCRIPT_SUFFIXES,
 } from "../source/scanner/index.js";
-import { isGeneratedSignalPath, isTestPath } from "../source/signals/policy.js";
+import { compareText, escapeRegExp } from "../text-utils.js";
 
 const IDENTIFIER_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 const SOURCE_MATCH_TEXT_LIMIT = 240;
@@ -61,9 +64,7 @@ export function isImplementationSourceMatch(match: SourceMatch): boolean {
 /** Checks whether a path belongs to supported, non-generated implementation source. */
 export function isImplementationSourcePath(filePath: string): boolean {
   const suffix = path.extname(filePath).toLowerCase();
-  return (
-    (PY_SUFFIXES.has(suffix) || TYPESCRIPT_SUFFIXES.has(suffix)) && !isGeneratedSignalPath(filePath)
-  );
+  return (PY_SUFFIXES.has(suffix) || TYPESCRIPT_SUFFIXES.has(suffix)) && !isGeneratedPath(filePath);
 }
 
 type FallbackCandidate = {
@@ -286,7 +287,7 @@ export function conceptPathMatches(
       return (
         categoryForPath(filePath) === "code" &&
         terms.every((term) => lowerPath.includes(term)) &&
-        !isGeneratedSignalPath(filePath) &&
+        !isGeneratedPath(filePath) &&
         (includeTests || !isTestPath(filePath))
       );
     })
@@ -734,7 +735,7 @@ function sourcePathRank(filePath: string, searchText: string): number {
   ) {
     rank += 5;
   }
-  if (isGeneratedSignalPath(normalizedPath)) {
+  if (isGeneratedPath(normalizedPath)) {
     rank += 8;
   }
   const pathTermMatches = searchTerms(searchText).filter((term) => lower.includes(term)).length;
@@ -1087,34 +1088,6 @@ function appendMatch(
   }
   seen.add(key);
   matches.push(sourceMatch);
-}
-
-/** Reads a record field from untrusted JSON-like data. */
-function recordValue(value: unknown): Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
-}
-
-/** Reads an array field from untrusted JSON-like data. */
-function arrayValue(value: unknown): unknown[] {
-  return Array.isArray(value) ? value : [];
-}
-
-/** Escapes text for literal use inside regular expressions. */
-function escapeRegExp(value: string): string {
-  return value.replace(/[\\^$*+?.()|[\]{}]/g, "\\$&");
-}
-
-/** Sorts text values with stable lexical ordering. */
-function compareText(left: string, right: string): number {
-  if (left < right) {
-    return -1;
-  }
-  if (left > right) {
-    return 1;
-  }
-  return 0;
 }
 
 /** Locates a Python function, async function, or class definition line. */

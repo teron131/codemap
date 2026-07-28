@@ -14,6 +14,7 @@ import {
   type CodebaseMemoryStatusResult,
 } from "../codebase-memory/index.js";
 import { resolveProjectRoot } from "../common.js";
+import { arrayValue, numberField, recordValue, stringField } from "../json-utils.js";
 import { addProjectRootArgument, parseIntegerOption } from "./options.js";
 
 type BackendOptions = {
@@ -469,26 +470,4 @@ function symbolImpactRow(value: unknown): string {
   const file = stringField(record.file);
   const detail = [label, file].filter((item) => item !== null);
   return `${name}${detail.length > 0 ? ` (${detail.join(", ")})` : ""}`;
-}
-
-/** Reads an object record while rejecting arrays and primitives. */
-function recordValue(value: unknown): Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
-}
-
-/** Reads an array while rejecting other values. */
-function arrayValue(value: unknown): unknown[] {
-  return Array.isArray(value) ? value : [];
-}
-
-/** Reads a nonempty string field. */
-function stringField(value: unknown): string | null {
-  return typeof value === "string" && value.length > 0 ? value : null;
-}
-
-/** Reads a numeric field. */
-function numberField(value: unknown): number | null {
-  return typeof value === "number" ? value : null;
 }

@@ -7,7 +7,9 @@ import { Lang, type NapiConfig, parse, type SgNode } from "@ast-grep/napi";
 import { parse as parseYaml } from "yaml";
 
 import { expandUser } from "../common.js";
+import { recordValue } from "../json-utils.js";
 import { IGNORED_DIR_NAMES } from "../source/scanner/constants.js";
+import { compareText } from "../text-utils.js";
 
 export const LANGUAGE_ALIASES: Record<string, string> = {
   javascript: "javascript",
@@ -298,13 +300,6 @@ function cliRows(stdout: string): AstGrepCliMatch[] {
   return Array.isArray(parsed) ? (parsed as AstGrepCliMatch[]) : [];
 }
 
-/** Reads a record field from untrusted JSON-like data. */
-function recordValue(value: unknown): Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
-}
-
 /** Reads a numeric field from untrusted row data. */
 function numberValue(value: unknown): number {
   return typeof value === "number" ? value : Number(value ?? 0) || 0;
@@ -357,15 +352,4 @@ function splitLines(text: string): string[] {
     lines.pop();
   }
   return lines;
-}
-
-/** Sorts text values with stable lexical ordering. */
-function compareText(left: string, right: string): number {
-  if (left < right) {
-    return -1;
-  }
-  if (left > right) {
-    return 1;
-  }
-  return 0;
 }

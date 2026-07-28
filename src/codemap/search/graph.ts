@@ -1,6 +1,7 @@
 /** Searches derived graph relationship context for matching text. */
 import type { GraphEdge, GraphNode, GraphPayload } from "../source/graph/index.js";
-import { isTestPath } from "../source/signals/policy.js";
+import { isTestPath } from "../source/scanner/index.js";
+import { compareText } from "../text-utils.js";
 import { matchesGlobFilter, matchesTextFilter } from "./filters.js";
 
 export type GraphMatchOptions = {
@@ -201,15 +202,4 @@ function buildGraphSearchIndex(graph: GraphPayload): GraphSearchIndex {
 /** Formats graph edge fields as searchable relationship text. */
 function graphEdgeText(edge: GraphEdge): string {
   return `${String(edge.source ?? "")} ${String(edge.type ?? "")} ${String(edge.target ?? "")}`;
-}
-
-/** Sorts text values with stable lexical ordering. */
-function compareText(left: string, right: string): number {
-  if (left < right) {
-    return -1;
-  }
-  if (left > right) {
-    return 1;
-  }
-  return 0;
 }

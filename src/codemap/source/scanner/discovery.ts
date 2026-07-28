@@ -313,14 +313,18 @@ function globToRegExpSource(pattern: string): string {
         index = closeIndex;
       }
     } else {
-      source += escapeRegExp(char);
+      source += escapeGlobLiteral(char);
     }
   }
   return source;
 }
 
-/** Escapes text for literal use inside regular expressions. */
-function escapeRegExp(value: string): string {
+/**
+ * Escapes one already-classified literal glob character for the compiled pattern.
+ *
+ * Deliberately leaves `*`, `[`, and `]` unescaped: the caller translates those into regular expression syntax before reaching here, so the shared `escapeRegExp` would break glob semantics.
+ */
+function escapeGlobLiteral(value: string): string {
   return value.replace(/[\\^$+?.()|{}]/g, "\\$&");
 }
 

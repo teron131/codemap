@@ -1,27 +1,10 @@
-/** Re-exports source graph builders, canonical payloads, and schemas. */
-export {
-  addCallEdges,
-  addEdge,
-  addImportEdges,
-  addStructureNodes,
-  buildGraphFragment,
-  buildNodesAndEdges,
-  classifyTags,
-  classNode,
-  complexityForLines,
-  fileNode,
-  fileSummary,
-  functionNode,
-  lineSpan,
-  nodeTypeForFile,
-  SIGNIFICANT_CLASS_LINES,
-  SIGNIFICANT_FUNCTION_LINES,
-} from "./builder.js";
+/** Re-exports source graph payload builders and schemas. */
+export { classifyTags } from "./builder.js";
 export {
   buildGraphPayload,
   currentTreeGraph,
   currentTreeSummaryGraph,
-  graphStats,
   relatedEdges,
 } from "./canonical.js";
-export type { GraphEdge, GraphNode, GraphPayload, GraphStats } from "./schema.js";
+export { buildLikelyEntries, buildPathRankedLikelyEntries } from "./likely-entries.js";
+export type { GraphEdge, GraphNode, GraphPayload } from "./schema.js";
