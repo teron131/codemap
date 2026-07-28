@@ -1,6 +1,8 @@
 /** Builds graph nodes and edges from scan, import, and structure evidence. */
 import path from "node:path";
 
+import { arrayValue } from "../../json-utils.js";
+import { compareText } from "../../text-utils.js";
 import { ENTRYPOINT_BASENAMES } from "../scanner/index.js";
 import type { GraphEdge, GraphNode } from "./schema.js";
 
@@ -111,7 +113,7 @@ export function fileSummary(
       ["resources", "resources"],
       ["definitions", "definitions"],
     ] as const) {
-      const count = arrayValue(structure[key]).length;
+      const count = arrayValue<Record<string, unknown>>(structure[key]).length;
       if (count) {
         counts.push(`${count} ${label}`);
       }
@@ -253,10 +255,12 @@ export function addStructureNodes(
   fileStructure: StructureEntry,
 ): Set<string> {
   const exports = new Set(
-    arrayValue(fileStructure.exports).map((exportInfo) => String(exportInfo.name)),
+    arrayValue<Record<string, unknown>>(fileStructure.exports).map((exportInfo) =>
+      String(exportInfo.name),
+    ),
   );
   const functionNodeIds = new Set<string>();
-  for (const functionInfo of arrayValue(fileStructure.functions)) {
+  for (const functionInfo of arrayValue<Record<string, unknown>>(fileStructure.functions)) {
     const functionName = String(functionInfo.name ?? "");
     if (lineSpan(functionInfo) < SIGNIFICANT_FUNCTION_LINES && !exports.has(functionName)) {
       continue;
@@ -268,9 +272,9 @@ export function addStructureNodes(
       evidence: "native-structure",
     });
   }
-  for (const classInfo of arrayValue(fileStructure.classes)) {
+  for (const classInfo of arrayValue<Record<string, unknown>>(fileStructure.classes)) {
     const className = String(classInfo.name ?? "");
-    const methodCount = arrayValue(classInfo.methods).length;
+    const methodCount = arrayValue<Record<string, unknown>>(classInfo.methods).length;
     if (
       lineSpan(classInfo) < SIGNIFICANT_CLASS_LINES &&
       methodCount < 2 &&
@@ -296,7 +300,7 @@ export function addCallEdges(
 ): void {
   for (const structureEntry of structure.results ?? []) {
     const relPath = structureEntry.path;
-    for (const call of arrayValue(structureEntry.callGraph)) {
+    for (const call of arrayValue<Record<string, unknown>>(structureEntry.callGraph)) {
       const source = `function:${relPath}:${String(call.caller)}`;
       const target = `function:${relPath}:${String(call.callee)}`;
       if (functionNodeIds.has(source) && functionNodeIds.has(target)) {
@@ -333,7 +337,7 @@ export function buildNodesAndEdges(
   const functionNodeIds = new Set<string>();
 
   for (const [relPath, scanEntry] of Object.entries(filesByPath).sort(([left], [right]) =>
-    left.localeCompare(right),
+    compareText(left, right),
   )) {
     const fileStructure = structureByPath[relPath];
     const importTargets = importMap[relPath] ?? [];
@@ -371,11 +375,6 @@ export function buildGraphFragment(
     emitPaths: relPaths,
   });
   return { nodes, edges };
-}
-
-/** Reads an array field from untrusted JSON-like data. */
-function arrayValue(value: unknown): Array<Record<string, unknown>> {
-  return Array.isArray(value) ? (value as Array<Record<string, unknown>>) : [];
 }
 
 /** Preserves numeric metric fields and drops non-numeric values. */

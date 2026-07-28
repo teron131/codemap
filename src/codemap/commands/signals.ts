@@ -2,11 +2,7 @@
 import type { Command } from "commander";
 
 import { resolveProjectRoot } from "../common.js";
-import {
-  buildSignalView,
-  renderSignalText,
-  SIGNAL_SECTION_CHOICES,
-} from "../source/signals/index.js";
+import { buildSignalView, renderSignalText, SIGNAL_SECTION_CHOICES } from "../signals/index.js";
 import { addProjectRootArgument } from "./options.js";
 
 type SignalOptions = {

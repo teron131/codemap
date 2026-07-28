@@ -4,6 +4,8 @@ import {
   callCodebaseMemoryTool,
   withFreshCodebaseMemoryProject,
 } from "../codebase-memory/client.js";
+import { arrayValue, numberField, recordValue, stringField } from "../json-utils.js";
+import { uniqueStrings } from "../text-utils.js";
 import { matchesGlobFilter, matchesTextFilter } from "./filters.js";
 
 type CodebaseMemoryRenderOptions = {
@@ -570,45 +572,9 @@ function renderCodebaseMemorySemanticSearch(
   return lines.join("\n");
 }
 
-/** Deduplicates strings while preserving backend rank order. */
-function uniqueStrings(values: string[]): string[] {
-  const seen = new Set<string>();
-  const unique: string[] = [];
-  for (const value of values) {
-    if (seen.has(value)) {
-      continue;
-    }
-    seen.add(value);
-    unique.push(value);
-  }
-  return unique;
-}
-
 /** Formats backend confidence scores without noisy floating-point tails. */
 function formatScore(value: number): string {
   return value.toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
-}
-
-/** Reads object records while rejecting arrays and primitives. */
-function recordValue(value: unknown): Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
-}
-
-/** Reads arrays while rejecting other values. */
-function arrayValue(value: unknown): unknown[] {
-  return Array.isArray(value) ? value : [];
-}
-
-/** Reads string fields while rejecting empty values. */
-function stringField(value: unknown): string | null {
-  return typeof value === "string" && value.length > 0 ? value : null;
-}
-
-/** Reads number fields while rejecting other values. */
-function numberField(value: unknown): number | null {
-  return typeof value === "number" ? value : null;
 }
 
 /** Reads a nonnegative numeric score while rejecting backend cost/rank values. */

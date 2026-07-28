@@ -7,7 +7,7 @@ import {
   inspectPathTargetKind,
   renderCodebaseMemoryInspect,
   renderCurrentTreeInspection,
-} from "../source/inspection/index.js";
+} from "../inspect/index.js";
 import { addProjectRootArgument, DEFAULT_ROW_LIMIT, parseIntegerOption } from "./options.js";
 
 type InspectOptions = {

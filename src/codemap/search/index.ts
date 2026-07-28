@@ -1,14 +1,13 @@
-/** Re-exports source, structural, and graph search APIs. */
-export { type GraphMatchOptions, renderGraphMatchLines } from "./graph.js";
+/** Re-exports the source and graph search surface used by search commands. */
+export type { GraphMatchOptions } from "./graph.js";
+export { renderGraphMatchLines } from "./graph.js";
+export type { SourceFallbackSearch, SourceMatch } from "./source.js";
 export {
   conceptPathMatches,
   definitionMatches,
-  isImplementationSourcePath,
   isImplementationSourceMatch,
+  isImplementationSourcePath,
   pathMatches,
-  type SourceFallbackSearch,
-  type SourceMatch,
   sourceFallbackMatches,
   sourceMatches,
 } from "./source.js";
-export { callMatches, resolveTargetPaths, searchRuleMatches } from "./structural.js";

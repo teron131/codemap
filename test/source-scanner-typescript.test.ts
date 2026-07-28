@@ -4,10 +4,10 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { collectReports } from "../src/codemap/source/docstrings/index.js";
 import { runImportMap, scanEntry } from "../src/codemap/source/extraction/index.js";
 import { classifyTags } from "../src/codemap/source/graph/index.js";
 import { scanTypescriptFile } from "../src/codemap/source/scanner/index.js";
-import { collectReports } from "../src/codemap/source/signals/docstrings/index.js";
 
 const workspaceRoot = process.cwd();
 let workDir: string;

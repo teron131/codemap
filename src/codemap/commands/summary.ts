@@ -2,9 +2,9 @@
 import type { Command } from "commander";
 
 import { resolveProjectRoot } from "../common.js";
-import { codebaseMemoryArchitectureSummary } from "../rendering/architecture.js";
-import { buildSummaryText } from "../rendering/index.js";
 import { currentTreeSummaryGraph } from "../source/graph/index.js";
+import { codebaseMemoryArchitectureSummary } from "../summary/architecture.js";
+import { buildSummaryText } from "../summary/index.js";
 import { addProjectRootArgument } from "./options.js";
 
 type SummaryOptions = {
