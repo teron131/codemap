@@ -13,10 +13,11 @@ import {
   definitionMatches,
   type GraphMatchOptions,
   isImplementationSourceMatch,
+  isImplementationSourcePath,
   pathMatches,
   renderGraphMatchLines,
-  type SourceFallbackGroup,
   sourceFallbackMatches,
+  type SourceFallbackSearch,
   type SourceMatch,
   sourceMatches,
 } from "../search/index.js";
@@ -51,12 +52,13 @@ type RootOptions = {
 };
 
 type CurrentTreeSourceSearch = {
-  fallbackGroups: SourceFallbackGroup[];
-  fallbackScanTruncated: boolean;
+  fallback: SourceFallbackSearch | undefined;
   matches: SourceMatch[];
   preferFallback: boolean;
   textOnly: boolean;
 };
+
+const EXACT_SOURCE_MATCH_LIMIT = 3;
 
 /** Registers backend-ranked source, graph, semantic, and structural search commands. */
 export function addSearchParser(program: Command): void {
@@ -119,6 +121,7 @@ export async function commandSearch(
   const limit = searchLimit(options.limit);
   const root = resolveProjectRoot(options.projectRoot ?? rootOptions.projectRoot);
   console.log(`Search: ${searchText}`);
+  let fallbackPreflight: SourceFallbackSearch | undefined;
   if (!options.graph && !options.semantic) {
     const directPaths = pathMatches(root, searchText, { limit });
     if (directPaths.length > 0) {
@@ -132,6 +135,28 @@ export async function commandSearch(
     if (directDefinitions.length > 0) {
       printSourceMatches(directDefinitions);
       return 0;
+    }
+    fallbackPreflight = sourceFallbackMatches(root, searchText, {
+      includeTests: Boolean(options.includeTests),
+      limit,
+    });
+    if (fallbackPreflight.fullCoverage) {
+      printSourceFallbackMatches(fallbackPreflight);
+      return 0;
+    }
+    if (
+      fallbackPreflight.queryTerms.length >= 2 &&
+      !fallbackPreflight.hasPathSupplementedCoverage
+    ) {
+      const exactTextMatches = sourceMatches(root, searchText, {
+        includeTests: Boolean(options.includeTests),
+        limit: Math.min(limit, EXACT_SOURCE_MATCH_LIMIT),
+        textOnly: true,
+      }).filter(isImplementationSourceMatch);
+      if (exactTextMatches.length > 0) {
+        printSourceMatches(exactTextMatches);
+        return 0;
+      }
     }
   }
   if (
@@ -165,7 +190,7 @@ export async function commandSearch(
   ) {
     return 0;
   }
-  const currentTree = currentTreeSourceSearch(root, searchText, limit, options);
+  const currentTree = currentTreeSourceSearch(root, searchText, limit, options, fallbackPreflight);
   if (options.semantic) {
     printCurrentTreeSourceSearch(currentTree);
     console.log("\nSemantic graph matches:");
@@ -184,6 +209,7 @@ function currentTreeSourceSearch(
   searchText: string,
   limit: number,
   options: SearchOptions,
+  fallbackPreflight: SourceFallbackSearch | undefined,
 ): CurrentTreeSourceSearch {
   const filePaths = discoverFiles(root);
   const textOnly = filePaths.length > DETAILED_ANALYSIS_FILE_LIMIT;
@@ -202,19 +228,20 @@ function currentTreeSourceSearch(
   const directUseful = matches.some(
     (match) => match.engine === "path" || isImplementationSourceMatch(match),
   );
-  const fallback = directUseful
-    ? { groups: [], scanTruncated: false }
-    : sourceFallbackMatches(root, searchText, {
-        includeTests,
-        limit,
-        textOnly,
-      });
-  const fallbackUseful = fallback.groups.some((group) =>
-    group.matches.some(isImplementationSourceMatch),
-  );
+  const preservePathEvidence = fallbackPreflight?.hasPathSupplementedCoverage ?? false;
+  const fallback =
+    directUseful && !preservePathEvidence
+      ? undefined
+      : (fallbackPreflight ??
+        sourceFallbackMatches(root, searchText, {
+          includeTests,
+          limit,
+        }));
+  const fallbackUseful =
+    fallback?.candidates.some((candidate) => isImplementationSourcePath(candidate.filePath)) ??
+    false;
   return {
-    fallbackGroups: fallback.groups,
-    fallbackScanTruncated: fallback.scanTruncated,
+    fallback,
     matches,
     preferFallback: fallbackUseful || matches.length === 0,
     textOnly,
@@ -226,16 +253,18 @@ function printCurrentTreeSourceSearch(result: CurrentTreeSourceSearch): void {
   const notes = [];
   if (result.textOnly) {
     notes.push(
-      result.preferFallback && result.fallbackGroups.length > 0
+      result.preferFallback && (result.fallback?.candidates.length ?? 0) > 0
         ? "Fallback: large repo; structural partial search skipped."
         : "Fallback: large repo; structural search skipped.",
     );
   }
-  if (result.fallbackScanTruncated) {
+  if (result.fallback?.scanStatus === "truncated") {
     notes.push("Collection bound reached; ranking uses the available prefix.");
+  } else if (result.fallback?.scanStatus === "failed") {
+    notes.push("Collection failed; ranking uses the available evidence.");
   }
-  if (result.preferFallback && result.fallbackGroups.length > 0) {
-    printSourceFallbackMatches(result.fallbackGroups, {
+  if (result.preferFallback && result.fallback && result.fallback.candidates.length > 0) {
+    printSourceFallbackMatches(result.fallback, {
       note: notes.join(" "),
     });
     return;
@@ -282,29 +311,32 @@ export function printSourceMatches(
   }
 }
 
-/** Prints partial source matches for a no-hit phrase query. */
+/** Prints file-oriented source candidates with coverage and bounded concrete anchors. */
 function printSourceFallbackMatches(
-  groups: SourceFallbackGroup[],
+  result: SourceFallbackSearch,
   { note = "" }: { note?: string } = {},
 ): void {
-  if (groups.length === 0) {
+  if (result.candidates.length === 0) {
     return;
   }
-  console.log("\nNo matches, fallback to partial matches:");
+  console.log(
+    result.fullCoverage
+      ? "\nCurrent-tree source candidates:"
+      : "\nNo whole-query source match; partial candidates:",
+  );
   if (note) {
     console.log(`  ${note}`);
   }
-  for (const group of groups) {
-    console.log(`  ${group.term}:`);
-    for (const item of group.matches) {
-      console.log(
-        `    - ${item.engine} ${item.filePath}:${item.line}:${item.column} [${item.kind}]`,
-      );
-      console.log(`        ${item.text}`);
+  for (const candidate of result.candidates) {
+    console.log(
+      `  - ${candidate.filePath} [terms ${candidate.matchedTerms.length}/${result.queryTerms.length}: ${candidate.matchedTerms.join(", ")}]`,
+    );
+    for (const anchor of candidate.anchors) {
+      console.log(`      ${anchor.line}:${anchor.column} ${anchor.text}`);
     }
-    if (group.truncated) {
-      console.log("    ...");
-    }
+  }
+  if (result.totalCandidates > result.candidates.length) {
+    console.log(`  ... ${result.totalCandidates - result.candidates.length} more candidates`);
   }
 }
 

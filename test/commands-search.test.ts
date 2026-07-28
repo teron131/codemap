@@ -588,8 +588,10 @@ describe("search command handler", () => {
     ).resolves.toBe(0);
 
     const output = logLines();
-    expect(output).toContain("  - src/tools/registry.ts [file]");
-    expect(output.indexOf("  - src/tools/registry.ts [file]")).toBeLessThan(
+    const ownerIndex = output.findIndex((line) => line.includes("src/tools/registry.ts"));
+    expect(ownerIndex).toBeGreaterThanOrEqual(0);
+    expect(output[ownerIndex]).toContain("[terms 2/2: tool, registry]");
+    expect(ownerIndex).toBeLessThan(
       output.findIndex((line) => line.includes("Initialize the tool registry")),
     );
   });
@@ -682,14 +684,46 @@ describe("search command handler", () => {
     const output = logLines().join("\n");
     expect(output).toContain("Search: where manifest matches saved");
     expect(output).not.toContain("\nSource matches:");
-    expect(output).toContain("\nNo matches, fallback to partial matches:");
-    expect(output).toContain("  manifest:");
+    expect(output).toContain("\nNo whole-query source match; partial candidates:");
+    expect(output).toContain("[terms 2/3: manifest, match]");
     expect(output).toContain("src/pdf.ts");
-    expect(output.indexOf("src/pdf.ts")).toBeLessThan(output.indexOf("src/a-manifest.ts"));
+    expect(output).not.toContain("src/a-manifest.ts");
     expect(output).not.toContain("package.json");
     expect(output).toContain("writeManifest");
-    expect(output).toContain("  match:");
-    expect(output).not.toContain("  matche:");
+    expect(output).toContain("matchRows");
+    expect(output).not.toContain("matche,");
+  });
+
+  it("preserves fallback evidence when a phrase has one meaningful term", async () => {
+    writeFileSync(
+      path.join(workDir, "src", "fallback-policy.ts"),
+      "export const fallbackPolicy = true;\n",
+      "utf8",
+    );
+    writeFileSync(
+      path.join(workDir, "src", "fallback-cache.ts"),
+      "export const fallbackCache = true;\n",
+      "utf8",
+    );
+    writeFileSync(
+      path.join(workDir, "src", "fallback-render.ts"),
+      "export const fallbackRender = true;\n",
+      "utf8",
+    );
+
+    await expect(
+      commandSearch(["where", "fallback"], {
+        projectRoot: workDir,
+        limit: "3",
+      }),
+    ).resolves.toBe(0);
+
+    const output = logLines().join("\n");
+    expect(output).toContain("No whole-query source match; partial candidates:");
+    expect(output).toContain("src/fallback-policy.ts [terms 1/1: fallback]");
+    expect(output).toContain("... 1 more candidates");
+    expect(output.match(/\[terms 1\/1: fallback]/g)).toHaveLength(2);
+    expect(output).not.toContain("Source matches:\n  none");
   });
 
   it("does not let a documentation phrase suppress implementation fallback evidence", async () => {
@@ -717,7 +751,7 @@ describe("search command handler", () => {
     ).resolves.toBe(0);
 
     const output = logLines().join("\n");
-    expect(output).toContain("No matches, fallback to partial matches:");
+    expect(output).toContain("No whole-query source match; partial candidates:");
     expect(output).toContain("src/approval-policy.ts");
     expect(output).not.toContain("README.md");
   });
@@ -733,8 +767,8 @@ describe("search command handler", () => {
     ).resolves.toBe(0);
 
     const output = logLines().join("\n");
-    expect(output).toContain("  class:");
-    expect(output).not.toContain("  clas:");
+    expect(output).toContain("[terms 1/4: class]");
+    expect(output).not.toContain(": clas]");
   });
 
   it("prints graph search relationships without internal edge syntax", async () => {

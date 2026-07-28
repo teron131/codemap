@@ -60,10 +60,10 @@ describe("large-repo command fallbacks", () => {
     ).resolves.toBe(0);
 
     const output = logLines().join("\n");
-    expect(output).toContain("\nNo matches, fallback to partial matches:");
+    expect(output).toContain("\nNo whole-query source match; partial candidates:");
     expect(output).toContain("  Fallback: large repo; structural partial search skipped.");
-    expect(output).toContain("  attestation:");
-    expect(output).toContain("    - rg ./src/policy.ts:");
+    expect(output).toContain("./src/policy.ts [terms 2/3: policy, attestation]");
+    expect(output).toContain("1:24 export function resolveAttestation()");
     expect(output).not.toContain("ast-grep");
   });
 

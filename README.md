@@ -53,7 +53,7 @@ codemap --help
 | Command | Primary evidence | Purpose |
 | --- | --- | --- |
 | `summary` | Codebase Memory architecture, then current-tree fallback | Compact repository orientation. |
-| `search <text>` | Current-tree paths and exact definitions, then Codebase Memory ranked search, then ast-grep plus `rg` fallback | Broad path, concept, symbol, and text discovery. |
+| `search <text>` | Current-tree paths, exact definitions and text, and decisive locally cohesive multi-term source candidates; then Codebase Memory ranked search and local fallback | Broad path, concept, symbol, and text discovery. |
 | `search --graph <text>` | Codebase Memory graph search, then current-tree graph fallback | Relationship-aware discovery. |
 | `search --semantic <text>` | Codebase Memory semantic graph search, then current-tree fallback | Vocabulary-bridging discovery. |
 | `search calls <name>` | ast-grep, or labeled Python regex fallback | Call-shaped source matches. |
