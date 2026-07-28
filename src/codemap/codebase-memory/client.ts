@@ -17,6 +17,8 @@ import {
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 
+import { arrayValue, recordValue } from "../json-utils.js";
+
 type JsonObject = Record<string, unknown>;
 
 type JsonRpcResponse = {
@@ -750,16 +752,6 @@ function codebaseMemoryErrorText(value: string): boolean {
     /^(error|failed|invalid|unknown)\b/i.test(value) ||
     /\b(required|must be|not found|not indexed|unavailable)\b/i.test(value)
   );
-}
-
-/** Returns object records while rejecting arrays and primitives. */
-export function recordValue(value: unknown): JsonObject {
-  return isRecord(value) ? value : {};
-}
-
-/** Returns arrays while rejecting other JSON values. */
-export function arrayValue(value: unknown): unknown[] {
-  return Array.isArray(value) ? value : [];
 }
 
 /** Converts number-like values into nullable numbers. */

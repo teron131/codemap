@@ -1,16 +1,11 @@
-/** Re-exports optional CodebaseMemory MCP integration helpers. */
+/** Re-exports optional Codebase Memory MCP integration helpers. */
 export {
-  type CodebaseMemoryReadyProject,
-  type CodebaseMemoryToolResult,
   callCodebaseMemoryTool,
-  codebaseMemoryEnabled,
   codebaseMemoryFailureReason,
   withFreshCodebaseMemoryProject,
 } from "./client.js";
+export type { CodebaseMemoryChangeOptions, CodebaseMemoryStatusResult } from "./queries.js";
 export {
-  type CodebaseMemoryChangeOptions,
-  type CodebaseMemoryIndexResult,
-  type CodebaseMemoryStatusResult,
   codebaseMemoryChanges,
   codebaseMemoryIndex,
   codebaseMemoryProjects,

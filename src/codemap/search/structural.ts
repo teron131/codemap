@@ -15,6 +15,7 @@ import {
   targetFiles,
 } from "../ast-grep/index.js";
 import { expandUser } from "../common.js";
+import { escapeRegExp } from "../text-utils.js";
 
 const CALL_TARGET_RE = /^[A-Za-z_$][A-Za-z0-9_$]*(\.[A-Za-z_$][A-Za-z0-9_$]*)*$/;
 
@@ -168,9 +169,4 @@ function pythonDefinitionLine(line: string, target: string): boolean {
   }
   const name = escapeRegExp(target);
   return new RegExp(`^\\s*(?:(?:async\\s+)?def|class)\\s+${name}\\s*\\(`).test(line);
-}
-
-/** Escapes text for literal use inside regular expressions. */
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

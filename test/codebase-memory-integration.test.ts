@@ -36,14 +36,14 @@ import {
   commandSummary,
 } from "../src/codemap/commands/index.js";
 import {
+  codebaseMemoryInspect,
+  renderCodebaseMemoryInspect,
+} from "../src/codemap/inspect/index.js";
+import {
   printCodebaseMemoryGraphSearch,
   printCodebaseMemorySearch,
   printCodebaseMemorySemanticSearch,
 } from "../src/codemap/search/codebase-memory.js";
-import {
-  codebaseMemoryInspect,
-  renderCodebaseMemoryInspect,
-} from "../src/codemap/source/inspection/index.js";
 
 const workspaceRoot = process.cwd();
 let workDir: string;

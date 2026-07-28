@@ -1,11 +1,10 @@
 /** Provides normalized Codebase Memory operations for backend diagnostics and signal queries. */
 import { performance } from "node:perf_hooks";
 
+import { arrayValue, recordValue } from "../json-utils.js";
 import {
-  arrayValue,
   callCodebaseMemoryTool,
   type CodebaseMemoryReadyProject,
-  recordValue,
   withFreshCodebaseMemoryProject,
 } from "./client.js";
 

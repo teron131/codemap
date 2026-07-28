@@ -6,7 +6,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { commandSummary, main } from "../src/codemap/commands/index.js";
-import { renderSummaryText } from "../src/codemap/rendering/index.js";
+import { renderSummaryText } from "../src/codemap/summary/index.js";
 
 const workspaceRoot = process.cwd();
 let workDir: string;

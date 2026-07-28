@@ -5,8 +5,8 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { renderSignalText, selectPayloadSection } from "../src/codemap/source/signals/index.js";
-import { buildLightweightSignalPayload } from "../src/codemap/source/signals/lightweight.js";
+import { renderSignalText, selectPayloadSection } from "../src/codemap/signals/index.js";
+import { buildLightweightSignalPayload } from "../src/codemap/signals/lightweight.js";
 
 const workspaceRoot = process.cwd();
 let workDir: string;
