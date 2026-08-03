@@ -9,6 +9,7 @@ import { addSignalsParser } from "./signals.js";
 import { addSummaryParser } from "./summary.js";
 
 const COMMAND_NAMES = new Set(["backend", "index", "inspect", "search", "signals", "summary"]);
+const OUTPUT_BYTE_LIMIT = OUTPUT_TOKEN_LIMIT * BYTES_PER_ESTIMATED_TOKEN;
 
 type OutputBudgetResult = {
   output: string;
@@ -120,16 +121,12 @@ function normalizedArgv(argv: string[]): string[] {
 
 /** Applies one conservative final-output budget while preserving JSON validity. */
 function applyOutputBudget(output: string): OutputBudgetResult {
+  if (fitsOutputBudget(output)) {
+    return { output, notice: null };
+  }
   const parsed = parseJsonOutput(output);
   if (parsed !== null) {
-    const compact = `${JSON.stringify(parsed.value)}\n`;
-    if (estimatedTokens(compact) <= OUTPUT_TOKEN_LIMIT) {
-      return { output: compact, notice: null };
-    }
     return boundedJsonOutput(parsed.value);
-  }
-  if (estimatedTokens(output) <= OUTPUT_TOKEN_LIMIT) {
-    return { output, notice: null };
   }
   return boundedTextOutput(output);
 }
@@ -152,6 +149,7 @@ function boundedJsonOutput(value: unknown): OutputBudgetResult {
   const groups: JsonArrayGroup[] = [];
   const target = jsonSkeleton(value, groups);
   const total = countJsonArrayItems(value);
+  let outputBytes = Buffer.byteLength(JSON.stringify(target), "utf8") + 1;
   let shown = 0;
 
   while (true) {
@@ -166,16 +164,17 @@ function boundedJsonOutput(value: unknown): OutputBudgetResult {
       const childGroups: JsonArrayGroup[] = [];
       const sourceItem = group.source[group.nextIndex];
       const targetItem = Array.isArray(sourceItem)
-        ? structuredClone(sourceItem)
+        ? sourceItem
         : jsonSkeleton(sourceItem, childGroups);
-      group.target.push(targetItem);
-      const candidate = `${JSON.stringify(target)}\n`;
-      if (estimatedTokens(candidate) > OUTPUT_TOKEN_LIMIT) {
-        group.target.pop();
+      const itemBytes =
+        Buffer.byteLength(JSON.stringify(targetItem), "utf8") + (group.target.length > 0 ? 1 : 0);
+      if (outputBytes + itemBytes > OUTPUT_BYTE_LIMIT) {
         group.blocked = true;
         continue;
       }
+      group.target.push(targetItem);
       group.nextIndex += 1;
+      outputBytes += itemBytes;
       shown += 1;
       groups.push(...childGroups);
     }
@@ -187,12 +186,12 @@ function boundedJsonOutput(value: unknown): OutputBudgetResult {
   const rowOutput = `${JSON.stringify(target)}\n`;
   let output = rowOutput;
   for (const maxStringBytes of [4_096, 1_024, 256, 64, 16]) {
-    if (estimatedTokens(output) <= OUTPUT_TOKEN_LIMIT) {
+    if (fitsOutputBudget(output)) {
       break;
     }
     output = `${JSON.stringify(truncateJsonStrings(target, maxStringBytes))}\n`;
   }
-  if (estimatedTokens(output) > OUTPUT_TOKEN_LIMIT) {
+  if (!fitsOutputBudget(output)) {
     output = `${JSON.stringify(Array.isArray(value) ? [] : isRecord(value) ? {} : "")}\n`;
   }
   const truncated = Math.max(0, total - shown);
@@ -280,14 +279,16 @@ function utf8Prefix(value: string, maxBytes: number): string {
 function boundedTextOutput(output: string): OutputBudgetResult {
   const lines = output.trimEnd().split(/\r?\n/);
   const shown: string[] = [];
+  let outputBytes = 0;
   for (const line of lines) {
     const nextShown = shown.length + 1;
     const footer = textBudgetFooter(nextShown, lines.length);
-    const candidate = `${[...shown, line, footer].join("\n")}\n`;
-    if (estimatedTokens(candidate) > OUTPUT_TOKEN_LIMIT) {
+    const lineBytes = Buffer.byteLength(line, "utf8") + 1;
+    if (outputBytes + lineBytes + Buffer.byteLength(footer, "utf8") + 1 > OUTPUT_BYTE_LIMIT) {
       break;
     }
     shown.push(line);
+    outputBytes += lineBytes;
   }
   const footer = textBudgetFooter(shown.length, lines.length);
   return {
@@ -321,6 +322,11 @@ function outputBudgetNotice({
 /** Conservatively estimates tokens from final UTF-8 bytes. */
 function estimatedTokens(output: string): number {
   return Math.ceil(Buffer.byteLength(output, "utf8") / BYTES_PER_ESTIMATED_TOKEN);
+}
+
+/** Checks final UTF-8 bytes against the conservative token allowance. */
+function fitsOutputBudget(output: string): boolean {
+  return Buffer.byteLength(output, "utf8") <= OUTPUT_BYTE_LIMIT;
 }
 
 /** Checks for a JSON object while rejecting arrays and primitives. */
