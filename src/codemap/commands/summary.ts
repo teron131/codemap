@@ -1,10 +1,8 @@
-/** Defines CLI behavior for backend-first source summary output. */
+/** Defines CLI behavior for the focused repository-orientation summary. */
 import type { Command } from "commander";
 
 import { resolveProjectRoot } from "../common.js";
-import { currentTreeSummaryGraph } from "../source/graph/index.js";
-import { codebaseMemoryArchitectureSummary } from "../summary/architecture.js";
-import { buildSummaryText } from "../summary/index.js";
+import { buildRepositorySummary, renderSummaryText } from "../summary/index.js";
 import { addProjectRootArgument } from "./options.js";
 
 type SummaryOptions = {
@@ -29,14 +27,9 @@ export function addSummaryParser(program: Command): void {
   addProjectRootArgument(summary);
 }
 
-/** Builds and prints backend architecture or current-tree fallback output. */
+/** Builds and prints current-tree context enriched by native architecture facts. */
 export function commandSummary(options: SummaryOptions, rootOptions: RootOptions = {}): number {
   const root = resolveProjectRoot(options.projectRoot ?? rootOptions.projectRoot);
-  const backendSummary = codebaseMemoryArchitectureSummary(root);
-  if (backendSummary !== null) {
-    console.log(backendSummary);
-    return 0;
-  }
-  console.log(buildSummaryText(currentTreeSummaryGraph(root), { root }).trim());
+  console.log(renderSummaryText(buildRepositorySummary(root)).trim());
   return 0;
 }

@@ -91,6 +91,49 @@ describe("TypeScript-family scanner", () => {
     }
   });
 
+  it("collects value, type, and aliased public export names", () => {
+    const filePath = path.join(workDir, "surface.ts");
+    writeFileSync(
+      filePath,
+      [
+        "const internal = true;",
+        "export interface Options { enabled: boolean }",
+        "export type Result = { ok: boolean };",
+        "export enum Mode { Fast }",
+        "export class Runner {}",
+        "export function run() { return internal; }",
+        "export const version = '1';",
+        "export const api = { run() { const nestedLocal = true; return nestedLocal; } };",
+        "export { internal as publicFlag };",
+      ].join("\n"),
+      "utf8",
+    );
+
+    expect(scanTypescriptFile(filePath, { relPath: "surface.ts" }).exportedNames).toEqual([
+      "Options",
+      "Result",
+      "Mode",
+      "Runner",
+      "run",
+      "version",
+      "api",
+      "publicFlag",
+    ]);
+  });
+
+  it("keeps public exports when a large source skips detailed AST metrics", () => {
+    const filePath = path.join(workDir, "large-surface.ts");
+    writeFileSync(
+      filePath,
+      `export const publicApi = true;\n/*${"x".repeat(256 * 1024)}*/\n`,
+      "utf8",
+    );
+
+    expect(scanTypescriptFile(filePath, { relPath: "large-surface.ts" }).exportedNames).toEqual([
+      "publicApi",
+    ]);
+  });
+
   it("resolves imports across JavaScript and TypeScript module suffixes", () => {
     const rows = [
       ["src/main.mts", "import './worker.js';\n"],

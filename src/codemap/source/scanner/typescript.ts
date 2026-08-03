@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
-import { Lang, parse, type SgNode } from "@ast-grep/napi";
+import { Lang, type NapiConfig, parse, type SgNode } from "@ast-grep/napi";
 
 import { ENTRYPOINT_BASENAMES, TYPESCRIPT_LANG_BY_SUFFIX } from "./constants.js";
 import {
@@ -12,24 +12,27 @@ import {
   createFileMetrics,
   type FileMetrics,
   sourceLineCount,
+  type TypeScriptReexportBinding,
 } from "./metrics.js";
 
-/** Walks ast-grep syntax nodes depth-first. */
-export function walkSg(node: SgNode): SgNode[] {
-  const nodes = [node];
-  for (const child of node.children()) {
-    nodes.push(...walkSg(child));
-  }
-  return nodes;
-}
+/** Keeps native AST extraction below the large-script teardown failure boundary. */
+const MAX_AST_SOURCE_BYTES = 256 * 1024;
+const TYPESCRIPT_SCAN_KINDS = [
+  "import_statement",
+  "call_expression",
+  "export_statement",
+  "class_declaration",
+  "function_declaration",
+  "variable_declarator",
+];
 
 /** Finds a direct ast-grep child node by kind. */
-export function directChild(node: SgNode, ...kinds: string[]): SgNode | null {
+function directChild(node: SgNode, ...kinds: string[]): SgNode | null {
   return node.children().find((child) => kinds.includes(String(child.kind()))) ?? null;
 }
 
 /** Finds a descendant ast-grep node by kind. */
-export function descendant(node: SgNode | null, ...kinds: string[]): SgNode | null {
+function descendant(node: SgNode | null, ...kinds: string[]): SgNode | null {
   if (node === null) {
     return null;
   }
@@ -46,7 +49,7 @@ export function descendant(node: SgNode | null, ...kinds: string[]): SgNode | nu
 }
 
 /** Reads string text from an ast-grep node. */
-export function stringValue(node: SgNode | null): string {
+function stringValue(node: SgNode | null): string {
   if (node === null) {
     return "";
   }
@@ -59,18 +62,18 @@ export function stringValue(node: SgNode | null): string {
 }
 
 /** Builds a function span from an ast-grep node range. */
-export function spanFor(node: SgNode): number {
+function spanFor(node: SgNode): number {
   const nodeRange = node.range();
   return Math.max(1, nodeRange.end.line - nodeRange.start.line + 1);
 }
 
 /** Finds the one-based start line for an ast-grep node. */
-export function startLineFor(node: SgNode): number {
+function startLineFor(node: SgNode): number {
   return node.range().start.line + 1;
 }
 
 /** Records TypeScript import specifiers on file metrics. */
-export function addTypescriptImport(metrics: FileMetrics, target: string): void {
+function addTypescriptImport(metrics: FileMetrics, target: string): void {
   if (!target) {
     return;
   }
@@ -82,12 +85,17 @@ export function addTypescriptImport(metrics: FileMetrics, target: string): void 
   }
 }
 
-/** Records TypeScript re-export specifiers on file metrics. */
-export function addTypescriptReexport(metrics: FileMetrics, target: string): void {
+/** Records TypeScript re-export specifiers and their public name bindings. */
+function addTypescriptReexport(
+  metrics: FileMetrics,
+  target: string,
+  bindings: TypeScriptReexportBinding[] | null,
+): void {
   if (!target) {
     return;
   }
   metrics.typescriptReexportTargets.push(target);
+  metrics.typescriptReexports.push({ target, bindings });
   if (target.startsWith("./") || target.startsWith("../")) {
     metrics.typescriptLocalReexportTargets.push(target);
     metrics.reexportsLocal += 1;
@@ -95,15 +103,39 @@ export function addTypescriptReexport(metrics: FileMetrics, target: string): voi
   }
 }
 
+/** Extracts named, aliased, namespace, or star re-export bindings. */
+function typescriptReexportBindings(node: SgNode): TypeScriptReexportBinding[] | null {
+  const clause = directChild(node, "export_clause");
+  if (clause !== null) {
+    return clause
+      .children()
+      .filter((child) => child.kind() === "export_specifier")
+      .flatMap((specifier) => {
+        const identifiers = specifier
+          .children()
+          .filter((child) => child.kind() === "identifier")
+          .map((child) => child.text());
+        const imported = identifiers[0];
+        const exported = identifiers.at(-1);
+        return imported === undefined || exported === undefined ? [] : [{ imported, exported }];
+      });
+  }
+  const namespace = directChild(node, "namespace_export");
+  const exported = directChild(namespace ?? node, "identifier");
+  return namespace === null || exported === null
+    ? null
+    : [{ imported: null, exported: exported.text() }];
+}
+
 /** Records a TypeScript exported symbol on file metrics. */
-export function addExportedName(metrics: FileMetrics, name: string): void {
+function addExportedName(metrics: FileMetrics, name: string): void {
   if (name && !metrics.exportedNames.includes(name)) {
     metrics.exportedNames.push(name);
   }
 }
 
 /** Records a TypeScript function-like definition span on file metrics. */
-export function addTypescriptFunction(
+function addTypescriptFunction(
   metrics: FileMetrics,
   relPath: string,
   name: string,
@@ -124,13 +156,27 @@ export function addTypescriptFunction(
 }
 
 /** Checks whether a TypeScript declaration is module-level state. */
-export function isTypescriptModuleLevelVariable(node: SgNode): boolean {
-  const ancestors = node.ancestors().map((ancestor) => ancestor.kind());
-  return ancestors.includes("program") && !ancestors.includes("statement_block");
+function isTypescriptModuleLevelVariable(node: SgNode): boolean {
+  let parent = node.parent();
+  while (parent !== null) {
+    const kind = parent.kind();
+    if (kind === "statement_block") {
+      return false;
+    }
+    if (kind === "program") {
+      return true;
+    }
+    parent = parent.parent();
+  }
+  return false;
 }
 
-/** Collects TypeScript exported names from export syntax nodes. */
-function collectTypescriptExportNames(metrics: FileMetrics, node: SgNode): void {
+/** Collects declaration and re-export names from one export syntax node. */
+function collectTypescriptExportNames(
+  metrics: FileMetrics,
+  node: SgNode,
+  bindings: TypeScriptReexportBinding[] | null,
+): void {
   for (const child of node.children()) {
     const kind = child.kind();
     if (kind === "function_declaration") {
@@ -143,26 +189,37 @@ function collectTypescriptExportNames(metrics: FileMetrics, node: SgNode): void 
       if (name !== null) {
         addExportedName(metrics, name.text());
       }
-    } else if (kind === "lexical_declaration" || kind === "variable_declaration") {
-      for (const descendantNode of walkSg(child)) {
-        if (descendantNode.kind() === "variable_declarator") {
-          const name = directChild(descendantNode, "identifier");
-          if (name !== null) {
-            addExportedName(metrics, name.text());
-          }
-        }
+    } else if (
+      kind === "interface_declaration" ||
+      kind === "type_alias_declaration" ||
+      kind === "enum_declaration"
+    ) {
+      const name = directChild(child, "type_identifier", "identifier");
+      if (name !== null) {
+        addExportedName(metrics, name.text());
       }
-    } else if (kind === "export_clause") {
-      for (const descendantNode of walkSg(child)) {
-        if (descendantNode.kind() === "export_specifier") {
-          const name = directChild(descendantNode, "identifier");
-          if (name !== null) {
-            addExportedName(metrics, name.text());
-          }
+    } else if (kind === "lexical_declaration" || kind === "variable_declaration") {
+      for (const declarator of child
+        .children()
+        .filter((candidate) => candidate.kind() === "variable_declarator")) {
+        const name = directChild(declarator, "identifier");
+        if (name !== null) {
+          addExportedName(metrics, name.text());
         }
       }
     }
   }
+  for (const binding of bindings ?? []) {
+    addExportedName(metrics, binding.exported);
+  }
+}
+
+/** Records one export statement without duplicating binding extraction across scan modes. */
+function collectTypescriptExport(metrics: FileMetrics, node: SgNode): void {
+  const bindings = typescriptReexportBindings(node);
+  metrics.exports += 1;
+  addTypescriptReexport(metrics, stringValue(directChild(node, "string")), bindings);
+  collectTypescriptExportNames(metrics, node, bindings);
 }
 
 /** Scans TypeScript-family source with ast-grep syntax nodes. */
@@ -177,14 +234,12 @@ function scanTypescriptWithAstGrep({
   relPath: string;
   metrics: FileMetrics;
 }): boolean {
-  let root: SgNode;
-  try {
-    root = parse(astGrepLanguageForSuffix(path.extname(filePath)), source).root();
-  } catch {
+  const root = parseTypescriptRoot(filePath, source);
+  if (root === null) {
     return false;
   }
 
-  for (const node of walkSg(root)) {
+  for (const node of root.findAll(typescriptScanRule(filePath))) {
     const kind = node.kind();
     if (kind === "import_statement") {
       addTypescriptImport(metrics, stringValue(directChild(node, "string")));
@@ -194,9 +249,7 @@ function scanTypescriptWithAstGrep({
         addTypescriptImport(metrics, stringValue(descendant(node, "string")));
       }
     } else if (kind === "export_statement") {
-      metrics.exports += 1;
-      addTypescriptReexport(metrics, stringValue(directChild(node, "string")));
-      collectTypescriptExportNames(metrics, node);
+      collectTypescriptExport(metrics, node);
     } else if (kind === "class_declaration") {
       const name = directChild(node, "type_identifier", "identifier");
       if (name !== null) {
@@ -241,6 +294,49 @@ function scanTypescriptWithAstGrep({
   return true;
 }
 
+/** Selects relevant syntax nodes in native code instead of materializing the whole tree in JS. */
+function typescriptScanRule(filePath: string): NapiConfig {
+  const suffix = path.extname(filePath);
+  const kinds =
+    suffix === ".jsx" || suffix === ".tsx"
+      ? [...TYPESCRIPT_SCAN_KINDS, "jsx_element"]
+      : TYPESCRIPT_SCAN_KINDS;
+  return { rule: { any: kinds.map((kind) => ({ kind })) } };
+}
+
+/** Keeps imports and public exports for large files without deep native AST traversal. */
+function scanTypescriptSurfaceWithAstGrep({
+  source,
+  filePath,
+  metrics,
+}: {
+  source: string;
+  filePath: string;
+  metrics: FileMetrics;
+}): boolean {
+  const root = parseTypescriptRoot(filePath, source);
+  if (root === null) {
+    return false;
+  }
+  for (const node of root.children()) {
+    if (node.kind() === "import_statement") {
+      addTypescriptImport(metrics, stringValue(directChild(node, "string")));
+    } else if (node.kind() === "export_statement") {
+      collectTypescriptExport(metrics, node);
+    }
+  }
+  return true;
+}
+
+/** Parses one TypeScript-family source while treating native parser failures as no AST data. */
+function parseTypescriptRoot(filePath: string, source: string): SgNode | null {
+  try {
+    return parse(astGrepLanguageForSuffix(path.extname(filePath)), source).root();
+  } catch {
+    return null;
+  }
+}
+
 /** Scans one TypeScript-family file into source metrics. */
 export function scanTypescriptFile(
   filePath: string,
@@ -261,7 +357,11 @@ export function scanTypescriptFile(
   metrics.lines = sourceLineCount(source);
   metrics.entrypointHint =
     ENTRYPOINT_BASENAMES.has(path.basename(filePath)) || source.includes("require.main === module");
-  scanTypescriptWithAstGrep({ source, filePath, relPath, metrics });
+  if (Buffer.byteLength(source, "utf8") <= MAX_AST_SOURCE_BYTES) {
+    scanTypescriptWithAstGrep({ source, filePath, relPath, metrics });
+  } else {
+    scanTypescriptSurfaceWithAstGrep({ source, filePath, metrics });
+  }
   return metrics;
 }
 

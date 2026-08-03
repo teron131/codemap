@@ -46,7 +46,9 @@ export function cleanBlockComment(lines: string[]): string {
   for (const line of lines) {
     let stripped = line.trim();
     stripped = removePrefix(removePrefix(stripped, "/**"), "/*");
-    stripped = removeSuffix(stripped, "*/");
+    if (stripped.endsWith("*/")) {
+      stripped = stripped.slice(0, -2);
+    }
     if (stripped.startsWith("*")) {
       stripped = stripped.slice(1);
     }
@@ -71,6 +73,7 @@ export function isIgnorableFileComment(comment: string): boolean {
     lowered.startsWith("eslint-") ||
     lowered.startsWith("@ts-") ||
     lowered.startsWith("biome-ignore") ||
+    /^\/?\s*<reference\b/.test(lowered) ||
     lowered.startsWith("oxlint-")
   );
 }
@@ -336,11 +339,6 @@ function splitLines(source: string): string[] {
 /** Removes a prefix from text when present. */
 function removePrefix(value: string, prefix: string): string {
   return value.startsWith(prefix) ? value.slice(prefix.length) : value;
-}
-
-/** Removes a suffix from text when present. */
-function removeSuffix(value: string, suffix: string): string {
-  return value.endsWith(suffix) ? value.slice(0, -suffix.length) : value;
 }
 
 /** Sorts text values with stable lexical ordering. */
