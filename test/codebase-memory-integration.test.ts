@@ -921,19 +921,28 @@ describe("Codebase Memory integration", () => {
   });
 
   it("prints compact backend architecture summaries", () => {
+    const sourceDir = path.join(workDir, "src");
+    mkdirSync(sourceDir, { recursive: true });
+    writeFileSync(
+      path.join(sourceDir, "needle.ts"),
+      "export function needle() {}\nexport function callerOne() { needle(); }\n",
+      "utf8",
+    );
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     try {
       expect(commandSummary({ projectRoot: workDir })).toBe(0);
       const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
 
-      expect(output).toContain("# CodebaseMemory Architecture");
-      expect(output).toContain("nodes: 12, edges: 34");
-      expect(output).toContain("node labels: Function 7");
-      expect(output).toContain("## Hotspots (hidden generic: 1)");
-      expect(output).toContain("- needle (fan-in 3, mock-project.src.needle)");
-      expect(output).toContain("top: needle, callerOne");
-      expect(output).not.toContain("top: needle, needle");
-      expect(output).not.toContain("- get (fan-in");
+      expect(output).toContain(`# ${path.basename(workDir)}`);
+      expect(output).toContain("## Hotspots");
+      expect(output).toContain("needle · src/needle.ts · 33.3%");
+      expect(output).toContain("## Clusters");
+      expect(output).toContain("core · 57.1% · 75%");
+      expect(output).toContain("└─ needle, callerOne");
+      expect(output).not.toContain("hiddenTestHelper");
+      expect(output).not.toContain("`get`");
+      expect(output).not.toContain("nodes: 12");
+      expect(output).not.toContain("edges: 34");
       expect(output).not.toContain('"file_tree"');
       expect(output).not.toContain('"node_labels"');
     } finally {
@@ -941,16 +950,47 @@ describe("Codebase Memory integration", () => {
     }
   });
 
-  it("notes sparse backend architecture summaries without symbol nodes", () => {
+  it("preserves backend architecture responses larger than the child pipe buffer", () => {
+    vi.stubEnv("CODEBASE_MEMORY_MOCK_LARGE_ARCHITECTURE", "1");
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      expect(commandSummary({ projectRoot: workDir })).toBe(0);
+      const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+
+      expect(output).toContain("## Hotspots");
+      expect(output).not.toContain("Codebase Memory unavailable");
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it("reports the backend reason when architecture is genuinely unavailable", () => {
+    vi.stubEnv("CODEBASE_MEMORY_MOCK_ERROR_TOOL", "get_architecture");
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      expect(commandSummary({ projectRoot: workDir })).toBe(0);
+      const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+
+      expect(output).toContain("Codebase Memory unavailable; hotspots and clusters omitted.");
+      expect(output).toContain("Reason: project not found or not indexed.");
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it("omits sparse backend inventory without inventing symbol insights", () => {
     vi.stubEnv("CODEBASE_MEMORY_MOCK_SPARSE_ARCHITECTURE", "1");
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     try {
       expect(commandSummary({ projectRoot: workDir })).toBe(0);
       const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
 
-      expect(output).toContain("node labels: File 12, Module 12");
-      expect(output).toContain("note: no function/class/method nodes; summary is file-level only.");
+      expect(output).toContain(`# ${path.basename(workDir)}`);
+      expect(output).not.toContain("File 12");
+      expect(output).not.toContain("Module 12");
       expect(output).not.toContain("## Hotspots");
+      expect(output).not.toContain("## Clusters");
+      expect(output).not.toContain("Codebase Memory unavailable");
     } finally {
       logSpy.mockRestore();
     }
@@ -1002,7 +1042,7 @@ describe("Codebase Memory integration", () => {
       expect(commandSummary({ projectRoot: workDir })).toBe(0);
       const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
       expect(output).toContain("# codebase-memory-integration-");
-      expect(output).not.toContain("# CodebaseMemory Architecture");
+      expect(output).toContain("Codebase Memory unavailable; hotspots and clusters omitted.");
     } finally {
       logSpy.mockRestore();
     }
@@ -1824,7 +1864,7 @@ const payloads = {
               label: "core",
               members: 4,
               cohesion: 0.75,
-              top_nodes: ["needle", "get", "needle", "callerOne"],
+              top_nodes: ["needle", "get", "needle", "callerOne", "hiddenTestHelper"],
             },
           ],
           entry_points: [
@@ -1839,6 +1879,9 @@ const payloads = {
               type: "file",
             },
           ],
+          ...(process.env.CODEBASE_MEMORY_MOCK_LARGE_ARCHITECTURE === "1"
+            ? { transport_padding: "x".repeat(128 * 1024) }
+            : {}),
         },
   search_code:
 	process.env.CODEBASE_MEMORY_MOCK_UNKNOWN_SEARCH === "1"

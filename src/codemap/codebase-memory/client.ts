@@ -16,6 +16,7 @@ import {
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { arrayValue, recordValue } from "../json-utils.js";
 
@@ -74,113 +75,6 @@ const READY_INDEX_STATUSES = new Set(["complete", "completed", "indexed", "ready
 const activeOperations: ActiveCodebaseMemoryOperation[] = [];
 const failureReasons = new Map<string, string>();
 const lockSleepView = new Int32Array(new SharedArrayBuffer(4));
-
-/** Supervises one MCP child so its process lifetime remains represented in the root lock. */
-const LOCKED_CHILD_SOURCE = String.raw`
-const { spawnSync } = require("node:child_process");
-const {
-  mkdirSync,
-  readFileSync,
-  rmdirSync,
-  statSync,
-  writeFileSync,
-} = require("node:fs");
-
-const [command, timeoutText, lockPath, token, parentPidText] = process.argv.slice(1);
-const timeoutMs = Number(timeoutText);
-const parentPid = Number(parentPidText);
-const recoveryPath = lockPath + ".recovery";
-const sleepView = new Int32Array(new SharedArrayBuffer(4));
-const recoveryGraceMs = ${INCOMPLETE_LOCK_GRACE_MS};
-const childRecoveryGraceMs = ${CHILD_RECOVERY_GRACE_MS};
-
-function errorCode(error) {
-  return error && typeof error === "object" && typeof error.code === "string"
-    ? error.code
-    : null;
-}
-
-function tryClaimRecovery() {
-  try {
-    mkdirSync(recoveryPath);
-    return true;
-  } catch (error) {
-    if (errorCode(error) !== "EEXIST") {
-      return false;
-    }
-  }
-  try {
-    if (Date.now() - statSync(recoveryPath).mtimeMs >= recoveryGraceMs) {
-      rmdirSync(recoveryPath);
-      mkdirSync(recoveryPath);
-      return true;
-    }
-  } catch {}
-  return false;
-}
-
-function claimRecovery() {
-  const deadline = Date.now() + childRecoveryGraceMs;
-  while (Date.now() <= deadline) {
-    if (tryClaimRecovery()) {
-      return true;
-    }
-    Atomics.wait(sleepView, 0, 0, 10);
-  }
-  return false;
-}
-
-function transferLock(pid, recoverAfter) {
-  if (!claimRecovery()) {
-    return false;
-  }
-  try {
-    const owner = JSON.parse(readFileSync(lockPath, "utf8"));
-    if (owner.token !== token) {
-      return false;
-    }
-    writeFileSync(
-      lockPath,
-      JSON.stringify({ pid, token, recoverAfter }),
-      "utf8",
-    );
-    return true;
-  } catch {
-    return false;
-  } finally {
-    try {
-      rmdirSync(recoveryPath);
-    } catch {}
-  }
-}
-
-if (!transferLock(process.pid, Date.now() + timeoutMs + childRecoveryGraceMs)) {
-  process.stderr.write("CodebaseMemory cache lock ownership was lost before launch.\n");
-  process.exit(70);
-}
-
-const result = spawnSync(command, [], {
-  input: readFileSync(0),
-  timeout: timeoutMs,
-  maxBuffer: 16 * 1024 * 1024,
-});
-const restored = transferLock(parentPid, null);
-if (result.stdout) {
-  process.stdout.write(result.stdout);
-}
-if (result.stderr) {
-  process.stderr.write(result.stderr);
-}
-if (!restored) {
-  process.stderr.write("CodebaseMemory cache lock ownership was lost after launch.\n");
-  process.exit(70);
-}
-if (result.error) {
-  process.stderr.write(result.error.message + "\n");
-  process.exit(1);
-}
-process.exit(result.status ?? 1);
-`;
 
 /** Returns whether the optional CodebaseMemory integration is enabled. */
 export function codebaseMemoryEnabled(): boolean {
@@ -577,14 +471,14 @@ export function callCodebaseMemoryTool(
       : spawnSync(
           process.execPath,
           [
-            "--input-type=commonjs",
-            "--eval",
-            LOCKED_CHILD_SOURCE,
+            ...lockedChildRuntimeArguments(),
             command,
             String(timeoutMs),
             lock.path,
             lock.token,
             String(process.pid),
+            String(INCOMPLETE_LOCK_GRACE_MS),
+            String(CHILD_RECOVERY_GRACE_MS),
           ],
           spawnOptions,
         );
@@ -616,6 +510,13 @@ export function callCodebaseMemoryTool(
     failureReasons.delete(root);
   }
   return { ok: true, value: payload };
+}
+
+/** Locates the compiled supervisor, or loads its TypeScript source during development. */
+function lockedChildRuntimeArguments(): string[] {
+  const extension = path.extname(fileURLToPath(import.meta.url));
+  const childPath = fileURLToPath(new URL(`./locked-child${extension}`, import.meta.url));
+  return extension === ".ts" ? ["--import", import.meta.resolve("tsx"), childPath] : [childPath];
 }
 
 /** Associates a nested provider failure with the active project operation. */

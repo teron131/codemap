@@ -13,6 +13,16 @@ export type VariableSignal = {
   moduleLevel: boolean;
 };
 
+export type TypeScriptReexportBinding = {
+  imported: string | null;
+  exported: string;
+};
+
+export type TypeScriptReexport = {
+  target: string;
+  bindings: TypeScriptReexportBinding[] | null;
+};
+
 export type FileMetrics = {
   path: string;
   relPath: string;
@@ -33,6 +43,7 @@ export type FileMetrics = {
   typescriptLocalImportTargets: string[];
   typescriptReexportTargets: string[];
   typescriptLocalReexportTargets: string[];
+  typescriptReexports: TypeScriptReexport[];
   typescriptExtendsBases: string[];
   pyImportTargets: string[];
   pyLocalImportTargets: string[];
@@ -73,6 +84,7 @@ export function createFileMetrics({
     typescriptLocalImportTargets: [],
     typescriptReexportTargets: [],
     typescriptLocalReexportTargets: [],
+    typescriptReexports: [],
     typescriptExtendsBases: [],
     pyImportTargets: [],
     pyLocalImportTargets: [],

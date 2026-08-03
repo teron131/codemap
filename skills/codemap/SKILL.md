@@ -15,7 +15,7 @@ Graph-backed commands explicitly refresh one non-persistent snapshot per operati
 codemap summary --project-root <path>
 ```
 
-Use `summary` to find repository inventory, likely entrypoints, hubs, backend hotspots, and clusters. Continue with `search` to find a target, `inspect` to expand one known target, and `signals` to compare ranked source metrics.
+Use `summary` for a focused repository overview of README purpose, language mix, structural roles, hotspots, clusters, and the selected public API. If the session hook already provided it for the current tree, do not run it again. Continue with `search` to find a target, `inspect` to expand one known target, and `signals` to compare ranked source metrics.
 
 ## Find Source From A Clue
 

@@ -35,3 +35,15 @@ export function uniqueStrings(values: string[]): string[] {
   }
   return unique;
 }
+
+/** Samples the sorted first, middle, and last extent of a wide text collection. */
+export function extentSamples(values: string[]): string[] {
+  if (values.length <= 3) {
+    return values;
+  }
+  return uniqueStrings([
+    values[0] ?? "",
+    values[Math.floor((values.length - 1) / 2)] ?? "",
+    values.at(-1) ?? "",
+  ]).filter(Boolean);
+}
