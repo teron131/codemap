@@ -52,7 +52,7 @@ codemap --help
 
 | Command | Primary evidence | Purpose |
 | --- | --- | --- |
-| `summary` | Codebase Memory architecture, then current-tree fallback | Compact repository orientation. |
+| `summary` | Current-tree README, language mix, package manifests, imports, and public exports, enriched by Codebase Memory | Focused orientation through README purpose and outline, language percentages, a compact package- or feature-level repository skeleton, call-share hotspots, cohesive clusters, and an at-most-three-level hierarchy of public surfaces selected by entry position, import reach, and breadth, with directly exposed modules and defining exports. |
 | `search <text>` | Current-tree paths, exact definitions and text, and decisive locally cohesive multi-term source candidates; then Codebase Memory ranked search and local fallback | Broad path, concept, symbol, and text discovery. |
 | `search --graph <text>` | Codebase Memory graph search, then current-tree graph fallback | Relationship-aware discovery. |
 | `search --semantic <text>` | Codebase Memory semantic graph search, then current-tree fallback | Vocabulary-bridging discovery. |
