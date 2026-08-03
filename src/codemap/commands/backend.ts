@@ -187,7 +187,7 @@ export function commandBackendQuery(
   const root = resolveBackendRoot(options, rootOptions);
   const result = codebaseMemoryQuery(root, queryText, options.maxRows);
   if (result !== null) {
-    console.log(options.json ? JSON.stringify(result, null, 2) : renderQueryRows(result));
+    console.log(options.json ? JSON.stringify(result) : renderQueryRows(result));
     return 0;
   }
   console.log(backendFailureMessage(root, "Could not run Codebase Memory query."));
@@ -202,7 +202,7 @@ export function commandBackendChanges(
   const root = resolveBackendRoot(options, rootOptions);
   const result = codebaseMemoryChanges(root, backendChangeOptions(options));
   if (result !== null) {
-    console.log(options.json ? JSON.stringify(result, null, 2) : renderBackendChanges(result));
+    console.log(options.json ? JSON.stringify(result) : renderBackendChanges(result));
     return 0;
   }
   console.log(backendFailureMessage(root, "Could not read Codebase Memory change impact."));
