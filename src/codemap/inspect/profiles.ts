@@ -3,7 +3,7 @@ import { existsSync, statSync } from "node:fs";
 import path from "node:path";
 
 import { DETAILED_ANALYSIS_FILE_LIMIT } from "../common.js";
-import { arrayValue, recordValue } from "../json-utils.js";
+import { arrayValue, numberValue, recordValue } from "../json-utils.js";
 import { denseFileCounters } from "../signals/render.js";
 import { type ScanEntry, structureForFile } from "../source/extraction/index.js";
 import type { GraphPayload } from "../source/graph/index.js";
@@ -215,7 +215,7 @@ export function appendFileProfileRow(lines: string[], rows: MetricRow[]): void {
 
 /** Appends file, line, and child summaries for a symbol node. */
 export function appendSymbolProfile(lines: string[], node: MetricRow): void {
-  const nodeType = titleCase(String(node.type ?? "symbol"));
+  const nodeType = capitalize(String(node.type ?? "symbol"));
   if (!["Function", "Class"].includes(nodeType)) {
     return;
   }
@@ -432,13 +432,8 @@ function arrayRows(value: unknown): MetricRow[] {
   return Array.isArray(value) ? (value as MetricRow[]) : [];
 }
 
-/** Reads a numeric field from untrusted row data. */
-function numberValue(value: unknown): number {
-  return Number(value ?? 0);
-}
-
-/** Formats labels for output headings. */
-function titleCase(value: string): string {
+/** Capitalizes the first character without changing the remaining label. */
+function capitalize(value: string): string {
   return value ? `${value[0]?.toUpperCase() ?? ""}${value.slice(1)}` : value;
 }
 

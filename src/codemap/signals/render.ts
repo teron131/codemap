@@ -1,5 +1,5 @@
 /** Renders signal payload sections as readable text output. */
-import { arrayValue, recordValue } from "../json-utils.js";
+import { arrayValue, numberValue, recordValue } from "../json-utils.js";
 import { languageRows, rankDefinitionRowsByMentions, rankFunctionRowsByLength } from "./payload.js";
 import type { SignalRow } from "./schema.js";
 
@@ -90,7 +90,7 @@ function signalTitle(section: string): string {
     "docstring-signals": "# Docstring Signals",
     docstrings: "# Docstrings",
   };
-  return titles[section] ?? `# ${titleCase(section.replaceAll("-", " "))} Signals`;
+  return titles[section] ?? `# ${titleCaseWords(section.replaceAll("-", " "))} Signals`;
 }
 
 /** Appends top ranked metric sections to text output. */
@@ -572,13 +572,8 @@ function valueOrDefault(value: unknown, fallback: unknown): unknown {
   return value ?? fallback;
 }
 
-/** Reads a numeric field from untrusted row data. */
-function numberValue(value: unknown): number {
-  return Number(value ?? 0);
-}
-
-/** Formats labels for output headings. */
-function titleCase(value: string): string {
+/** Title-cases every word while normalizing the remaining letters. */
+function titleCaseWords(value: string): string {
   return value.replace(
     /\w\S*/g,
     (word) => `${word[0]?.toUpperCase() ?? ""}${word.slice(1).toLowerCase()}`,
