@@ -1,6 +1,7 @@
 /** Builds ranked source rows from file metrics and identifier usage. */
 import { readFileSync } from "node:fs";
 
+import { numberValue } from "../json-utils.js";
 import { describeNumbers } from "../math-utils.js";
 import type { FileMetrics, FunctionSpan } from "../source/scanner/index.js";
 import { compareText } from "../text-utils.js";
@@ -323,9 +324,4 @@ function occurrenceCount(occurrences: OccurrenceCounts, name: string): number {
     return occurrences.get(name) ?? 0;
   }
   return numberValue(occurrences[name]);
-}
-
-/** Reads a numeric field from untrusted row data. */
-function numberValue(value: unknown): number {
-  return Number(value ?? 0);
 }

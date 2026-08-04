@@ -281,10 +281,10 @@ function cliJsonMatches(root: string, stdout: string): SyntaxMatch[] {
       engine: "ast-grep",
       filePath: path.relative(root, absoluteFilePath).split(path.sep).join("/"),
       text: String(item.text ?? ""),
-      line: numberValue(start.line) + 1,
-      column: numberValue(start.column) + 1,
-      endLine: numberValue(end.line) + 1,
-      endColumn: numberValue(end.column) + 1,
+      line: numberOrZero(start.line) + 1,
+      column: numberOrZero(start.column) + 1,
+      endLine: numberOrZero(end.line) + 1,
+      endColumn: numberOrZero(end.column) + 1,
       lines: String(item.lines ?? ""),
     };
   });
@@ -300,8 +300,8 @@ function cliRows(stdout: string): AstGrepCliMatch[] {
   return Array.isArray(parsed) ? (parsed as AstGrepCliMatch[]) : [];
 }
 
-/** Reads a numeric field from untrusted row data. */
-function numberValue(value: unknown): number {
+/** Coerces a numeric field and replaces invalid values with zero. */
+function numberOrZero(value: unknown): number {
   return typeof value === "number" ? value : Number(value ?? 0) || 0;
 }
 

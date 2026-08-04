@@ -1,6 +1,7 @@
 /** Builds and dispatches the top-level Codemap CLI parser. */
 import { Command, CommanderError } from "commander";
 
+import { isRecord } from "../json-utils.js";
 import { addBackendParsers, addIndexParser } from "./backend.js";
 import { addInspectParser } from "./inspect.js";
 import { BYTES_PER_ESTIMATED_TOKEN, OUTPUT_TOKEN_LIMIT, PROJECT_ROOT_HELP } from "./options.js";
@@ -327,9 +328,4 @@ function estimatedTokens(output: string): number {
 /** Checks final UTF-8 bytes against the conservative token allowance. */
 function fitsOutputBudget(output: string): boolean {
   return Buffer.byteLength(output, "utf8") <= OUTPUT_BYTE_LIMIT;
-}
-
-/** Checks for a JSON object while rejecting arrays and primitives. */
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
