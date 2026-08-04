@@ -130,7 +130,7 @@ export function buildSignalExport(
   targetPath: string,
   { sectionMode }: { sectionMode: string | string[] },
 ): Row {
-  const displayRoot = isDir(targetPath) ? targetPath : path.dirname(targetPath);
+  const displayRoot = isDirectory(targetPath) ? targetPath : path.dirname(targetPath);
   const allFiles = discoverFiles(targetPath);
   const displayFiles = allFiles.map((filePath) => relativePath(filePath, { displayRoot }));
   const scannedFiles = allFiles.map((filePath) => scanFile(filePath, { displayRoot }));
@@ -218,6 +218,6 @@ function isFile(filePath: string): boolean {
 }
 
 /** Checks whether a path exists and is a directory. */
-function isDir(filePath: string): boolean {
+function isDirectory(filePath: string): boolean {
   return existsSync(filePath) && statSync(filePath).isDirectory();
 }

@@ -286,7 +286,7 @@ export function collectReports(
   targetPath: string,
   { focusFiles = null }: { focusFiles?: string[] | null } = {},
 ): [string, FileReport[]] {
-  const moduleRoot = isDir(targetPath) ? targetPath : path.dirname(targetPath);
+  const moduleRoot = isDirectory(targetPath) ? targetPath : path.dirname(targetPath);
   const supportedFiles =
     focusFiles !== null && focusFiles.length > 0
       ? supportedFocusPaths(resolveFocusPathsInOrder(focusFiles, { moduleRoot }))
@@ -474,6 +474,6 @@ function isFile(filePath: string): boolean {
 }
 
 /** Checks whether a path exists and is a directory. */
-function isDir(filePath: string): boolean {
+function isDirectory(filePath: string): boolean {
   return existsSync(filePath) && statSync(filePath).isDirectory();
 }

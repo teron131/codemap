@@ -1,7 +1,7 @@
 /** Builds graph nodes and edges from scan, import, and structure evidence. */
 import path from "node:path";
 
-import { arrayValue } from "../../json-utils.js";
+import { arrayValue, numberField } from "../../json-utils.js";
 import { compareText } from "../../text-utils.js";
 import { ENTRYPOINT_BASENAMES } from "../scanner/index.js";
 import type { GraphEdge, GraphNode } from "./schema.js";
@@ -223,7 +223,7 @@ export function functionNode(relPath: string, functionInfo: Record<string, unkno
     type: "function",
     name: functionName,
     filePath: relPath,
-    lineRange: [numberOrNull(functionInfo.startLine), numberOrNull(functionInfo.endLine)],
+    lineRange: [numberField(functionInfo.startLine), numberField(functionInfo.endLine)],
     summary: `${functionName} in ${relPath}.`,
     tags: ["function"],
     complexity: complexityForLines(lineSpan(functionInfo)),
@@ -238,7 +238,7 @@ export function classNode(relPath: string, classInfo: Record<string, unknown>): 
     type: "class",
     name: className,
     filePath: relPath,
-    lineRange: [numberOrNull(classInfo.startLine), numberOrNull(classInfo.endLine)],
+    lineRange: [numberField(classInfo.startLine), numberField(classInfo.endLine)],
     summary: `${className} class in ${relPath}.`,
     tags: ["class"],
     complexity: complexityForLines(lineSpan(classInfo)),
@@ -375,9 +375,4 @@ export function buildGraphFragment(
     emitPaths: relPaths,
   });
   return { nodes, edges };
-}
-
-/** Preserves numeric metric fields and drops non-numeric values. */
-function numberOrNull(value: unknown): number | null {
-  return typeof value === "number" ? value : null;
 }

@@ -10,9 +10,12 @@
 export function recordValue<T extends Record<string, unknown> = Record<string, unknown>>(
   value: unknown,
 ): T {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? (value as T)
-    : ({} as T);
+  return isRecord(value) ? (value as T) : ({} as T);
+}
+
+/** Checks for an object record while rejecting arrays and primitives. */
+export function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 /** Reads arrays while rejecting other values. */
@@ -25,7 +28,17 @@ export function stringField(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
 }
 
+/** Reads strings while rejecting empty and whitespace-only values. */
+export function nonblankString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
 /** Reads number fields while rejecting other values. */
 export function numberField(value: unknown): number | null {
   return typeof value === "number" ? value : null;
+}
+
+/** Coerces a present JSON-like value to a number and defaults missing values to zero. */
+export function numberValue(value: unknown): number {
+  return Number(value ?? 0);
 }

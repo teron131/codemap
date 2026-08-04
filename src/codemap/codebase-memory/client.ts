@@ -18,7 +18,7 @@ import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { arrayValue, recordValue } from "../json-utils.js";
+import { arrayValue, isRecord, nonblankString, numberField, recordValue } from "../json-utils.js";
 
 type JsonObject = Record<string, unknown>;
 
@@ -181,8 +181,8 @@ function refreshProject(root: string): CodebaseMemoryRefreshResult {
     return { ok: false, reason: `Index refresh failed: ${readableToolReason(indexResult.reason)}` };
   }
   const indexed = recordValue(indexResult.value);
-  const projectName = stringOrNull(indexed.project);
-  const indexStatus = stringOrNull(indexed.status);
+  const projectName = nonblankString(indexed.project);
+  const indexStatus = nonblankString(indexed.status);
   if (
     projectName === null ||
     indexStatus === null ||
@@ -201,8 +201,8 @@ function refreshProject(root: string): CodebaseMemoryRefreshResult {
     ok: true,
     project: {
       name: projectName,
-      nodes: numberOrNull(indexed.nodes),
-      edges: numberOrNull(indexed.edges),
+      nodes: numberField(indexed.nodes),
+      edges: numberField(indexed.edges),
       status: skippedFiles > 0 ? "partial" : "ready",
     },
   };
@@ -395,13 +395,13 @@ function deleteExistingProject(root: string): { ok: true } | { ok: false; reason
   }
   const resolvedRoot = canonicalPath(root);
   const existing = projects.map(recordValue).find((project) => {
-    const projectRoot = stringOrNull(project.root_path);
+    const projectRoot = nonblankString(project.root_path);
     return projectRoot !== null && canonicalPath(projectRoot) === resolvedRoot;
   });
   if (existing === undefined) {
     return { ok: true };
   }
-  const projectName = stringOrNull(existing.name);
+  const projectName = nonblankString(existing.name);
   if (projectName === null) {
     return { ok: false, reason: "Could not delete existing project: missing project name." };
   }
@@ -414,7 +414,7 @@ function deleteExistingProject(root: string): { ok: true } | { ok: false; reason
       reason: `Could not delete existing project: ${readableToolReason(deleteResult.reason)}`,
     };
   }
-  return stringOrNull(recordValue(deleteResult.value).status) === "deleted"
+  return nonblankString(recordValue(deleteResult.value).status) === "deleted"
     ? { ok: true }
     : { ok: false, reason: "Could not delete existing project: invalid deletion response." };
 }
@@ -580,8 +580,8 @@ function ensureWritableDirectory(directory: string): boolean {
 function readableToolReason(reason: string): string {
   try {
     const payload = recordValue(JSON.parse(reason));
-    const hint = stringOrNull(payload.hint);
-    const outcome = stringOrNull(payload.outcome);
+    const hint = nonblankString(payload.hint);
+    const outcome = nonblankString(payload.outcome);
     if (hint !== null) {
       return outcome === null ? hint : `${outcome}: ${hint}`;
     }
@@ -653,19 +653,4 @@ function codebaseMemoryErrorText(value: string): boolean {
     /^(error|failed|invalid|unknown)\b/i.test(value) ||
     /\b(required|must be|not found|not indexed|unavailable)\b/i.test(value)
   );
-}
-
-/** Converts number-like values into nullable numbers. */
-function numberOrNull(value: unknown): number | null {
-  return typeof value === "number" ? value : null;
-}
-
-/** Converts a nonempty string into a nullable string. */
-function stringOrNull(value: unknown): string | null {
-  return typeof value === "string" && value.trim().length > 0 ? value : null;
-}
-
-/** Checks whether a value is a plain object record. */
-function isRecord(value: unknown): value is JsonObject {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
 }

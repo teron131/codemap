@@ -8,7 +8,7 @@ import {
   codebaseMemoryQueryWithProject,
 } from "../codebase-memory/index.js";
 import { DETAILED_ANALYSIS_FILE_LIMIT } from "../common.js";
-import { arrayValue, recordValue } from "../json-utils.js";
+import { arrayValue, nonblankString, recordValue } from "../json-utils.js";
 import { runScan } from "../source/extraction/index.js";
 import { isGeneratedPath, isSupportedSourcePath, isTestPath } from "../source/scanner/index.js";
 import { compareText } from "../text-utils.js";
@@ -162,8 +162,8 @@ function functionMetricRow(
   row: Record<string, unknown>,
   { includeTests }: { includeTests: boolean },
 ): Record<string, unknown> | null {
-  const name = nonBlankStringField(row.name);
-  const filePath = nonBlankStringField(row.file_path);
+  const name = nonblankString(row.name);
+  const filePath = nonblankString(row.file_path);
   if (name === null || filePath === null || !existsSync(path.join(root, filePath))) {
     return null;
   }
@@ -211,15 +211,6 @@ function numericField(value: unknown): number {
 /** Reads boolean graph fields emitted as JSON booleans or strings. */
 function booleanField(value: unknown): boolean {
   return value === true || value === "true" || value === 1 || value === "1";
-}
-
-/**
- * Reads backend row fields that must carry a visible value.
- *
- * Stricter than the shared `stringField`: backend rows can carry whitespace-only names and file paths, and those must be rejected before they reach path resolution.
- */
-function nonBlankStringField(value: unknown): string | null {
-  return typeof value === "string" && value.trim().length > 0 ? value : null;
 }
 
 /** Builds the selected current-tree signal payload for CLI output. */
