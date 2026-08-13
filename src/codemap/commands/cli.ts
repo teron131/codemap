@@ -2,6 +2,7 @@
 import { Command, CommanderError } from "commander";
 
 import { isRecord } from "../json-utils.js";
+import { CODEMAP_VERSION } from "../version.js";
 import { addBackendParsers, addIndexParser } from "./backend.js";
 import { addInspectParser } from "./inspect.js";
 import { BYTES_PER_ESTIMATED_TOKEN, OUTPUT_TOKEN_LIMIT, PROJECT_ROOT_HELP } from "./options.js";
@@ -34,6 +35,7 @@ export function buildParser(): Command {
   program
     .name("codemap")
     .description("Command-line parser and command dispatch for Codemap.")
+    .version(CODEMAP_VERSION)
     .addHelpCommand(false)
     .enablePositionalOptions()
     .exitOverride()
