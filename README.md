@@ -45,6 +45,7 @@ Verify the full setup:
 codebase-memory-mcp --version
 rg --version
 ast-grep --version
+codemap --version
 codemap --help
 ```
 
