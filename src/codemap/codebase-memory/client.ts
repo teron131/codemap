@@ -19,6 +19,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { arrayValue, isRecord, nonblankString, numberField, recordValue } from "../json-utils.js";
+import { CODEMAP_VERSION } from "../version.js";
 
 type JsonObject = Record<string, unknown>;
 
@@ -437,7 +438,7 @@ export function callCodebaseMemoryTool(
       params: {
         protocolVersion: PROTOCOL_VERSION,
         capabilities: {},
-        clientInfo: { name: "codemap", version: "0.0.0" },
+        clientInfo: { name: "codemap", version: CODEMAP_VERSION },
       },
     },
     {
