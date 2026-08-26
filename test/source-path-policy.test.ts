@@ -45,10 +45,12 @@ describe("source path policy", () => {
   it("matches backend metric paths to the supported current-tree source surface", () => {
     expect(isSupportedSourcePath("src/app.ts")).toBe(true);
     expect(isSupportedSourcePath("src/app.py")).toBe(true);
+    expect(isSupportedSourcePath("src/product/target/system.ts")).toBe(true);
     expect(isSupportedSourcePath(".github/scripts/check.mjs")).toBe(true);
 
     expect(isSupportedSourcePath("apps/android/Main.kt")).toBe(false);
     expect(isSupportedSourcePath(".agents/skills/check.mjs")).toBe(false);
     expect(isSupportedSourcePath("dist/app.js")).toBe(false);
+    expect(isSupportedSourcePath("target/generated.js")).toBe(false);
   });
 });

@@ -47,14 +47,12 @@ export function publicExportSurfaces(
   }
   const fanIn = importFanIn(relationships);
   const candidates = [...surfaces]
-    .map(
-      (file): ExportSurfaceCandidate => ({
-        file,
-        groups: exportGroups(resolvedExports(source, file, new Set())),
-        declared: declared.has(file),
-        fanIn: fanIn.get(file) ?? 0,
-      }),
-    )
+    .map((file): ExportSurfaceCandidate => ({
+      file,
+      groups: exportGroups(resolvedExports(source, file, new Set())),
+      declared: declared.has(file),
+      fanIn: fanIn.get(file) ?? 0,
+    }))
     .filter((surface) => surface.groups.length > 0);
   const structuralFocus = exportFocusPaths(structural);
   const fallbackFocus = sampledPackageRoots(structural.packages);

@@ -56,6 +56,27 @@ describe("inspect command handler", () => {
     expect(output).toContain("calls: helper in src/app.ts:7");
   });
 
+  it("inspects TypeScript methods by their bare name", () => {
+    writeFileSync(
+      path.join(workDir, "src", "target.ts"),
+      [
+        "export class TargetSystem {",
+        "  async createPinnedTarget() { return this.persistTarget(); }",
+        "  private persistTarget() { return true; }",
+        "}",
+      ].join("\n"),
+      "utf8",
+    );
+
+    expect(commandInspect("createPinnedTarget", { local: true, projectRoot: workDir })).toBe(0);
+
+    const output = logLines().join("\n");
+    expect(output).toContain("# createPinnedTarget in src/target.ts:2");
+    expect(output).toContain("- file: src/target.ts, lines: 2-2");
+    expect(output).toContain("calls: persistTarget in src/target.ts:3");
+    expect(output).not.toContain("calls: createPinnedTarget");
+  });
+
   it("does not repeat contained symbols as other matches for file inspection", () => {
     writeFileSync(
       path.join(workDir, "src", "app.ts"),
