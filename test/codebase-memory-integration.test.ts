@@ -1013,6 +1013,27 @@ describe("Codebase Memory integration", () => {
     }
   });
 
+  it("defaults semantic search to fifteen results", async () => {
+    vi.stubEnv("CODEBASE_MEMORY_MOCK_MANY_SEMANTIC", "1");
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      expect(
+        await commandSearch(["needle"], {
+          projectRoot: workDir,
+          semantic: true,
+        }),
+      ).toBe(0);
+      const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+
+      expect(output).toContain("semantic results: 15");
+      expect(output).toContain("semanticNeedle14");
+      expect(output).not.toContain("semanticNeedle15");
+      expect(output).toContain("- ...");
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
   it("lets low-score semantic graph rows fall back instead of printing noise", () => {
     vi.stubEnv("CODEBASE_MEMORY_MOCK_LOW_SEMANTIC", "1");
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
@@ -1936,24 +1957,33 @@ const payloads = {
       : Array.isArray(toolArgs.semantic_query)
       ? {
           search_mode: "semantic",
-          total: 1,
+          total: process.env.CODEBASE_MEMORY_MOCK_MANY_SEMANTIC === "1" ? 20 : 1,
           results: [],
-          semantic_results: [
-            {
-              name: "semanticNeedle",
-              qualified_name:
-                process.env.CODEBASE_MEMORY_MOCK_TEST_ONLY === "1"
-                  ? "mock-project.tests.semanticNeedle"
-                  : "mock-project.src.semanticNeedle",
-			  label: "Function",
-              file_path:
-                process.env.CODEBASE_MEMORY_MOCK_TEST_ONLY === "1"
-                  ? ${JSON.stringify(path.join(workDir, "tests", "semantic-needle.test.ts"))}
-                  : ${JSON.stringify(path.join(workDir, "src", "semantic-needle.ts"))},
-              score: process.env.CODEBASE_MEMORY_MOCK_LOW_SEMANTIC === "1" ? 0 : 0.987,
-            },
-          ],
-          has_more: false,
+          semantic_results:
+            process.env.CODEBASE_MEMORY_MOCK_MANY_SEMANTIC === "1"
+              ? Array.from({ length: 20 }, (_, index) => ({
+                  name: "semanticNeedle" + index,
+                  qualified_name: "mock-project.src.semanticNeedle" + index,
+                  label: "Function",
+                  file_path: ${JSON.stringify(path.join(workDir, "src", "semantic-needle.ts"))},
+                  score: 0.987 - index / 1000,
+                }))
+              : [
+                  {
+                    name: "semanticNeedle",
+                    qualified_name:
+                      process.env.CODEBASE_MEMORY_MOCK_TEST_ONLY === "1"
+                        ? "mock-project.tests.semanticNeedle"
+                        : "mock-project.src.semanticNeedle",
+			        label: "Function",
+                    file_path:
+                      process.env.CODEBASE_MEMORY_MOCK_TEST_ONLY === "1"
+                        ? ${JSON.stringify(path.join(workDir, "tests", "semantic-needle.test.ts"))}
+                        : ${JSON.stringify(path.join(workDir, "src", "semantic-needle.ts"))},
+                    score: process.env.CODEBASE_MEMORY_MOCK_LOW_SEMANTIC === "1" ? 0.49 : 0.987,
+                  },
+                ],
+          has_more: process.env.CODEBASE_MEMORY_MOCK_MANY_SEMANTIC === "1",
         }
       : process.env.CODEBASE_MEMORY_MOCK_MIXED_GRAPH_ROWS === "1"
       ? {

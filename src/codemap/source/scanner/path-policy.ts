@@ -9,6 +9,7 @@ import {
   IGNORED_DIR_NAMES,
   KEPT_HIDDEN_DIR_NAMES,
   PY_SUFFIXES,
+  ROOT_IGNORED_DIR_NAMES,
   TYPESCRIPT_SUFFIXES,
 } from "./constants.js";
 
@@ -66,8 +67,9 @@ export function isSupportedSourcePath(filePath: string): boolean {
   return (
     (PY_SUFFIXES.has(suffix) || TYPESCRIPT_SUFFIXES.has(suffix)) &&
     !directories.some(
-      (directory) =>
+      (directory, index) =>
         IGNORED_DIR_NAMES.has(directory) ||
+        (index === 0 && ROOT_IGNORED_DIR_NAMES.has(directory)) ||
         (directory.startsWith(".") && !KEPT_HIDDEN_DIR_NAMES.has(directory)),
     )
   );

@@ -152,11 +152,12 @@ export const IGNORED_DIR_NAMES = new Set([
   "node_modules",
   "public",
   "references",
-  "target",
   "user-data",
   "venv",
   "vendor",
 ]);
+
+export const ROOT_IGNORED_DIR_NAMES = new Set(["target"]);
 
 export const KEPT_HIDDEN_DIR_NAMES = new Set([".github"]);
 

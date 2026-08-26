@@ -178,17 +178,20 @@ export function callEdgesForFunction(functionDefinition: Definition, lines: stri
     const stripped = line.trim();
     if (
       !stripped ||
-      stripped.startsWith("def ") ||
-      stripped.startsWith("async def ") ||
-      stripped.startsWith("function ") ||
-      /^export\s+(?:async\s+)?function\b/.test(stripped) ||
       stripped.startsWith("class ") ||
       stripped.startsWith("import ") ||
       stripped.startsWith("from ")
     ) {
       continue;
     }
-    for (const callee of callNames(line)) {
+    const callees = callNames(line);
+    if (lineIndex === functionDefinition.lineIndex) {
+      const declarationIndex = callees.indexOf(functionDefinition.name);
+      if (declarationIndex >= 0) {
+        callees.splice(declarationIndex, 1);
+      }
+    }
+    for (const callee of callees) {
       edges.push({
         caller: functionDefinition.name,
         callee,
@@ -202,7 +205,7 @@ export function callEdgesForFunction(functionDefinition: Definition, lines: stri
 /** Extracts called symbol names from a source line. */
 export function callNames(line: string): string[] {
   const names: string[] = [];
-  for (const match of line.matchAll(/(?:^|[^A-Za-z0-9_])([A-Za-z_][A-Za-z0-9_]*)\s*\(/g)) {
+  for (const match of line.matchAll(/(?:^|[^A-Za-z0-9_.])([A-Za-z_][A-Za-z0-9_]*)\s*\(/g)) {
     const name = match[1] ?? "";
     if (name && !["if", "for", "while", "return"].includes(name)) {
       names.push(name);

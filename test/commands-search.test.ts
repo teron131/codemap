@@ -84,6 +84,41 @@ describe("search command handler", () => {
     expect(logLines()).toEqual(["src/calls.ts:2:1: console.log( ..."]);
   });
 
+  it("finds receiver-qualified method calls from a bare method name", async () => {
+    writeFileSync(
+      path.join(workDir, "src", "calls.ts"),
+      [
+        "class Runner {",
+        "  refresh() {}",
+        "  run() { this.service.refresh(); refresh(); }",
+        "  service = { refresh() {} };",
+        "}",
+      ].join("\n"),
+      "utf8",
+    );
+
+    await expect(
+      dispatch(buildParser(), [
+        "node",
+        "codemap",
+        "search",
+        "calls",
+        "--project-root",
+        workDir,
+        "--json",
+        "refresh",
+        "src/calls.ts",
+      ]),
+    ).resolves.toBe(0);
+
+    const payload = JSON.parse(logLines().join(""));
+    expect(payload.total).toBe(2);
+    expect(payload.matches.map((match: { text: string }) => match.text)).toEqual([
+      "this.service.refresh()",
+      "refresh()",
+    ]);
+  });
+
   it("keeps default call-site rows for the shared output boundary", async () => {
     writeFileSync(
       path.join(workDir, "src", "many-calls.ts"),
@@ -213,7 +248,7 @@ describe("search command handler", () => {
     }
   });
 
-  it("labels Python regex fallback and keeps repeated same-line calls", async () => {
+  it("uses the bundled Python parser and keeps repeated same-line calls", async () => {
     writeFileSync(
       path.join(workDir, "src", "calls.py"),
       "def helper():\n    pass\n\nhelper(); helper()\n",
@@ -238,7 +273,7 @@ describe("search command handler", () => {
 
     const output = logLines();
     expect(output).toHaveLength(2);
-    expect(output.every((line) => line.includes("[regex]"))).toBe(true);
+    expect(output.every((line) => !line.includes("[regex]"))).toBe(true);
     expect(output.some((line) => line.includes("def helper"))).toBe(false);
   });
 
@@ -287,7 +322,7 @@ describe("search command handler", () => {
     expect(logLines()).toEqual(["No matches"]);
   });
 
-  it("prints source matches and backend semantic fallback status", async () => {
+  it("prefers an exact current-tree definition over backend semantic search", async () => {
     writeFileSync(
       path.join(workDir, "src", "app.ts"),
       "export function needle() {\n  return 'needle';\n}\n",
@@ -305,11 +340,11 @@ describe("search command handler", () => {
     const output = logLines().join("\n");
     expect(output).toContain("Search: needle");
     expect(output).toContain("\nSource matches:");
-    expect(output).toContain("[symbol]");
-    expect(output).toContain("\nSemantic graph matches:");
     expect(output).toContain(
-      "  unavailable: Codebase Memory semantic search returned no answer; used current-tree search fallback.",
+      "Exact current-tree definition found; skipped backend semantic search.",
     );
+    expect(output).toContain("[symbol]");
+    expect(output).not.toContain("\nSemantic graph matches:");
   });
 
   it("does not treat a bare symbol name as a file-path query", async () => {
@@ -358,9 +393,43 @@ describe("search command handler", () => {
     expect(output).not.toContain("src/consumer.ts");
   });
 
-  it("keeps supported inferred languages when another language is unavailable", async () => {
-    writeFileSync(path.join(workDir, "src", "mixed.ts"), "const value = true;\n", "utf8");
-    writeFileSync(path.join(workDir, "src", "mixed.py"), "value = True\n", "utf8");
+  it("resolves a concise phrase to a TypeScript method definition", async () => {
+    mkdirSync(path.join(workDir, "src", "product", "target"), { recursive: true });
+    mkdirSync(path.join(workDir, "target"), { recursive: true });
+    writeFileSync(
+      path.join(workDir, "src", "product", "target", "system.ts"),
+      ["export class TargetSystem {", "  async createPinnedTarget() { return true; }", "}"].join(
+        "\n",
+      ),
+      "utf8",
+    );
+    writeFileSync(
+      path.join(workDir, "target", "generated.ts"),
+      "export function createPinnedTarget() { return false; }\n",
+      "utf8",
+    );
+    writeFileSync(
+      path.join(workDir, "src", "consumer.ts"),
+      "targetSystem.createPinnedTarget();\n",
+      "utf8",
+    );
+
+    await expect(
+      commandSearch(["create", "pinned", "target"], {
+        projectRoot: workDir,
+      }),
+    ).resolves.toBe(0);
+
+    const output = logLines().join("\n");
+    expect(output).toContain("src/product/target/system.ts");
+    expect(output).toContain("async createPinnedTarget()");
+    expect(output).not.toContain("src/consumer.ts");
+    expect(output).not.toContain("target/generated.ts");
+  });
+
+  it("searches inferred TypeScript and Python with bundled parsers", async () => {
+    writeFileSync(path.join(workDir, "src", "mixed.ts"), "print('typescript');\n", "utf8");
+    writeFileSync(path.join(workDir, "src", "mixed.py"), "print('python')\n", "utf8");
     vi.stubEnv("PATH", "");
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
@@ -373,24 +442,54 @@ describe("search command handler", () => {
           "--project-root",
           workDir,
           "--pattern",
-          "const $A = $B",
+          "print($A)",
           "src",
         ]),
       ).resolves.toBe(0);
 
-      expect(logLines().join("\n")).toContain("src/mixed.ts");
-      expect(errorSpy).toHaveBeenCalledWith("Unavailable syntax languages: python.");
+      const output = logLines().join("\n");
+      expect(output).toContain("src/mixed.ts");
+      expect(output).toContain("src/mixed.py");
+      expect(errorSpy).not.toHaveBeenCalled();
     } finally {
       errorSpy.mockRestore();
     }
   });
 
-  it("reports an unavailable rule engine instead of a valid empty result", async () => {
+  it("runs Python rule search with the bundled parser", async () => {
     writeFileSync(
       path.join(workDir, "python-rule.yml"),
+      ["id: python-functions", "language: python", "rule:", "  kind: function_definition"].join(
+        "\n",
+      ),
+      "utf8",
+    );
+    writeFileSync(path.join(workDir, "src", "rule.py"), "def run():\n    pass\n", "utf8");
+    vi.stubEnv("PATH", "");
+
+    await expect(
+      dispatch(buildParser(), [
+        "node",
+        "codemap",
+        "search",
+        "rule",
+        "--project-root",
+        workDir,
+        "--rule",
+        "python-rule.yml",
+        "src",
+      ]),
+    ).resolves.toBe(0);
+
+    expect(logLines().join("\n")).toContain("src/rule.py:1:1: def run(): ...");
+  });
+
+  it("reports an unavailable rule engine instead of a valid empty result", async () => {
+    writeFileSync(
+      path.join(workDir, "rust-rule.yml"),
       [
-        "id: python-functions",
-        "language: python",
+        "id: rust-functions",
+        "language: rust",
         "rule:",
         "  any:",
         "    - kind: function_definition",
@@ -409,7 +508,7 @@ describe("search command handler", () => {
           "--project-root",
           workDir,
           "--rule",
-          "python-rule.yml",
+          "rust-rule.yml",
           "src",
         ]),
       ).resolves.toBe(127);

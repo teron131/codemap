@@ -1,14 +1,13 @@
-/** Adapts ast-grep NAPI and CLI behavior to Codemap syntax operations. */
-import { spawnSync } from "node:child_process";
+/** Adapts ast-grep NAPI behavior to Codemap syntax operations. */
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 
-import { Lang, type NapiConfig, parse, type SgNode } from "@ast-grep/napi";
+import python from "@ast-grep/lang-python";
+import { Lang, type NapiConfig, parse, registerDynamicLanguage, type SgNode } from "@ast-grep/napi";
 import { parse as parseYaml } from "yaml";
 
 import { expandUser } from "../common.js";
-import { recordValue } from "../json-utils.js";
-import { IGNORED_DIR_NAMES } from "../source/scanner/constants.js";
+import { IGNORED_DIR_NAMES, ROOT_IGNORED_DIR_NAMES } from "../source/scanner/constants.js";
 import { compareText } from "../text-utils.js";
 
 export const LANGUAGE_ALIASES: Record<string, string> = {
@@ -49,16 +48,7 @@ const INFERRED_SYNTAX_LANGUAGES = [
   { language: "python", suffixes: new Set([".py"]) },
 ];
 
-type AstGrepCliMatch = {
-  text?: string;
-  file?: string;
-  lines?: string;
-  range?: {
-    byteOffset?: { start?: number; end?: number };
-    start?: { line?: number; column?: number };
-    end?: { line?: number; column?: number };
-  };
-};
+registerDynamicLanguage({ python });
 
 /** Parses source text into an ast-grep root node for a language. */
 export function astGrepRoot(source: string, language: string): SgNode | null {
@@ -94,12 +84,6 @@ export function ruleMatches(
 ): SyntaxMatch[] | null {
   const language = normalizeLanguage(lang);
   if (napiLanguageFor(language) === null) {
-    if (language === "python") {
-      const config = matchConfig as unknown as Record<string, unknown>;
-      const patternValue = recordValue(config.rule).pattern;
-      const pattern = typeof patternValue === "string" ? patternValue : null;
-      return pattern === null ? null : cliPatternMatches(root, language, pattern, paths, { limit });
-    }
     return null;
   }
   const matches: SyntaxMatch[] = [];
@@ -218,7 +202,12 @@ export function shouldScanAstGrepFile(filePath: string, root: string): boolean {
   } else {
     relParts = filePath.split(path.sep).filter(Boolean);
   }
-  return !relParts.slice(0, -1).some((part) => IGNORED_DIR_NAMES.has(part));
+  return !relParts
+    .slice(0, -1)
+    .some(
+      (part, index) =>
+        IGNORED_DIR_NAMES.has(part) || (index === 0 && ROOT_IGNORED_DIR_NAMES.has(part)),
+    );
 }
 
 /** Resolves a project-relative file and rejects paths outside the root. */
@@ -244,72 +233,12 @@ export function contextLines(sourceLines: string[], startLine: number, endLine: 
   return sourceLines.slice(start, end).join("\n");
 }
 
-/** Runs ast-grep CLI pattern search and converts matches to codemap rows. */
-function cliPatternMatches(
-  root: string,
-  language: string,
-  pattern: string,
-  paths: string[],
-  { limit = null }: { limit?: number | null } = {},
-): SyntaxMatch[] | null {
-  const files = targetFiles(root, paths, language);
-  if (files.length === 0) {
-    return [];
-  }
-  const result = spawnSync(
-    "ast-grep",
-    ["run", "--lang", language, "--pattern", pattern, "--json=compact", ...files],
-    { cwd: root, encoding: "utf8" },
-  );
-  if (result.error) {
-    return null;
-  }
-  if (result.status !== 0 && result.status !== 1) {
-    return null;
-  }
-  return cliJsonMatches(root, result.stdout).slice(0, limit === null ? undefined : limit);
-}
-
-/** Converts ast-grep JSON match rows into codemap syntax matches. */
-function cliJsonMatches(root: string, stdout: string): SyntaxMatch[] {
-  return cliRows(stdout).map((item) => {
-    const range = recordValue(item.range);
-    const start = recordValue(range.start);
-    const end = recordValue(range.end);
-    const absoluteFilePath = path.resolve(root, String(item.file ?? ""));
-    return {
-      engine: "ast-grep",
-      filePath: path.relative(root, absoluteFilePath).split(path.sep).join("/"),
-      text: String(item.text ?? ""),
-      line: numberOrZero(start.line) + 1,
-      column: numberOrZero(start.column) + 1,
-      endLine: numberOrZero(end.line) + 1,
-      endColumn: numberOrZero(end.column) + 1,
-      lines: String(item.lines ?? ""),
-    };
-  });
-}
-
-/** Parses ast-grep JSON output, treating empty output as no matches. */
-function cliRows(stdout: string): AstGrepCliMatch[] {
-  const trimmed = stdout.trim();
-  if (!trimmed) {
-    return [];
-  }
-  const parsed = JSON.parse(trimmed) as unknown;
-  return Array.isArray(parsed) ? (parsed as AstGrepCliMatch[]) : [];
-}
-
-/** Coerces a numeric field and replaces invalid values with zero. */
-function numberOrZero(value: unknown): number {
-  return typeof value === "number" ? value : Number(value ?? 0) || 0;
-}
-
 /** Maps normalized language names to ast-grep NAPI languages. */
-function napiLanguageFor(language: string): Lang | null {
-  const languages: Record<string, Lang> = {
+function napiLanguageFor(language: string): Lang | string | null {
+  const languages: Record<string, Lang | string> = {
     javascript: Lang.JavaScript,
     jsx: Lang.JavaScript,
+    python: "python",
     tsx: Lang.Tsx,
     typescript: Lang.TypeScript,
   };

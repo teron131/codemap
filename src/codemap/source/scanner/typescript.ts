@@ -23,6 +23,7 @@ const TYPESCRIPT_SCAN_KINDS = [
   "export_statement",
   "class_declaration",
   "function_declaration",
+  "method_definition",
   "variable_declarator",
 ];
 
@@ -265,6 +266,11 @@ function scanTypescriptWithAstGrep({
       }
     } else if (kind === "function_declaration") {
       const name = directChild(node, "identifier");
+      if (name !== null) {
+        addTypescriptFunction(metrics, relPath, name.text(), node);
+      }
+    } else if (kind === "method_definition") {
+      const name = directChild(node, "property_identifier", "private_property_identifier");
       if (name !== null) {
         addTypescriptFunction(metrics, relPath, name.text(), node);
       }
