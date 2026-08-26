@@ -7,6 +7,7 @@ import {
   IGNORED_DIR_NAMES,
   IGNORED_FILE_SUFFIXES,
   KEPT_HIDDEN_DIR_NAMES,
+  ROOT_IGNORED_DIR_NAMES,
   SCAN_BASENAMES,
   SCAN_SUFFIXES,
 } from "./constants.js";
@@ -58,7 +59,7 @@ export function walkFiles(targetPath: string): string[] {
       .filter((name) => {
         const childPath = path.join(root, name);
         return (
-          shouldScanDir(name) &&
+          shouldScanDir(name, { root: path.resolve(root) === path.resolve(targetPath) }) &&
           !gitignoreMatches(childPath, targetPath, ignoreRules, { isDir: true })
         );
       });
@@ -88,8 +89,8 @@ export function walkFiles(targetPath: string): string[] {
 }
 
 /** Checks whether file discovery should enter a directory. */
-export function shouldScanDir(name: string): boolean {
-  if (IGNORED_DIR_NAMES.has(name)) {
+export function shouldScanDir(name: string, { root = false }: { root?: boolean } = {}): boolean {
+  if (IGNORED_DIR_NAMES.has(name) || (root && ROOT_IGNORED_DIR_NAMES.has(name))) {
     return false;
   }
   return !name.startsWith(".") || KEPT_HIDDEN_DIR_NAMES.has(name);
@@ -136,7 +137,7 @@ export function discoverRipgrepFiles(targetPath: string): string[] | null {
       continue;
     }
     const pathParts = rawPath.split(/[\\/]/);
-    if (pathParts.slice(0, -1).some((part) => !shouldScanDir(part))) {
+    if (pathParts.slice(0, -1).some((part, index) => !shouldScanDir(part, { root: index === 0 }))) {
       continue;
     }
     const filePath = path.join(targetPath, rawPath);

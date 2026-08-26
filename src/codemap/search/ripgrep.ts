@@ -2,6 +2,7 @@
 import { spawnSync } from "node:child_process";
 
 import { arrayValue, recordValue } from "../json-utils.js";
+import { ROOT_IGNORED_DIR_NAMES } from "../source/scanner/constants.js";
 import {
   IGNORED_DIR_NAMES,
   isTestPath,
@@ -165,7 +166,10 @@ export function compactSourceMatchText(value: string): string {
 
 /** Builds ripgrep glob exclusions from the shared source-scan ignore set. */
 function ripgrepExcludeArgs(): string[] {
-  return [...IGNORED_DIR_NAMES].flatMap((name) => ["--glob", `!**/${name}/**`]);
+  return [
+    ...[...IGNORED_DIR_NAMES].flatMap((name) => ["--glob", `!**/${name}/**`]),
+    ...[...ROOT_IGNORED_DIR_NAMES].flatMap((name) => ["--glob", `!${name}/**`]),
+  ];
 }
 
 /** Parses complete ripgrep JSON events from the bounded synchronous output prefix. */

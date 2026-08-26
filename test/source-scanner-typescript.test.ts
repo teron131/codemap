@@ -91,6 +91,32 @@ describe("TypeScript-family scanner", () => {
     }
   });
 
+  it("records class methods as function-like definitions", () => {
+    const filePath = path.join(workDir, "service.ts");
+    writeFileSync(
+      filePath,
+      [
+        "export class Service {",
+        "  async createPinnedTarget() {",
+        "    return true;",
+        "  }",
+        "}",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const metrics = scanTypescriptFile(filePath, { relPath: "service.ts" });
+
+    expect(metrics.functionNames).toContain("createPinnedTarget");
+    expect(metrics.functionSpans).toContainEqual(
+      expect.objectContaining({
+        name: "createPinnedTarget",
+        span: 3,
+        startLine: 2,
+      }),
+    );
+  });
+
   it("collects value, type, and aliased public export names", () => {
     const filePath = path.join(workDir, "surface.ts");
     writeFileSync(

@@ -27,18 +27,32 @@ const SOURCE_CANDIDATE_LIMIT = 1_000;
 const SYMBOL_KINDS_BY_LANGUAGE: Record<string, string[]> = {
   typescript: [
     "function_declaration",
+    "method_definition",
     "class_declaration",
     "lexical_declaration",
     "variable_declaration",
   ],
-  tsx: ["function_declaration", "class_declaration", "lexical_declaration", "variable_declaration"],
+  tsx: [
+    "function_declaration",
+    "method_definition",
+    "class_declaration",
+    "lexical_declaration",
+    "variable_declaration",
+  ],
   javascript: [
     "function_declaration",
+    "method_definition",
     "class_declaration",
     "lexical_declaration",
     "variable_declaration",
   ],
-  jsx: ["function_declaration", "class_declaration", "lexical_declaration", "variable_declaration"],
+  jsx: [
+    "function_declaration",
+    "method_definition",
+    "class_declaration",
+    "lexical_declaration",
+    "variable_declaration",
+  ],
   python: ["function_definition", "class_definition", "assignment"],
 };
 
@@ -93,16 +107,38 @@ export function definitionMatches(
     limit: number;
   },
 ): SourceMatch[] {
-  if (!IDENTIFIER_RE.test(searchText)) {
+  const symbols = definitionSymbols(searchText);
+  if (symbols.length === 0) {
     return [];
   }
   const candidateLimit = includeTests ? limit : Math.max(limit, SOURCE_CANDIDATE_LIMIT);
-  return rankSourceMatches(
-    ripgrepDefinitionMatches(root, searchText, {
-      limit: candidateLimit,
-    }).filter((match) => includeTests || !isTestPath(match.filePath)),
-    searchText,
-  ).slice(0, limit);
+  const matches: SourceMatch[] = [];
+  const seen = new Set<string>();
+  const phraseIntent = !IDENTIFIER_RE.test(searchText);
+  for (const symbol of symbols) {
+    const candidates = [
+      ...astGrepSymbolMatches(root, symbol, { limit: candidateLimit }),
+      ...ripgrepDefinitionMatches(root, symbol, { limit: candidateLimit }),
+    ];
+    for (const match of candidates) {
+      if (
+        (!includeTests && isTestPath(match.filePath)) ||
+        (phraseIntent && !isCallableDefinition(match, symbol))
+      ) {
+        continue;
+      }
+      appendMatch(matches, seen, match, { limit: candidateLimit });
+    }
+  }
+  return rankSourceMatches(matches, searchText).slice(0, limit);
+}
+
+/** Keeps phrase-derived definition intent on functions, methods, and classes instead of similarly named state. */
+function isCallableDefinition(match: SourceMatch, symbol: string): boolean {
+  const escaped = escapeRegExp(symbol);
+  const modifiers = String.raw`(?:(?:export|default|abstract|async|declare|public|protected|private|static|override|readonly)\s+)*`;
+  const declaration = String.raw`(?:(?:function|class|def)\s+)?${escaped}(?:\b|\s*\()`;
+  return new RegExp(`^${modifiers}${declaration}`).test(match.text);
 }
 
 /** Searches source text and symbols across target files. */
@@ -316,6 +352,19 @@ function searchTerms(searchText: string): string[] {
     .filter((term) => term.length >= 3 && !SEARCH_STOP_WORDS.has(term));
 }
 
+/** Converts a concise concept phrase into common source identifier forms. */
+function definitionSymbols(searchText: string): string[] {
+  if (IDENTIFIER_RE.test(searchText)) {
+    return [searchText];
+  }
+  const terms = searchTerms(searchText).slice(0, 6);
+  if (terms.length < 2) {
+    return [];
+  }
+  const titleTerms = terms.map((term) => `${term[0]?.toUpperCase() ?? ""}${term.slice(1)}`);
+  return [`${terms[0]}${titleTerms.slice(1).join("")}`, titleTerms.join(""), terms.join("_")];
+}
+
 /** Finds likely symbol matches with ast-grep before rg fallback. */
 function astGrepSymbolMatches(
   root: string,
@@ -414,13 +463,23 @@ function symbolMatchConfig(symbol: string, kinds: string[]): NapiConfig {
   const escaped = escapeRegExp(symbol);
   return {
     rule: {
-      any: kinds.map((kind) => ({
-        kind,
-        has: {
-          kind: "identifier",
-          regex: `^${escaped}$`,
-        },
-      })),
+      any: kinds.map((kind) =>
+        kind === "method_definition"
+          ? {
+              kind,
+              has: {
+                kind: "property_identifier",
+                regex: `^${escaped}$`,
+              },
+            }
+          : {
+              kind,
+              has: {
+                kind: "identifier",
+                regex: `^${escaped}$`,
+              },
+            },
+      ),
     },
   };
 }

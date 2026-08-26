@@ -3,7 +3,6 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 import {
-  contextLines,
   loadRule,
   matchConfigFromRule,
   normalizeLanguage,
@@ -11,7 +10,6 @@ import {
   ruleMatches,
   SYNTAX_SUFFIXES_BY_LANGUAGE,
   type SyntaxMatch,
-  syntaxMatches,
   targetFiles,
 } from "../ast-grep/index.js";
 import { expandUser } from "../common.js";
@@ -30,14 +28,14 @@ export function callMatches(
   const searchPaths = shouldPrefilterCalls(language)
     ? callCandidatePaths(root, language, target, paths)
     : paths;
-  const matches =
-    searchPaths.length === 0
-      ? []
-      : syntaxMatches(root, language, `${target}($$$ARGS)`, searchPaths);
-  if (matches === null && (language === "python" || language === "py")) {
-    return pythonCallMatches(root, target, paths);
+  if (searchPaths.length === 0) {
+    return [];
   }
-  return matches;
+  const patterns = target.includes(".")
+    ? [{ pattern: `${target}($$$ARGS)` }]
+    : [{ pattern: `${target}($$$ARGS)` }, { pattern: `$RECEIVER.${target}($$$ARGS)` }];
+  const matches = ruleMatches(root, language, { rule: { any: patterns } }, searchPaths);
+  return matches === null ? null : uniqueCallMatches(matches);
 }
 
 /** Runs ast-grep YAML rule search for target paths. */
@@ -101,7 +99,7 @@ function shouldPrefilterCalls(language: string): boolean {
   return Object.hasOwn(SYNTAX_SUFFIXES_BY_LANGUAGE, normalizeLanguage(language));
 }
 
-/** Finds Python files whose text contains a likely callee name. */
+/** Finds source files whose text contains a likely callee name. */
 function callCandidatePaths(
   root: string,
   language: string,
@@ -120,53 +118,23 @@ function callCandidatePaths(
   return candidates;
 }
 
-/** Extracts a plain callee name from a Python call-search pattern. */
-function callTextPattern(target: string, { global = false }: { global?: boolean } = {}): RegExp {
+/** Builds a text prefilter for direct or receiver-qualified callees. */
+function callTextPattern(target: string): RegExp {
   const parts = target.split(".").map((part) => escapeRegExp(part));
   const callPrefix = parts.length === 1 ? parts[0] : parts.join(String.raw`\s*\.\s*`);
-  return new RegExp(`(^|[^A-Za-z0-9_.$])${callPrefix}\\s*\\(`, global ? "g" : "");
+  const prefixBoundary = parts.length === 1 ? "[^A-Za-z0-9_$]" : "[^A-Za-z0-9_.$]";
+  return new RegExp(`(^|${prefixBoundary})${callPrefix}\\s*\\(`);
 }
 
-/** Finds Python call expressions with text matching the requested callee. */
-function pythonCallMatches(root: string, target: string, paths: string[]): SyntaxMatch[] {
-  const matches: SyntaxMatch[] = [];
-  for (const filePath of targetFiles(root, paths, "python")) {
-    let source = "";
-    try {
-      source = readFileSync(filePath, "utf8");
-    } catch {
-      continue;
+/** Removes duplicate rows when direct and member-call patterns overlap. */
+function uniqueCallMatches(matches: SyntaxMatch[]): SyntaxMatch[] {
+  const seen = new Set<string>();
+  return matches.filter((match) => {
+    const key = `${match.filePath}:${match.line}:${match.column}:${match.endLine}:${match.endColumn}`;
+    if (seen.has(key)) {
+      return false;
     }
-    const sourceLines = source.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
-    for (let index = 0; index < sourceLines.length; index += 1) {
-      const line = sourceLines[index] ?? "";
-      if (pythonDefinitionLine(line, target)) {
-        continue;
-      }
-      for (const found of line.matchAll(callTextPattern(target, { global: true }))) {
-        const prefix = found[1] ?? "";
-        const column = Number(found.index) + prefix.length + 1;
-        matches.push({
-          engine: "regex",
-          filePath: path.relative(root, filePath).split(path.sep).join("/"),
-          text: line.trim(),
-          line: index + 1,
-          column,
-          endLine: index + 1,
-          endColumn: line.length + 1,
-          lines: contextLines(sourceLines, index, index),
-        });
-      }
-    }
-  }
-  return matches;
-}
-
-/** Excludes Python function or class definitions from approximate call rows. */
-function pythonDefinitionLine(line: string, target: string): boolean {
-  if (target.includes(".")) {
-    return false;
-  }
-  const name = escapeRegExp(target);
-  return new RegExp(`^\\s*(?:(?:async\\s+)?def|class)\\s+${name}\\s*\\(`).test(line);
+    seen.add(key);
+    return true;
+  });
 }

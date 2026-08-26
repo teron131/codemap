@@ -35,7 +35,9 @@ Use `--graph` when the result needs BM25-ranked relationship context. Add graph 
 codemap search --graph --relationship <type> --file-pattern "<glob>" --limit <count> --project-root <path> "<concept>"
 ```
 
-Use `--semantic` when repository vocabulary differs from the clue. Do not combine `--graph` and `--semantic`. When the backend has no useful answer, Codemap falls back to current-tree evidence.
+Use `--semantic` when repository vocabulary differs from the clue. Do not combine `--graph` and `--semantic`. Codemap returns an exact current-tree definition before consulting semantic ranking, and falls back to broader current-tree evidence when the backend has no useful answer.
+
+Source, graph, and semantic search return at most 15 matches by default. Add `--limit <count>` when a different result window is useful.
 
 Default search does not evaluate regular expressions. Use raw `rg` for regex completeness:
 
@@ -52,9 +54,9 @@ codemap search match --json --project-root <path> --lang <lang> --pattern "<patt
 codemap search rule --json --project-root <path> --rule <rule.yml> [paths...]
 ```
 
-Use `search calls` only for source call-shaped matches such as `print(...)`, `logger.info(...)`, or `console.log(...)`; backend availability never changes it into a caller/callee trace. JSON returns compact `{total,matches}` data. Add `--limit` only when a result smaller than the shared output ceiling is useful.
+Use `search calls` only for source call-shaped matches such as `print(...)`, `logger.info(...)`, or `console.log(...)`; a bare method name matches calls on any receiver, while a dotted target remains exact. Backend availability never changes it into a caller/callee trace. JSON returns compact `{total,matches}` data. Add `--limit` only when a result smaller than the shared output ceiling is useful.
 
-Use `search match` for one structural pattern and `search rule` for a reusable YAML rule. Built-in matching covers JavaScript and TypeScript. Use raw ast-grep for rewrite previews, fixes, complex Python rules, interactive authoring, detailed parse dumps, or engine options Codemap does not expose.
+Use `search match` for one structural pattern and `search rule` for a reusable YAML rule. Built-in matching covers JavaScript, TypeScript, and Python. Use raw ast-grep for rewrite previews, fixes, interactive authoring, detailed parse dumps, or engine options Codemap does not expose.
 
 ## Inspect One Known Target
 
@@ -109,13 +111,13 @@ Detailed row surfaces filter generated or bundled paths where source-specific an
 
 Treat extracted relative and absolute imports, functions, classes, file containment, same-file call-like edges, and docstring/comment signals as syntax-level leads rather than compiler facts. Start from likely entries such as `__main__.py`, `cli.py`, `main.py`, and `app.py`.
 
-Codemap's built-in ast-grep language set does not include Python. A simple Python pattern requires the ast-grep CLI:
+Python patterns run through Codemap's bundled ast-grep parser:
 
 ```sh
 codemap search match --project-root <path> --lang python --pattern "def $NAME($$$ARGS): $$$BODY" [paths...]
 ```
 
-Python `search calls` uses the CLI when installed and otherwise labels approximate rows `[regex]`; comments and strings can match, so verify them in source. Use raw ast-grep for Python kind, relational, reusable, rewrite, or fix rules.
+Python `search calls`, `search match`, and `search rule` use structural syntax matching. Use raw ast-grep for rewrite or fix rules and engine options Codemap does not expose.
 
 ## Diagnose Freshness Or Change Impact
 

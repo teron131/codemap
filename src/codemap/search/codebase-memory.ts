@@ -37,7 +37,7 @@ type CodebaseMemoryGraphRenderOptions = CodebaseMemoryRenderOptions &
     | "relationship"
   >;
 
-const MIN_SEMANTIC_SCORE = 0.2;
+const MIN_SEMANTIC_SCORE = 0.5;
 const BACKEND_SEARCH_CANDIDATE_LIMIT = 100;
 const JSON_FORMAT = { format: "json" } as const;
 

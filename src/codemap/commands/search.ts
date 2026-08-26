@@ -23,7 +23,7 @@ import {
 } from "../search/index.js";
 import { currentTreeGraph } from "../source/graph/index.js";
 import { discoverFiles } from "../source/scanner/index.js";
-import { addProjectRootArgument, DEFAULT_ROW_LIMIT, parseIntegerOption } from "./options.js";
+import { addProjectRootArgument, parseIntegerOption } from "./options.js";
 import {
   addSearchCallsParser,
   addSearchMatchParser,
@@ -59,6 +59,7 @@ type CurrentTreeSourceSearch = {
 };
 
 const EXACT_SOURCE_MATCH_LIMIT = 3;
+const DEFAULT_SEARCH_LIMIT = 15;
 
 /** Registers backend-ranked source, graph, semantic, and structural search commands. */
 export function addSearchParser(program: Command): void {
@@ -66,7 +67,7 @@ export function addSearchParser(program: Command): void {
     .command("search")
     .description("Search current code.")
     .argument("[searchText...]", "Text to search for.")
-    .option("--limit <count>", "Maximum matches.", parseIntegerOption)
+    .option("--limit <count>", "Maximum matches. Defaults to 15.", parseIntegerOption)
     .option("--graph", "Search with derived relationship context instead of the fast source path.")
     .option("--semantic", "Use Codebase Memory semantic graph search.")
     .option("--label <label>", "Filter --graph results by node label.")
@@ -122,6 +123,18 @@ export async function commandSearch(
   const root = resolveProjectRoot(options.projectRoot ?? rootOptions.projectRoot);
   console.log(`Search: ${searchText}`);
   let fallbackPreflight: SourceFallbackSearch | undefined;
+  if (options.semantic) {
+    const directDefinitions = definitionMatches(root, searchText, {
+      includeTests: Boolean(options.includeTests),
+      limit,
+    });
+    if (directDefinitions.length > 0) {
+      printSourceMatches(directDefinitions, {
+        note: "Exact current-tree definition found; skipped backend semantic search.",
+      });
+      return 0;
+    }
+  }
   if (!options.graph && !options.semantic) {
     const directPaths = pathMatches(root, searchText, { limit });
     if (directPaths.length > 0) {
@@ -375,8 +388,8 @@ function backendOutputOptions(options: SearchOptions): {
 /** Parses the search result limit option. */
 function searchLimit(value: string | number | undefined): number {
   if (value === undefined) {
-    return DEFAULT_ROW_LIMIT;
+    return DEFAULT_SEARCH_LIMIT;
   }
   const parsed = typeof value === "number" ? value : Number.parseInt(String(value), 10);
-  return Number.isNaN(parsed) ? DEFAULT_ROW_LIMIT : parsed;
+  return Number.isNaN(parsed) ? DEFAULT_SEARCH_LIMIT : parsed;
 }

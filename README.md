@@ -16,13 +16,13 @@ Use Codemap for normal repository navigation and change scoping. Use direct Code
 
 ## Install
 
-Node.js 22+ is required. Commands below use npm; equivalent pnpm commands also work.
+Node.js 22.12+ is required. Commands below use npm; equivalent pnpm commands also work.
 
 | Tool | Role | Setup |
 | --- | --- | --- |
 | [Codebase Memory MCP](https://github.com/DeusData/codebase-memory-mcp#installation) | Relationships, architecture, semantic search, and change impact | Install the external `codebase-memory-mcp` binary |
 | [ripgrep](https://github.com/BurntSushi/ripgrep#installation) | Exact-text search and fast file discovery | Install the external `rg` binary |
-| [ast-grep](https://github.com/ast-grep/ast-grep#installation) | Structural search and source parsing | JavaScript and TypeScript engine bundled; CLI optional for Python and advanced operations |
+| [ast-grep](https://github.com/ast-grep/ast-grep#installation) | Structural search and source parsing | JavaScript, TypeScript, and Python engines bundled; CLI optional for advanced operations outside Codemap |
 
 Install the external tools on macOS for full coverage:
 
@@ -56,9 +56,9 @@ codemap --help
 | `summary` | Current-tree README, language mix, package manifests, imports, and public exports, enriched by Codebase Memory | Focused orientation through README purpose and outline, language percentages, a compact package- or feature-level repository skeleton, call-share hotspots, cohesive clusters, and an at-most-three-level hierarchy of public surfaces selected by entry position, import reach, and breadth, with directly exposed modules and defining exports. |
 | `search <text>` | Current-tree paths, exact definitions and text, and decisive locally cohesive multi-term source candidates; then Codebase Memory ranked search and local fallback | Broad path, concept, symbol, and text discovery. |
 | `search --graph <text>` | Codebase Memory graph search, then current-tree graph fallback | Relationship-aware discovery. |
-| `search --semantic <text>` | Codebase Memory semantic graph search, then current-tree fallback | Vocabulary-bridging discovery. |
-| `search calls <name>` | ast-grep, or labeled Python regex fallback | Call-shaped source matches. |
-| `search match` / `search rule` | ast-grep | Built-in JS/TS structural discovery; simple Python patterns require the ast-grep CLI. |
+| `search --semantic <text>` | Exact current-tree definition, then Codebase Memory semantic graph search and current-tree fallback | Vocabulary-bridging discovery without hiding an exact implementation owner. |
+| `search calls <name>` | ast-grep | Call-shaped source matches across the bundled language parsers. |
+| `search match` / `search rule` | ast-grep | Built-in JavaScript, TypeScript, and Python structural discovery. |
 | `inspect <target>` | Codebase Memory for symbols, current tree for paths and fallback | Focused in-to-out neighborhood inspection. |
 | `signals` | Codebase Memory function metrics plus current-tree definitions | Ranked source metrics under the shared output ceiling. |
 | `backend ...` | Raw Codebase Memory diagnostics | Projects, status, schema, Cypher queries, and change impact. |
@@ -66,7 +66,7 @@ codemap --help
 
 ## Output
 
-Every command applies one final approximate 10,000-token ceiling after selection and rendering. Text keeps complete lines and reports `shown`, `total`, and `truncated` counts. JSON remains one valid minified value and reports truncation on stderr. Use `--limit` or `--max-rows` when a smaller result is preferable.
+Every command applies one final approximate 10,000-token ceiling after selection and rendering. Text keeps complete lines and reports `shown`, `total`, and `truncated` counts. JSON remains one valid minified value and reports truncation on stderr. Search returns at most 15 matches by default; use `--limit` to override that selection or `--max-rows` on backend queries.
 
 ## Limits
 
