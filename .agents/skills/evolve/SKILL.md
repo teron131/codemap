@@ -30,7 +30,9 @@ Choose the relevant subset of the [public repository pool](#public-repository-po
 
 For each case, keep one compact record of the task, expected target, affected lanes, falsifier, result, and next action. Record rank, evidence mix, output size, elapsed time, and freshness when they bear on the change. Add an adversarial case when the work exposes a plausible failure.
 
-For behavior-preserving work, compare stdout, stderr, and exit status before and after on identical fixtures. Include affected ordering, language variants, candidate limits, degraded results, and JSON truncation. For performance claims, take repeated measurements and interleave baseline and changed runs when practical; distinguish local source work, process startup, and backend refresh. A single faster run or a reduced evidence set does not establish an optimization.
+For behavior-preserving work, compare stdout, stderr, and exit status before and after on identical fixtures. Include affected ordering, language variants, candidate limits, degraded results, and JSON truncation. For performance claims, take repeated measurements and interleave baseline and changed runs when practical; distinguish local source work, process startup, and backend refresh. Measure through process exit so native parser teardown and provider shutdown are included. A single faster run or a reduced evidence set does not establish an optimization.
+
+For parser or resolver changes, verify the affected declarations, documentation anchors, call ownership, and local import edges against source or an independent language parser. Choose relevant cases such as multiline or nested syntax, inherited and nested TypeScript configurations, package import/require conditions, unavailable configuration, and edits between commands. Check that comments and string examples do not fabricate declarations or calls and dependency targets outside the inspected inventory do not become local edges.
 
 Run special probes only when relevant: disable the backend for fallback work; add, edit, rename, and delete toy code for lifecycle work; parse JSON directly and with `jq`; run the installed command outside the repository when the executable or companion skill changes.
 
@@ -67,9 +69,10 @@ Judge maintainability separately from public output. Look for fewer competing ow
 
 ## Keep Boundaries Clear
 
-- Follow the ownership map in `docs/IDEAS.md`: keep refresh and failure attribution in the client, cache and lock recovery in their shared owner, and MCP envelopes and provider invocation in transport.
+- Follow the ownership map in `docs/IDEAS.md`: keep project refresh and failure attribution in the client, with cache ownership and lock recovery in their shared owner. The official MCP SDK owns negotiation and messages inside the supervised worker. Wait for provider exit before returning lock ownership, and retain the operation failure if cleanup also fails.
 - Keep provider arguments, eligibility, ranking, fallback, composition, and rendering with the owning feature.
-- Reuse target discovery, source reads, and parsing within one operation, then rediscover current evidence on the next command. Keep graph extraction sequencing with its graph owner and select signal collection before computing sections.
+- Delegate syntax, module resolution, and document structure to established libraries while keeping relevance and coverage decisions in Codemap. Resolve imports in the importing file's configuration and module context, then filter to the inspected source inventory.
+- Reuse target discovery, source reads, and parsed facts within one operation, then rediscover current evidence on the next command. Share scalar scanner facts across graph and inspection consumers without retaining native syntax trees between files. Keep graph extraction sequencing with its graph owner and select signal collection before computing sections.
 - Keep work bounds local to the expensive operation and final stdout budgeting in `commands/output.ts`. Preserve independent rule limits and deterministic ordering when batching work.
 - Change the full public boundary when needed: parser, implementation, renderer, exports, docs, skill, and public tests.
 - Keep executable output factual and compact. Put usage in `skills/codemap/SKILL.md`, public behavior in `README.md`, and durable decisions in `docs/IDEAS.md`.
