@@ -346,7 +346,7 @@ function parseTypescriptRoot(filePath: string, source: string): SgNode | null {
 /** Scans one TypeScript-family file into source metrics. */
 export function scanTypescriptFile(
   filePath: string,
-  { relPath }: { relPath: string },
+  { relPath, source: existingSource }: { relPath: string; source?: string | undefined },
 ): FileMetrics {
   const metrics = createFileMetrics({
     path: filePath,
@@ -355,7 +355,7 @@ export function scanTypescriptFile(
   });
   let source: string;
   try {
-    source = readFileSync(filePath, "utf8");
+    source = existingSource ?? readFileSync(filePath, "utf8");
   } catch {
     return metrics;
   }

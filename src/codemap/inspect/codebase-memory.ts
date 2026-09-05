@@ -1,9 +1,9 @@
 /** Adapts Codebase Memory symbol evidence into normalized inspection reports. */
 import path from "node:path";
 
+import { canonicalPath } from "../codebase-memory/cache.js";
 import {
   callCodebaseMemoryTool,
-  canonicalPath,
   withFreshCodebaseMemoryProject,
 } from "../codebase-memory/client.js";
 import { arrayValue, numberField, recordValue, stringField } from "../json-utils.js";

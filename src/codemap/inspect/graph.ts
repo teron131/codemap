@@ -2,8 +2,8 @@
 import path from "node:path";
 
 import { fileProfileRow, functionLengthSection } from "../signals/index.js";
-import { runImportMap, runScan, runStructure, type ScanEntry } from "../source/extraction/index.js";
-import { buildGraphPayload, type GraphNode, type GraphPayload } from "../source/graph/index.js";
+import { runImportMap, runScan, type ScanEntry } from "../source/extraction/index.js";
+import { buildCurrentTreeGraph, type GraphNode, type GraphPayload } from "../source/graph/index.js";
 import {
   type FileMetrics,
   PY_SUFFIXES,
@@ -23,19 +23,17 @@ export function currentTreeInspectGraph(
   const scan = existingScan ?? runScan(root);
   const importResult = runImportMap(root, scan.files);
   const importMap = importResult.importMap;
-  const pythonTreesByPath = importResult._pythonTrees;
-  const fileMetricsByPath = importResult._typescriptMetrics;
+  const fileMetricsByPath = importResult.fileMetrics;
   const emitPaths = inspectEmitPaths(root, rawTarget, scan, importMap, fileMetricsByPath);
   let structureFiles = scan.files;
   if (emitPaths !== null) {
     structureFiles = structureFiles.filter((item) => emitPaths.has(item.path));
   }
-  const structure = runStructure(root, structureFiles, importMap, {
-    fileMetricsByPath,
-    pythonTreesByPath,
-  });
-  const graph = buildGraphPayload(scan, structure, importResult, { emitPaths });
-  return [graph, metricsForFiles(root, structureFiles, fileMetricsByPath)];
+  const graph = buildCurrentTreeGraph(root, scan, importResult, { emitPaths });
+  return [
+    graph,
+    metricsForFiles(root, structureFiles, fileMetricsByPath, importResult.pythonSources),
+  ];
 }
 
 /** Builds import incoming and outgoing rows for inspection. */
@@ -94,13 +92,14 @@ export function metricsForFiles(
   root: string,
   files: ScanEntry[],
   fileMetricsByPath: Record<string, FileMetrics | undefined>,
+  sources: Record<string, string | undefined> = {},
 ): Record<string, unknown> {
   const scanned: FileMetrics[] = [];
   for (const item of files) {
     const relPath = item.path;
     let metrics = fileMetricsByPath[relPath];
     if (metrics === undefined) {
-      metrics = scanFile(path.join(root, relPath), { displayRoot: root });
+      metrics = scanFile(path.join(root, relPath), { displayRoot: root, source: sources[relPath] });
     }
     const sizeLines = item.sizeLines;
     if (sizeLines > 0 && metrics.lines === 0) {

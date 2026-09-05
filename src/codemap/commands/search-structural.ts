@@ -1,12 +1,7 @@
 /** Defines CLI behavior for explicit structural search subcommands. */
 import type { Command } from "commander";
 
-import {
-  resolveProjectFile,
-  type SyntaxMatch,
-  syntaxMatches,
-  targetLanguages,
-} from "../ast-grep/index.js";
+import { resolveProjectFile, type SyntaxMatch, SyntaxSearch } from "../ast-grep/index.js";
 import { resolveProjectRoot } from "../common.js";
 import { callMatches, resolveTargetPaths, searchRuleMatches } from "../search/structural.js";
 import { addProjectRootArgument, DEFAULT_ROW_LIMIT, parseIntegerOption } from "./options.js";
@@ -105,7 +100,8 @@ export function addSearchRuleParser(command: Command): void {
 export function commandSearchMatch(options: SearchMatchOptions): number {
   const root = resolveProjectRoot(options.projectRoot);
   const paths = resolveTargetPaths(root, options.paths ?? []);
-  const languages = structuralLanguages(root, paths, options.lang);
+  const search = new SyntaxSearch(root, paths);
+  const languages = options.lang ? [options.lang] : search.languages();
   if (languages.length === 0) {
     printNoSyntaxTargets(paths);
     return 1;
@@ -114,7 +110,7 @@ export function commandSearchMatch(options: SearchMatchOptions): number {
   const unavailableLanguages = [];
   let searchedLanguages = 0;
   for (const language of languages) {
-    const languageMatches = syntaxMatches(root, language, options.pattern, paths);
+    const languageMatches = search.matches(language, { rule: { pattern: options.pattern } });
     if (languageMatches === null) {
       unavailableLanguages.push(language);
       continue;
@@ -144,14 +140,15 @@ export function commandSearchCalls(options: SearchCallsOptions): number {
   }
   const root = resolveProjectRoot(options.projectRoot);
   const paths = resolveTargetPaths(root, options.paths ?? []);
-  const languages = structuralLanguages(root, paths, options.lang);
+  const search = new SyntaxSearch(root, paths);
+  const languages = options.lang ? [options.lang] : search.languages();
   if (languages.length === 0) {
     printNoSyntaxTargets(paths);
     return 1;
   }
   const matches = [];
   for (const language of languages) {
-    const languageMatches = callMatches(root, language, options.name, paths);
+    const languageMatches = callMatches(search, language, options.name);
     if (languageMatches === null) {
       console.log(`Unavailable: ast-grep is not available for language: ${language}.`);
       return 127;
@@ -236,15 +233,6 @@ function rootOption(
   command: Command,
 ): string | undefined {
   return options.projectRoot ?? command.optsWithGlobals<{ projectRoot?: string }>().projectRoot;
-}
-
-/** Returns explicit or target-inferred languages for structural search. */
-function structuralLanguages(
-  root: string,
-  paths: string[],
-  explicitLanguage: string | undefined,
-): string[] {
-  return explicitLanguage ? [explicitLanguage] : targetLanguages(root, paths);
 }
 
 /** Prints a focused message when language inference has no source files. */

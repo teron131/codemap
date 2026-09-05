@@ -9,6 +9,8 @@ Route relationship and semantic questions to Codebase Memory, exact text to `rg`
 
 Graph-backed commands explicitly refresh one non-persistent snapshot per operation and do not write graph data into the inspected repository. An explicit `CBM_CACHE_DIR` remains authoritative; an unwritable default cache falls back to a private OS temporary cache. Local `rg`, ast-grep, and current-tree evidence remain independently verifiable fallbacks.
 
+Local target inventories and source reads are reused only within a command. After editing source, rerun the affected command to inspect the current files.
+
 ## Orient Before Substantial Work
 
 ```sh
@@ -50,13 +52,15 @@ rg -n "<regex>" <path>
 ```sh
 codemap search calls --project-root <path> <function-or-method> [paths...]
 codemap search calls --json --limit <count> --project-root <path> <function-or-method> [paths...]
-codemap search match --json --project-root <path> --lang <lang> --pattern "<pattern>" [paths...]
+codemap search match --json --project-root <path> --lang <lang> --pattern '<pattern>' [paths...]
 codemap search rule --json --project-root <path> --rule <rule.yml> [paths...]
 ```
 
-Use `search calls` only for source call-shaped matches such as `print(...)`, `logger.info(...)`, or `console.log(...)`; a bare method name matches calls on any receiver, while a dotted target remains exact. Backend availability never changes it into a caller/callee trace. JSON returns compact `{total,matches}` data. Add `--limit` only when a result smaller than the shared output ceiling is useful.
+Use `search calls` only for source call-shaped matches such as `print(...)`, `logger.info(...)`, or `console.log(...)`; a bare method name matches calls on any receiver, while a dotted target remains exact. Backend availability never changes it into a caller/callee trace. JSON returns compact `{total,matches}` data. Call searches select at most 1,000 matches by default; `--limit` changes that selection before the final output ceiling applies.
 
-Use `search match` for one structural pattern and `search rule` for a reusable YAML rule. Built-in matching covers JavaScript, TypeScript, and Python. Use raw ast-grep for rewrite previews, fixes, interactive authoring, detailed parse dumps, or engine options Codemap does not expose.
+Scope `[paths...]` to known files or directories to reduce work and noise. Calls and patterns infer languages from those targets when `--lang` is omitted; YAML rules supply their own language. Single-quote patterns containing `$NAME` or `$$$ARGS` so the shell passes ast-grep placeholders literally.
+
+Use `search match` for one structural pattern and `search rule` for a reusable YAML rule. Pattern JSON is an array of match rows; rule JSON wraps matches with rule metadata. Built-in matching covers JavaScript, TypeScript, and Python. Use raw ast-grep for rewrite previews, fixes, interactive authoring, detailed parse dumps, or engine options Codemap does not expose.
 
 ## Inspect One Known Target
 
@@ -93,7 +97,7 @@ Upstream metrics remain provider facts. Fresh `functionMetrics` uses backend row
 
 Above the detailed-graph threshold, the fallback scans the 100 largest eligible source files and reports parsed versus eligible file counts. Its statistics describe only parsed rows. Treat its function-length and file rows as bounded current-tree evidence; relationship and mention coverage are not complete. Above 10,000 eligible files, default signals skip backend metric enrichment; use explicit backend commands only when that graph cost is justified.
 
-Open a detailed lane only when the default points there:
+Use a detailed lane when the question is already specific or the default points there:
 
 ```sh
 codemap signals --project-root <path> <section>
@@ -103,7 +107,9 @@ codemap signals --project-root <path> <section>
 - `files` or `lengths`: density and size measurements.
 - `functions`, `variables`, or `usage`: definition and lexical-usage tables.
 - `docstring-signals` or `docstrings`: documentation coverage or full docstring rows.
-- `all`: every detailed section plus provider function metrics, without repeating the compact `top` projection.
+- `all`: the detailed metric sections and documentation coverage, plus provider function metrics, without repeating the compact `top` projection. Full docstring rows require `docstrings` separately.
+
+Prefer the relevant section over requesting `all` and discarding most of it. Focused sections skip unrelated analysis; only `top` and `all` request backend function metrics. Use `docstrings` directly when the task needs documentation text.
 
 Detailed row surfaces filter generated or bundled paths where source-specific and use the same final-output budget. Add `--include-tests` only when tests are the target. Text and JSON expose the same normalized facts; compact JSON is intended for `jq` and pipelines.
 
@@ -114,7 +120,7 @@ Treat extracted relative and absolute imports, functions, classes, file containm
 Python patterns run through Codemap's bundled ast-grep parser:
 
 ```sh
-codemap search match --project-root <path> --lang python --pattern "def $NAME($$$ARGS): $$$BODY" [paths...]
+codemap search match --project-root <path> --lang python --pattern 'def $NAME($$$ARGS): $$$BODY' [paths...]
 ```
 
 Python `search calls`, `search match`, and `search rule` use structural syntax matching. Use raw ast-grep for rewrite or fix rules and engine options Codemap does not expose.

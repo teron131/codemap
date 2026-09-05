@@ -29,12 +29,13 @@ import { buildUsageSection } from "./usage.js";
 
 type Row = SignalRow;
 
-const SIGNAL_EXPORT_SECTIONS = [
-  "relationships",
-  "usage",
-  "function-lengths",
-  "file-profiles",
-] as const;
+export type SignalExportSection =
+  | "relationships"
+  | "usage"
+  | "function-lengths"
+  | "file-profiles"
+  | "docstring-signals"
+  | "docstrings";
 
 /** Summarizes import, entrypoint, AGENTS, and source relationship counts. */
 function buildRelationshipsSection(
@@ -128,23 +129,32 @@ function buildDocstringSignalSection(targetPath: string, signalFocusDocFiles: st
 /** Builds the selected signal sections for a target path. */
 export function buildSignalExport(
   targetPath: string,
-  { sectionMode }: { sectionMode: string | string[] },
+  {
+    sectionMode,
+    files,
+  }: { sectionMode: SignalExportSection | SignalExportSection[]; files?: string[] },
 ): Row {
+  const selected = new Set(Array.isArray(sectionMode) ? sectionMode : [sectionMode]);
+  if (selected.size === 1 && selected.has("docstrings")) {
+    return { sections: { docstrings: buildDocstringsData(targetPath) } };
+  }
   const displayRoot = isDirectory(targetPath) ? targetPath : path.dirname(targetPath);
-  const allFiles = discoverFiles(targetPath);
+  const allFiles = files ?? discoverFiles(targetPath);
   const displayFiles = allFiles.map((filePath) => relativePath(filePath, { displayRoot }));
   const scannedFiles = allFiles.map((filePath) => scanFile(filePath, { displayRoot }));
-  const fileProfileRows = scannedFiles.map((metrics) => fileProfileRow(metrics));
+  const needsProfiles =
+    selected.has("relationships") ||
+    selected.has("file-profiles") ||
+    selected.has("docstring-signals");
+  const fileProfileRows = needsProfiles ? scannedFiles.map(fileProfileRow) : [];
   fileProfileRows.sort(
     (left, right) =>
-      -Number(left.total ?? 0) - -Number(right.total ?? 0) ||
+      Number(right.total ?? 0) - Number(left.total ?? 0) ||
       compareText(String(left.file), String(right.file)),
   );
   const entrypoints = new Set(
     scannedFiles.filter((metrics) => metrics.entrypointHint).map((metrics) => metrics.relPath),
   );
-  const selected = new Set(Array.isArray(sectionMode) ? sectionMode : [sectionMode]);
-
   const sections: Row = {};
   if (selected.has("relationships")) {
     sections.relationships = buildRelationshipsSection(
@@ -176,24 +186,6 @@ export function buildSignalExport(
     sections.docstrings = buildDocstringsData(targetPath);
   }
   return { sections };
-}
-
-/** Builds the full signal export with a stable status and error envelope. */
-export function runSignalsExport(root: string): Row {
-  try {
-    const payload = buildSignalExport(root, {
-      sectionMode: [...SIGNAL_EXPORT_SECTIONS],
-    });
-    return {
-      ...payload,
-      status: "ok",
-    };
-  } catch (error) {
-    return {
-      status: "error",
-      message: error instanceof Error ? error.message : String(error),
-    };
-  }
 }
 
 /** Totals line counts from rows that expose a numeric length field. */

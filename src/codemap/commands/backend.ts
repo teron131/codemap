@@ -1,7 +1,7 @@
 /** Defines CLI behavior for Codebase Memory backend operations. */
 import type { Command } from "commander";
 
-import { canonicalPath } from "../codebase-memory/client.js";
+import { canonicalPath } from "../codebase-memory/cache.js";
 import {
   type CodebaseMemoryChangeOptions,
   codebaseMemoryChanges,

@@ -35,6 +35,37 @@ afterEach(() => {
 });
 
 describe("search command handler", () => {
+  it("keeps phrase variants independent before applying the final ranked limit", async () => {
+    writeFileSync(path.join(workDir, "src", "z.ts"), "export const resolveRequest = 1;\n");
+    writeFileSync(path.join(workDir, "src", "a.ts"), "export class ResolveRequest {}\n");
+    writeFileSync(path.join(workDir, "src", "b.py"), "def resolve_request():\n    pass\n");
+
+    await expect(
+      commandSearch(["resolve request"], { projectRoot: workDir, limit: 1, includeTests: true }),
+    ).resolves.toBe(0);
+
+    const output = logLines().join("\n");
+    expect(output).toContain("src/a.ts");
+    expect(output).not.toContain("src/z.ts");
+    expect(output).not.toContain("src/b.py");
+  });
+
+  it("discovers newly added call targets on the next command", async () => {
+    const args = ["node", "codemap", "search", "calls", "--project-root", workDir, "helper"];
+    writeFileSync(path.join(workDir, "src", "first.ts"), "helper('before');\n");
+    await expect(dispatch(buildParser(), args)).resolves.toBe(0);
+    expect(logLines().join("\n")).toContain("helper('before')");
+
+    logSpy.mockClear();
+    writeFileSync(path.join(workDir, "src", "first.ts"), "const value = 1;\n");
+    writeFileSync(path.join(workDir, "src", "second.py"), "helper('after')\n");
+    await expect(dispatch(buildParser(), args)).resolves.toBe(0);
+    const output = logLines().join("\n");
+    expect(output).toContain("src/second.py");
+    expect(output).toContain("helper('after')");
+    expect(output).not.toContain("before");
+  });
+
   it("infers language for call search from target files", async () => {
     writeFileSync(
       path.join(workDir, "src", "calls.ts"),
@@ -179,9 +210,9 @@ describe("search command handler", () => {
     );
 
     const result = spawnSync(
-      "pnpm",
+      process.execPath,
       [
-        "exec",
+        "--import",
         "tsx",
         "src/codemap/cli.ts",
         "search",
