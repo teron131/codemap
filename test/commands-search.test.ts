@@ -1,6 +1,6 @@
 /** Checks search command handler output and backend search fallback status. */
 import { spawnSync } from "node:child_process";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -48,6 +48,51 @@ describe("search command handler", () => {
     expect(output).toContain("src/a.ts");
     expect(output).not.toContain("src/z.ts");
     expect(output).not.toContain("src/b.py");
+  });
+
+  it("keeps a callable candidate when ripgrep yields similarly named state first", async () => {
+    const sources = [
+      ["src/z.ts", "export const resolveRequest = 1;"],
+      ["src/a.ts", "export class ResolveRequest {}"],
+    ] as const;
+    for (const [file, source] of sources) {
+      writeFileSync(path.join(workDir, file), `${source}\n`);
+    }
+    writeFileSync(path.join(workDir, "src", "b.py"), "def resolve_request():\n    pass\n");
+    const events = sources
+      .map(([file, source]) =>
+        JSON.stringify({
+          type: "match",
+          data: {
+            path: { text: `./${file}` },
+            lines: { text: `${source}\n` },
+            line_number: 1,
+            submatches: [{ start: 0 }],
+          },
+        }),
+      )
+      .join("\n");
+    const executable = path.join(workDir, "rg");
+    writeFileSync(
+      executable,
+      [
+        "#!/usr/bin/env node",
+        "/** Emits valid case-insensitive declaration matches in the unfavorable traversal order. */",
+        `if (!process.argv.some(arg => arg.includes('resolve_request'))) process.stdout.write(${JSON.stringify(`${events}\n`)});`,
+      ].join("\n"),
+    );
+    chmodSync(executable, 0o755);
+    vi.stubEnv("PATH", `${workDir}${path.delimiter}${process.env.PATH ?? ""}`);
+
+    await expect(
+      commandSearch(["resolve request"], {
+        projectRoot: workDir,
+        limit: 1,
+        includeTests: true,
+      }),
+    ).resolves.toBe(0);
+    expect(logLines().join("\n")).toContain("src/a.ts");
+    expect(logLines().join("\n")).not.toContain("src/z.ts");
   });
 
   it("discovers newly added call targets on the next command", async () => {
@@ -401,6 +446,46 @@ describe("search command handler", () => {
     expect(output).toContain("src/app.ts");
     expect(output).toContain("[symbol]");
     expect(output).not.toContain("[file]");
+  });
+
+  it("shows each definition once across syntax and line evidence without losing other owners", async () => {
+    writeFileSync(
+      path.join(workDir, "src", "a.py"),
+      "def handle_function_call(\n    name,\n):\n    return name\n",
+    );
+    writeFileSync(
+      path.join(workDir, "src", "b.ts"),
+      "export function handleFunctionCall(name: string) {\n  return name;\n}\n",
+    );
+
+    await expect(
+      commandSearch(["handle function call"], { projectRoot: workDir, limit: 5 }),
+    ).resolves.toBe(0);
+
+    const output = logLines().join("\n");
+    expect(output.match(/\[symbol\]/g)).toHaveLength(2);
+    expect(output).toContain("src/a.py:1:");
+    expect(output).toContain("src/b.ts:1:");
+
+    logSpy.mockClear();
+    await commandSearch(["handle function call"], { projectRoot: workDir, limit: 2 });
+    expect(logLines().join("\n")).toContain("src/a.py:1:");
+    expect(logLines().join("\n")).toContain("src/b.ts:1:");
+  });
+
+  it("keeps separate same-line method definitions when their source text is identical", async () => {
+    writeFileSync(
+      path.join(workDir, "src", "methods.ts"),
+      "class First { invoke() { return true; } } class Second { invoke() { return true; } }\n",
+    );
+
+    await expect(commandSearch(["invoke"], { projectRoot: workDir, limit: 5 })).resolves.toBe(0);
+
+    expect(
+      logLines()
+        .join("\n")
+        .match(/\[symbol\]/g),
+    ).toHaveLength(2);
   });
 
   it("resolves exact symbol intent to definitions before references", async () => {

@@ -4,6 +4,7 @@ import path from "node:path";
 
 import { PY_SUFFIXES, scanFile, TYPESCRIPT_SUFFIXES } from "../scanner/index.js";
 import type { FileMetrics } from "../scanner/metrics.js";
+import { pythonBlockSpan } from "../scanner/python.js";
 import type { ScanEntry } from "./scan.js";
 
 type StructureFunction = {
@@ -230,6 +231,12 @@ export function typescriptStructure(
     startLine: span.startLine,
     endLine: span.startLine + span.span - 1,
   }));
+  const classes = fileMetrics.classSpans.map((span) => ({
+    name: span.name,
+    startLine: span.startLine,
+    endLine: span.startLine + span.span - 1,
+    methods: span.methods,
+  }));
   let lines: string[] = [];
   try {
     lines = splitLines(readFileSync(filePath, "utf8"));
@@ -255,8 +262,8 @@ export function typescriptStructure(
   return {
     path: relPath,
     functions,
-    classes: [],
-    exports: fileMetrics.functionNames.map((name) => ({ name })),
+    classes,
+    exports: [...functions, ...classes].map((item) => ({ name: item.name })),
     callGraph,
   };
 }
@@ -276,7 +283,7 @@ function pythonDefinitions(lines: string[]): Definition[] {
         name: functionMatch[1] ?? "",
         startLine: index + 1,
         lineIndex: index,
-        endLine: blockEnd(lines, index, indent),
+        endLine: index + pythonBlockSpan(lines, index, indent),
         indent,
       });
     } else if (classMatch) {
@@ -285,7 +292,7 @@ function pythonDefinitions(lines: string[]): Definition[] {
         name: classMatch[1] ?? "",
         startLine: index + 1,
         lineIndex: index,
-        endLine: blockEnd(lines, index, indent),
+        endLine: index + pythonBlockSpan(lines, index, indent),
         indent,
       });
     }
@@ -321,23 +328,6 @@ function definitionDepth(definition: Definition, definitions: Definition[]): num
       candidate.endLine >= definition.endLine &&
       candidate.indent < definition.indent,
   ).length;
-}
-
-/** Finds the last line belonging to an indented Python block. */
-function blockEnd(lines: string[], startIndex: number, indent: number): number {
-  let endLine = startIndex + 1;
-  for (let index = startIndex + 1; index < lines.length; index += 1) {
-    const line = lines[index] ?? "";
-    if (!line.trim()) {
-      continue;
-    }
-    const currentIndent = indentOf(line);
-    if (currentIndent <= indent) {
-      break;
-    }
-    endLine = index + 1;
-  }
-  return endLine;
 }
 
 /** Counts leading spaces for Python indentation-sensitive parsing. */

@@ -302,7 +302,7 @@ function docstringForNode(root: string, node: GraphNode): string | null {
   });
 }
 
-/** Keeps inspected docstrings useful without dumping long blocks. */
+/** Keeps inspected docstrings compact and closes example fences before subsequent profile sections. */
 function compactDocstringLines(docstring: string): string[] {
   const lines = docstring
     .split(/\r?\n/)
@@ -311,6 +311,26 @@ function compactDocstringLines(docstring: string): string[] {
   const shown = lines.slice(0, 8);
   if (lines.length > shown.length) {
     shown.push("...");
+  }
+  let openFence: string | null = null;
+  for (const line of shown) {
+    const marker = /^(`{3,}|~{3,})(.*)$/.exec(line);
+    if (marker === null) {
+      continue;
+    }
+    const fence = marker[1] ?? "";
+    if (openFence === null) {
+      openFence = fence;
+    } else if (
+      fence[0] === openFence[0] &&
+      fence.length >= openFence.length &&
+      !marker[2]?.trim()
+    ) {
+      openFence = null;
+    }
+  }
+  if (openFence !== null) {
+    shown.push(openFence);
   }
   return shown;
 }

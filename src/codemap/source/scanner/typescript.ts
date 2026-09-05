@@ -185,7 +185,7 @@ function collectTypescriptExportNames(
       if (name !== null) {
         addExportedName(metrics, name.text());
       }
-    } else if (kind === "class_declaration") {
+    } else if (kind === "class_declaration" || kind === "abstract_class_declaration") {
       const name = directChild(child, "type_identifier", "identifier");
       if (name !== null) {
         addExportedName(metrics, name.text());
@@ -251,9 +251,27 @@ function scanTypescriptWithAstGrep({
       }
     } else if (kind === "export_statement") {
       collectTypescriptExport(metrics, node);
-    } else if (kind === "class_declaration") {
+    } else if (kind === "class_declaration" || kind === "abstract_class_declaration") {
       const name = directChild(node, "type_identifier", "identifier");
       if (name !== null) {
+        const methods = directChild(node, "class_body")?.children() ?? [];
+        metrics.classSpans.push({
+          name: name.text(),
+          span: spanFor(node),
+          startLine: startLineFor(node),
+          methods: methods
+            .filter((method) =>
+              ["method_definition", "abstract_method_signature"].includes(String(method.kind())),
+            )
+            .flatMap((method) => {
+              const methodName = directChild(
+                method,
+                "property_identifier",
+                "private_property_identifier",
+              );
+              return methodName === null ? [] : [methodName.text()];
+            }),
+        });
         metrics.defines += 1;
         addSample(metrics.samples, name.text());
       }
@@ -303,10 +321,13 @@ function scanTypescriptWithAstGrep({
 /** Selects relevant syntax nodes in native code instead of materializing the whole tree in JS. */
 function typescriptScanRule(filePath: string): NapiConfig {
   const suffix = path.extname(filePath);
-  const kinds =
-    suffix === ".jsx" || suffix === ".tsx"
-      ? [...TYPESCRIPT_SCAN_KINDS, "jsx_element"]
-      : TYPESCRIPT_SCAN_KINDS;
+  const kinds = [...TYPESCRIPT_SCAN_KINDS];
+  if (["typescript", "tsx"].includes(TYPESCRIPT_LANG_BY_SUFFIX[suffix] ?? "")) {
+    kinds.push("abstract_class_declaration");
+  }
+  if (suffix === ".jsx" || suffix === ".tsx") {
+    kinds.push("jsx_element");
+  }
   return { rule: { any: kinds.map((kind) => ({ kind })) } };
 }
 
