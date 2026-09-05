@@ -10,8 +10,8 @@ type PythonImportStatement =
   | { kind: "import"; names: string[] }
   | { kind: "from"; level: number; module: string; names: string[] };
 
-/** Reads Python source text when the file can be parsed for imports. */
-export function parsePythonTree(filePath: string): string | null {
+/** Reads import source while preserving unreadable-file fallback. */
+export function readPythonSource(filePath: string): string | null {
   try {
     return readFileSync(filePath, "utf8");
   } catch {
@@ -25,9 +25,8 @@ export function pythonImportTargets(
   root: string,
   filePaths: Set<string>,
   moduleIndex: PythonModuleIndex,
-  { tree = null }: { tree?: string | null } = {},
+  { source = readPythonSource(filePath) }: { source?: string | null } = {},
 ): string[] {
-  const source = tree ?? parsePythonTree(filePath);
   if (source === null) {
     return [];
   }

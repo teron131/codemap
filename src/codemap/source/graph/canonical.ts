@@ -1,33 +1,20 @@
 /** Builds canonical current-tree graph payloads and relationship helpers. */
 import { DETAILED_ANALYSIS_FILE_LIMIT } from "../../common.js";
-import type { ScanEntry } from "../extraction/index.js";
+import type { ScanPayload } from "../extraction/index.js";
 import { type ImportMapPayload, runImportMap, runScan, runStructure } from "../extraction/index.js";
-import type { StructureEntry } from "./builder.js";
 import { buildNodesAndEdges, fileNode } from "./builder.js";
 import type { GraphEdge, GraphNode, GraphPayload, GraphStats } from "./schema.js";
-
-type ScanPayload = {
-  files?: ScanEntry[];
-  stats?: {
-    byLanguage?: Record<string, number>;
-    byCategory?: Record<string, number>;
-  };
-};
-
-type StructurePayload = {
-  results?: StructureEntry[];
-};
 
 /** Summarizes canonical graph size, languages, categories, and edge types. */
 export function graphStats(nodes: GraphNode[], edges: GraphEdge[], scan: ScanPayload): GraphStats {
   return {
-    files: scan.files?.length ?? 0,
+    files: scan.files.length,
     nodes: nodes.length,
     edges: edges.length,
     nodeTypes: countBy(nodes, (node) => String(node.type ?? "unknown")),
     edgeTypes: countBy(edges, (edge) => String(edge.type ?? "unknown")),
-    languages: scan.stats?.byLanguage ?? {},
-    categories: scan.stats?.byCategory ?? {},
+    languages: scan.stats.byLanguage,
+    categories: scan.stats.byCategory,
   };
 }
 
@@ -47,20 +34,13 @@ export function relatedEdges(
 /** Builds the graph payload directly from the current project tree. */
 export function currentTreeGraph(
   root: string,
-  { emitPaths = null }: { emitPaths?: Set<string> | null } = {},
+  {
+    emitPaths = null,
+    scan = runScan(root),
+  }: { emitPaths?: Set<string> | null; scan?: ScanPayload } = {},
 ): GraphPayload {
-  const scan = runScan(root);
   const importResult = runImportMap(root, scan.files);
-  const importMap = importResult.importMap;
-  let structureFiles = scan.files;
-  if (emitPaths !== null) {
-    structureFiles = structureFiles.filter((item) => emitPaths.has(item.path));
-  }
-  const structure = runStructure(root, structureFiles, importMap, {
-    fileMetricsByPath: importResult._typescriptMetrics,
-    pythonTreesByPath: importResult._pythonTrees,
-  });
-  return buildGraphPayload(scan, structure, importResult, { emitPaths });
+  return buildCurrentTreeGraph(root, scan, importResult, { emitPaths });
 }
 
 /** Builds summary graph evidence, using path-ranked inventory above the detailed-analysis limit. */
@@ -69,7 +49,7 @@ export function currentTreeSummaryGraph(
   scan: ReturnType<typeof runScan> = runScan(root),
 ): GraphPayload {
   if (scan.files.length <= DETAILED_ANALYSIS_FILE_LIMIT) {
-    return currentTreeGraph(root);
+    return currentTreeGraph(root, { scan });
   }
   const nodes = scan.files.map((entry) => fileNode(entry.path, entry, null, []));
   return {
@@ -93,14 +73,20 @@ export function currentTreeSummaryGraph(
   };
 }
 
-/** Builds the canonical graph payload from scan, import, and structure data. */
-export function buildGraphPayload(
+/** Builds selected structure from one import snapshot, keeping extraction sequencing inside the graph owner. */
+export function buildCurrentTreeGraph(
+  root: string,
   scan: ScanPayload,
-  structure: StructurePayload,
-  importResult: Pick<ImportMapPayload, "importMap" | "stats">,
+  importResult: ImportMapPayload,
   { emitPaths = null }: { emitPaths?: Set<string> | null } = {},
 ): GraphPayload {
   const importMap = importResult.importMap;
+  const files =
+    emitPaths === null ? scan.files : scan.files.filter((item) => emitPaths.has(item.path));
+  const structure = runStructure(root, files, {
+    fileMetricsByPath: importResult.fileMetrics,
+    pythonSourcesByPath: importResult.pythonSources,
+  });
   const [nodes, edges] = buildNodesAndEdges(scan, structure, importMap, {
     emitPaths,
   });

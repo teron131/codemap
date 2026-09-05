@@ -1,14 +1,17 @@
-/** Re-exports the shared ast-grep adapter surface. */
+/** Exposes structural matching and target resolution while keeping native parsing and traversal policy separate. */
 export type { SyntaxMatch } from "./adapter.js";
 export {
   contextLines,
   loadRule,
   matchConfigFromRule,
+  ruleMatches,
+  SyntaxSearch,
+  syntaxMatches,
+} from "./adapter.js";
+export {
   normalizeLanguage,
   resolveProjectFile,
-  ruleMatches,
   SYNTAX_SUFFIXES_BY_LANGUAGE,
-  syntaxMatches,
   targetFiles,
   targetLanguages,
-} from "./adapter.js";
+} from "./targets.js";

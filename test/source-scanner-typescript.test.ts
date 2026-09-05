@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { collectReports } from "../src/codemap/source/docstrings/index.js";
 import { runImportMap, scanEntry } from "../src/codemap/source/extraction/index.js";
 import { classifyTags } from "../src/codemap/source/graph/index.js";
-import { scanTypescriptFile } from "../src/codemap/source/scanner/index.js";
+import { scanFile, scanTypescriptFile } from "../src/codemap/source/scanner/index.js";
 
 const workspaceRoot = process.cwd();
 let workDir: string;
@@ -27,6 +27,19 @@ afterEach(() => {
 });
 
 describe("TypeScript-family scanner", () => {
+  it("uses supplied source for one scan without caching it across later scans", () => {
+    const filePath = path.join(workDir, "api.ts");
+    writeFileSync(filePath, "export function diskVersion() {}\n");
+    const options = { displayRoot: workDir };
+
+    expect(
+      scanFile(filePath, { ...options, source: "export function snapshotVersion() {}\n" })
+        .functionNames,
+    ).toEqual(["snapshotVersion"]);
+    expect(scanFile(filePath, { ...options, source: "" }).functionNames).toEqual([]);
+    expect(scanFile(filePath, options).functionNames).toEqual(["diskVersion"]);
+  });
+
   it("labels JavaScript and TypeScript module suffixes", () => {
     for (const [suffix, language] of [
       [".mjs", "javascript"],

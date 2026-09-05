@@ -1,4 +1,4 @@
-/** Scans project files into language, category, and path inventory rows. */
+/** Builds a mixed-file inventory for graph sizing and language evidence without claiming syntax support. */
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
@@ -77,9 +77,9 @@ export const CONFIG_BASENAMES = new Set([
 ]);
 
 /** Scans project files into inventory rows. */
-export function runScan(root: string): ScanPayload {
-  const files = discoverFiles(root).map((filePath) => scanEntry(root, filePath));
-  return filterScan({ files });
+export function runScan(root: string, filePaths: string[] = discoverFiles(root)): ScanPayload {
+  const files = filePaths.map((filePath) => scanEntry(root, filePath));
+  return scanInventory(files);
 }
 
 /** Builds one scan inventory entry from a project-relative path. */
@@ -145,15 +145,13 @@ export function categoryForPath(relPath: string): string {
   return "code";
 }
 
-/** Filters scan payload files to a selected path subset. */
-export function filterScan(scan: { files?: ScanEntry[] }): ScanPayload {
-  const originalFiles = scan.files ?? [];
-  const files = originalFiles;
+/** Summarizes the already eligible inventory without inventing another filtering stage. */
+function scanInventory(files: ScanEntry[]): ScanPayload {
   const byCategory = countBy(files, (entry) => String(entry.fileCategory ?? "unknown"));
   const byLanguage = countBy(files, (entry) => String(entry.language ?? "unknown"));
   return {
     files,
-    filteredByTool: originalFiles.length - files.length,
+    filteredByTool: 0,
     stats: {
       filesScanned: files.length,
       byCategory,

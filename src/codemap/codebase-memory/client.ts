@@ -1,56 +1,23 @@
-/** Provides an optional stdio client for CodebaseMemory MCP tools. */
-import { spawnSync } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
+/** Owns one fresh backend snapshot per project operation and attributes provider failures to its lifecycle. */
+import { nonblankString, numberField, recordValue } from "../json-utils.js";
 import {
-  accessSync,
-  closeSync,
-  constants,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  realpathSync,
-  rmdirSync,
-  statSync,
-  unlinkSync,
-  writeFileSync,
-} from "node:fs";
-import { homedir, tmpdir } from "node:os";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-
-import { arrayValue, isRecord, nonblankString, numberField, recordValue } from "../json-utils.js";
-import { CODEMAP_VERSION } from "../version.js";
-
-type JsonObject = Record<string, unknown>;
-
-type JsonRpcResponse = {
-  id?: number | string | null;
-  result?: unknown;
-  error?: { message?: string };
-};
+  acquireProjectLock,
+  canonicalPath,
+  type CodebaseMemoryLock,
+  projectLockPath,
+  releaseProjectLock,
+} from "./cache.js";
+import {
+  callTool,
+  type CodebaseMemoryToolOptions,
+  type CodebaseMemoryToolResult,
+} from "./transport.js";
 
 export type CodebaseMemoryReadyProject = {
   name: string;
   nodes: number | null;
   edges: number | null;
   status: "ready" | "partial";
-};
-
-export type CodebaseMemoryToolResult = { ok: true; value: unknown } | { ok: false; reason: string };
-
-type CodebaseMemoryToolOptions = {
-  timeoutMs?: number;
-};
-
-type CodebaseMemoryLockOwner = {
-  pid: number;
-  token: string;
-  recoverAfter: number | null;
-};
-
-type CodebaseMemoryLock = {
-  path: string;
-  token: string;
 };
 
 type ActiveCodebaseMemoryOperation = {
@@ -63,19 +30,11 @@ type CodebaseMemoryRefreshResult =
   | { ok: true; project: CodebaseMemoryReadyProject }
   | { ok: false; reason: string };
 
-const PROTOCOL_VERSION = "2024-11-05";
-const DEFAULT_COMMAND = "codebase-memory-mcp";
 const DEFAULT_INDEX_MODE = "full";
-const REQUEST_TIMEOUT_MS = 8_000;
 const INDEX_REQUEST_TIMEOUT_MS = 120_000;
-const LOCK_WAIT_TIMEOUT_MS = 180_000;
-const LOCK_RETRY_MS = 50;
-const INCOMPLETE_LOCK_GRACE_MS = 30_000;
-const CHILD_RECOVERY_GRACE_MS = 5_000;
 const READY_INDEX_STATUSES = new Set(["complete", "completed", "indexed", "ready"]);
 const activeOperations: ActiveCodebaseMemoryOperation[] = [];
 const failureReasons = new Map<string, string>();
-const lockSleepView = new Int32Array(new SharedArrayBuffer(4));
 
 /** Returns whether the optional CodebaseMemory integration is enabled. */
 export function codebaseMemoryEnabled(): boolean {
@@ -209,176 +168,25 @@ function refreshProject(root: string): CodebaseMemoryRefreshResult {
   };
 }
 
-/** Acquires one repository's operational cache lock. */
-function acquireProjectLock(lockPath: string): CodebaseMemoryLock | null {
-  try {
-    mkdirSync(path.dirname(lockPath), { recursive: true, mode: 0o700 });
-  } catch {
-    return null;
+/** Calls the provider and attributes nested failures to the active project operation. */
+export function callCodebaseMemoryTool(
+  name: string,
+  args: Record<string, unknown>,
+  options: CodebaseMemoryToolOptions = {},
+): CodebaseMemoryToolResult {
+  if (!codebaseMemoryEnabled()) {
+    return { ok: false, reason: "disabled" };
   }
-  const deadline = Date.now() + LOCK_WAIT_TIMEOUT_MS;
-  while (Date.now() <= deadline) {
-    const owner = {
-      pid: process.pid,
-      token: randomUUID(),
-      recoverAfter: null,
-    };
-    let descriptor: number | null = null;
-    try {
-      descriptor = openSync(lockPath, "wx", 0o600);
-      writeFileSync(descriptor, JSON.stringify(owner), "utf8");
-      closeSync(descriptor);
-      descriptor = null;
-      return { path: lockPath, token: owner.token };
-    } catch (error) {
-      if (descriptor !== null) {
-        try {
-          closeSync(descriptor);
-        } catch {}
-        try {
-          unlinkSync(lockPath);
-        } catch {}
-        return null;
-      }
-      if (errorCode(error) !== "EEXIST") {
-        return null;
-      }
-      clearStaleProjectLock(lockPath);
-      Atomics.wait(lockSleepView, 0, 0, LOCK_RETRY_MS);
+  const active = activeOperations.at(-1);
+  const result = callTool(name, args, options, active?.lock);
+  if (active !== undefined) {
+    if (result.ok) {
+      failureReasons.delete(active.root);
+    } else {
+      failureReasons.set(active.root, readableToolReason(result.reason));
     }
   }
-  return null;
-}
-
-/** Removes a dead owner's lock while serializing stale-lock recovery. */
-function clearStaleProjectLock(lockPath: string): void {
-  const recoveryPath = `${lockPath}.recovery`;
-  if (!claimRecoveryDirectory(recoveryPath)) {
-    return;
-  }
-  try {
-    if (projectLockIsStale(lockPath)) {
-      try {
-        unlinkSync(lockPath);
-      } catch {}
-    }
-  } finally {
-    try {
-      rmdirSync(recoveryPath);
-    } catch {}
-  }
-}
-
-/** Claims the tiny stale-lock recovery section and repairs an abandoned claim. */
-function claimRecoveryDirectory(recoveryPath: string): boolean {
-  try {
-    mkdirSync(recoveryPath);
-    return true;
-  } catch (error) {
-    if (errorCode(error) !== "EEXIST") {
-      return false;
-    }
-  }
-  try {
-    if (Date.now() - statSync(recoveryPath).mtimeMs >= INCOMPLETE_LOCK_GRACE_MS) {
-      rmdirSync(recoveryPath);
-      mkdirSync(recoveryPath);
-      return true;
-    }
-  } catch {}
-  return false;
-}
-
-/** Checks whether a lock owner is gone or an incomplete lock has aged past its write window. */
-function projectLockIsStale(lockPath: string): boolean {
-  let modifiedAt = Date.now();
-  try {
-    modifiedAt = statSync(lockPath).mtimeMs;
-  } catch {
-    return false;
-  }
-  let owner: CodebaseMemoryLockOwner | null;
-  try {
-    owner = lockOwner(JSON.parse(readFileSync(lockPath, "utf8")));
-  } catch {
-    return Date.now() - modifiedAt >= INCOMPLETE_LOCK_GRACE_MS;
-  }
-  if (owner === null) {
-    return Date.now() - modifiedAt >= INCOMPLETE_LOCK_GRACE_MS;
-  }
-  if (owner.pid === process.pid) {
-    return true;
-  }
-  try {
-    process.kill(owner.pid, 0);
-    return false;
-  } catch (error) {
-    return (
-      errorCode(error) === "ESRCH" &&
-      (owner.recoverAfter === null || Date.now() >= owner.recoverAfter)
-    );
-  }
-}
-
-/** Validates lock metadata before using its process identifier. */
-function lockOwner(value: unknown): CodebaseMemoryLockOwner | null {
-  if (
-    typeof value !== "object" ||
-    value === null ||
-    !("pid" in value) ||
-    !("token" in value) ||
-    typeof value.pid !== "number" ||
-    !Number.isInteger(value.pid) ||
-    value.pid <= 0 ||
-    typeof value.token !== "string" ||
-    value.token.length === 0 ||
-    ("recoverAfter" in value &&
-      value.recoverAfter !== null &&
-      (typeof value.recoverAfter !== "number" || !Number.isFinite(value.recoverAfter)))
-  ) {
-    return null;
-  }
-  return {
-    pid: value.pid,
-    token: value.token,
-    recoverAfter:
-      "recoverAfter" in value && typeof value.recoverAfter === "number" ? value.recoverAfter : null,
-  };
-}
-
-/** Releases a lock only when this operation still owns its token. */
-function releaseProjectLock(lockPath: string, token: string): void {
-  try {
-    const owner = lockOwner(JSON.parse(readFileSync(lockPath, "utf8")));
-    if (owner?.token === token && owner.pid === process.pid) {
-      unlinkSync(lockPath);
-    }
-  } catch {}
-}
-
-/** Derives a stable lock path beside CodebaseMemory's operational cache. */
-function projectLockPath(root: string): string {
-  const rootHash = createHash("sha256").update(root).digest("hex");
-  return path.join(codebaseMemoryCacheRoot(), "codemap-locks", `${rootHash}.lock`);
-}
-
-/** Canonicalizes path aliases for cache matching and backend result normalization. */
-export function canonicalPath(root: string): string {
-  try {
-    return realpathSync.native(root);
-  } catch {
-    return path.resolve(root);
-  }
-}
-
-/** Reads a Node filesystem or process error code without widening catches. */
-function errorCode(error: unknown): string | null {
-  return typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    typeof error.code === "string"
-    ? error.code
-    : null;
+  return result;
 }
 
 /** Clears the current root's operational cache so deleted symbols cannot survive a full index. */
@@ -420,163 +228,6 @@ function deleteExistingProject(root: string): { ok: true } | { ok: false; reason
     : { ok: false, reason: "Could not delete existing project: invalid deletion response." };
 }
 
-/** Calls one CodebaseMemory MCP tool through the configured stdio server command. */
-export function callCodebaseMemoryTool(
-  name: string,
-  args: JsonObject,
-  options: CodebaseMemoryToolOptions = {},
-): CodebaseMemoryToolResult {
-  if (!codebaseMemoryEnabled()) {
-    return { ok: false, reason: "disabled" };
-  }
-  const command = codebaseMemoryCommand();
-  const messages = [
-    {
-      jsonrpc: "2.0",
-      id: 1,
-      method: "initialize",
-      params: {
-        protocolVersion: PROTOCOL_VERSION,
-        capabilities: {},
-        clientInfo: { name: "codemap", version: CODEMAP_VERSION },
-      },
-    },
-    {
-      jsonrpc: "2.0",
-      method: "notifications/initialized",
-      params: {},
-    },
-    {
-      jsonrpc: "2.0",
-      id: 2,
-      method: "tools/call",
-      params: { name, arguments: args },
-    },
-  ];
-  const timeoutMs = options.timeoutMs ?? REQUEST_TIMEOUT_MS;
-  const input = `${messages.map((message) => JSON.stringify(message)).join("\n")}\n`;
-  const spawnOptions = {
-    cwd: homedir(),
-    env: codebaseMemoryChildEnv(),
-    input,
-    encoding: "utf8" as const,
-    maxBuffer: 16 * 1024 * 1024,
-  };
-  const lock = activeOperations.at(-1)?.lock;
-  const result =
-    lock === undefined
-      ? spawnSync(command, [], {
-          ...spawnOptions,
-          timeout: timeoutMs,
-        })
-      : spawnSync(
-          process.execPath,
-          [
-            ...lockedChildRuntimeArguments(),
-            command,
-            String(timeoutMs),
-            lock.path,
-            lock.token,
-            String(process.pid),
-            String(INCOMPLETE_LOCK_GRACE_MS),
-            String(CHILD_RECOVERY_GRACE_MS),
-          ],
-          spawnOptions,
-        );
-  if (result.error !== undefined) {
-    return failedToolResult(result.error.message);
-  }
-  if (result.status !== 0 && result.status !== null) {
-    return failedToolResult(result.stderr.trim() || `exit ${result.status}`);
-  }
-  const responses = parseJsonRpcResponses(result.stdout);
-  const response = responses.find((item) => item.id === 2);
-  if (response === undefined) {
-    return failedToolResult("missing tool response");
-  }
-  if (response.error !== undefined) {
-    return failedToolResult(response.error.message ?? "tool error");
-  }
-  const resultError = toolResultError(response.result);
-  if (resultError !== null) {
-    return failedToolResult(resultError);
-  }
-  const payload = toolPayload(response.result);
-  const payloadError = toolPayloadError(payload);
-  if (payloadError !== null) {
-    return failedToolResult(payloadError);
-  }
-  const root = activeOperations.at(-1)?.root;
-  if (root !== undefined) {
-    failureReasons.delete(root);
-  }
-  return { ok: true, value: payload };
-}
-
-/** Locates the compiled supervisor, or loads its TypeScript source during development. */
-function lockedChildRuntimeArguments(): string[] {
-  const extension = path.extname(fileURLToPath(import.meta.url));
-  const childPath = fileURLToPath(new URL(`./locked-child${extension}`, import.meta.url));
-  return extension === ".ts" ? ["--import", import.meta.resolve("tsx"), childPath] : [childPath];
-}
-
-/** Associates a nested provider failure with the active project operation. */
-function failedToolResult(reason: string): CodebaseMemoryToolResult {
-  const root = activeOperations.at(-1)?.root;
-  if (root !== undefined) {
-    failureReasons.set(root, readableToolReason(reason));
-  }
-  return { ok: false, reason };
-}
-
-/** Resolves path-shaped command overrides before moving the child away from the project cwd. */
-function codebaseMemoryCommand(): string {
-  const command = process.env.CODEMAP_CODEBASE_MEMORY_COMMAND ?? DEFAULT_COMMAND;
-  return command.includes("/") || command.includes("\\") ? path.resolve(command) : command;
-}
-
-/** Builds a child environment that avoids leaking launcher-specific argv hints. */
-function codebaseMemoryChildEnv(): NodeJS.ProcessEnv {
-  const env = { ...process.env };
-  env.CBM_CACHE_DIR = codebaseMemoryCacheRoot();
-  delete env._;
-  for (const key of Object.keys(env)) {
-    if (key.startsWith("CODEMAP_")) {
-      delete env[key];
-    }
-  }
-  return env;
-}
-
-/** Uses the configured cache, the normal user cache, or a sandbox-writable temporary cache. */
-function codebaseMemoryCacheRoot(): string {
-  if (process.env.CBM_CACHE_DIR) {
-    return path.resolve(process.env.CBM_CACHE_DIR);
-  }
-  const defaultRoot = path.join(homedir(), ".cache", "codebase-memory-mcp");
-  if (ensureWritableDirectory(defaultRoot)) {
-    return defaultRoot;
-  }
-  const userKey =
-    typeof process.getuid === "function"
-      ? String(process.getuid())
-      : createHash("sha256").update(homedir()).digest("hex").slice(0, 12);
-  const fallbackRoot = path.join(tmpdir(), `codemap-${userKey}-codebase-memory-mcp`);
-  ensureWritableDirectory(fallbackRoot);
-  return fallbackRoot;
-}
-
-/** Creates one private cache directory and verifies that the current process may write it. */
-function ensureWritableDirectory(directory: string): boolean {
-  try {
-    mkdirSync(directory, { recursive: true, mode: 0o700 });
-    accessSync(directory, constants.W_OK);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /** Extracts a concise provider hint from JSON-encoded or plain tool failures. */
 function readableToolReason(reason: string): string {
   try {
@@ -588,70 +239,4 @@ function readableToolReason(reason: string): string {
     }
   } catch {}
   return reason;
-}
-
-/** Parses newline-delimited JSON-RPC responses from MCP stdio output. */
-function parseJsonRpcResponses(stdout: string): JsonRpcResponse[] {
-  const responses: JsonRpcResponse[] = [];
-  for (const line of stdout.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed.startsWith("{")) {
-      continue;
-    }
-    try {
-      const value = JSON.parse(trimmed);
-      if (isRecord(value)) {
-        responses.push(value as JsonRpcResponse);
-      }
-    } catch {}
-  }
-  return responses;
-}
-
-/** Extracts structured MCP output or JSON-decodes the first usable text block. */
-function toolPayload(result: unknown): unknown {
-  const record = recordValue(result);
-  if (isRecord(record.structuredContent)) {
-    return record.structuredContent;
-  }
-  const texts = toolTextBlocks(record);
-  for (const text of texts) {
-    try {
-      return JSON.parse(text);
-    } catch {}
-  }
-  return texts.length === 1 ? texts[0] : result;
-}
-
-/** Reads an MCP call-level error before feature-specific payload handling. */
-function toolResultError(result: unknown): string | null {
-  const record = recordValue(result);
-  if (record.isError !== true) {
-    return null;
-  }
-  return toolTextBlocks(record)[0] ?? "tool error";
-}
-
-/** Collects nonempty text blocks from an MCP tool result. */
-function toolTextBlocks(result: JsonObject): string[] {
-  return arrayValue(result.content)
-    .map((item) => recordValue(item).text)
-    .filter((value): value is string => typeof value === "string" && value.trim().length > 0);
-}
-
-/** Extracts a tool-level error from decoded MCP text payloads. */
-function toolPayloadError(value: unknown): string | null {
-  if (typeof value === "string" && codebaseMemoryErrorText(value)) {
-    return value;
-  }
-  const error = recordValue(value).error;
-  return typeof error === "string" && error.length > 0 ? error : null;
-}
-
-/** Detects plain-text CodebaseMemory tool errors. */
-function codebaseMemoryErrorText(value: string): boolean {
-  return (
-    /^(error|failed|invalid|unknown)\b/i.test(value) ||
-    /\b(required|must be|not found|not indexed|unavailable)\b/i.test(value)
-  );
 }

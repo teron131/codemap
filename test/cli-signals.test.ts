@@ -292,9 +292,9 @@ describe("signals CLI", () => {
     );
 
     const result = spawnSync(
-      "pnpm",
+      process.execPath,
       [
-        "exec",
+        "--import",
         "tsx",
         "src/codemap/cli.ts",
         "signals",
@@ -343,8 +343,17 @@ describe("signals CLI", () => {
     );
 
     const result = spawnSync(
-      "pnpm",
-      ["exec", "tsx", "src/codemap/cli.ts", "signals", "--project-root", workDir, "--json", "all"],
+      process.execPath,
+      [
+        "--import",
+        "tsx",
+        "src/codemap/cli.ts",
+        "signals",
+        "--project-root",
+        workDir,
+        "--json",
+        "all",
+      ],
       { cwd: workspaceRoot, encoding: "utf8" },
     );
 
@@ -352,6 +361,7 @@ describe("signals CLI", () => {
     expect(result.stderr).toBe("");
     const payload = JSON.parse(result.stdout);
     expect(payload).not.toHaveProperty("top");
+    expect(payload.docstrings).toEqual({});
     expect(payload.stats).toMatchObject({
       source: "currentTree",
       functions: {
@@ -380,9 +390,9 @@ describe("signals CLI", () => {
     );
 
     const result = spawnSync(
-      "pnpm",
+      process.execPath,
       [
-        "exec",
+        "--import",
         "tsx",
         "src/codemap/cli.ts",
         "signals",
@@ -416,9 +426,9 @@ describe("signals CLI", () => {
     );
 
     const result = spawnSync(
-      "pnpm",
+      process.execPath,
       [
-        "exec",
+        "--import",
         "tsx",
         "src/codemap/cli.ts",
         "signals",
@@ -505,8 +515,17 @@ describe("signals CLI", () => {
     );
 
     const result = spawnSync(
-      "pnpm",
-      ["exec", "tsx", "src/codemap/cli.ts", "signals", "--project-root", workDir, "--json", "top"],
+      process.execPath,
+      [
+        "--import",
+        "tsx",
+        "src/codemap/cli.ts",
+        "signals",
+        "--project-root",
+        workDir,
+        "--json",
+        "top",
+      ],
       { cwd: workspaceRoot, encoding: "utf8" },
     );
 
@@ -626,9 +645,9 @@ function firstDenseRow(payload: Record<string, unknown>): Record<string, unknown
 
 function signalTopJson(...args: string[]): Record<string, unknown> {
   const result = spawnSync(
-    "pnpm",
+    process.execPath,
     [
-      "exec",
+      "--import",
       "tsx",
       "src/codemap/cli.ts",
       "signals",

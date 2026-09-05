@@ -4,7 +4,7 @@ import path from "node:path";
 
 import type { NapiConfig } from "@ast-grep/napi";
 
-import { contextLines, ruleMatches, type SyntaxMatch, targetFiles } from "../ast-grep/index.js";
+import { contextLines, type SyntaxMatch, SyntaxSearch, targetFiles } from "../ast-grep/index.js";
 import {
   categoryForPath,
   CONFIG_BASENAMES,
@@ -115,9 +115,10 @@ export function definitionMatches(
   const matches: SourceMatch[] = [];
   const seen = new Set<string>();
   const phraseIntent = !IDENTIFIER_RE.test(searchText);
-  for (const symbol of symbols) {
+  const symbolGroups = astGrepSymbolMatches(root, symbols, { limit: candidateLimit });
+  for (const [index, symbol] of symbols.entries()) {
     const candidates = [
-      ...astGrepSymbolMatches(root, symbol, { limit: candidateLimit }),
+      ...(symbolGroups[index] ?? []),
       ...ripgrepDefinitionMatches(root, symbol, { limit: candidateLimit }),
     ];
     for (const match of candidates) {
@@ -159,9 +160,9 @@ export function sourceMatches(
   const seen = new Set<string>();
   const candidateLimit = includeTests ? limit : Math.max(limit, SOURCE_CANDIDATE_LIMIT);
   if (!textOnly && IDENTIFIER_RE.test(searchText)) {
-    for (const sourceMatch of astGrepSymbolMatches(root, searchText, {
+    for (const sourceMatch of astGrepSymbolMatches(root, [searchText], {
       limit: candidateLimit,
-    })) {
+    })[0] ?? []) {
       if (!includeTests && isTestPath(sourceMatch.filePath)) {
         continue;
       }
@@ -365,36 +366,42 @@ function definitionSymbols(searchText: string): string[] {
   return [`${terms[0]}${titleTerms.slice(1).join("")}`, titleTerms.join(""), terms.join("_")];
 }
 
-/** Finds likely symbol matches with ast-grep before rg fallback. */
+/** Evaluates identifier variants together without changing each variant's language order or candidate bound. */
 function astGrepSymbolMatches(
   root: string,
-  symbol: string,
+  symbols: string[],
   { limit }: { limit: number },
-): SourceMatch[] {
-  const matches: SourceMatch[] = [];
+): SourceMatch[][] {
+  const groups: SourceMatch[][] = symbols.map(() => []);
+  const search = new SyntaxSearch(root, ["."]);
+  const prefilter = new RegExp(symbols.map(escapeRegExp).join("|"));
   for (const [language, kinds] of Object.entries(SYMBOL_KINDS_BY_LANGUAGE)) {
-    const symbolMatches = ruleMatches(root, language, symbolMatchConfig(symbol, kinds), ["."], {
-      limit: limit - matches.length,
-    });
-    if (symbolMatches === null) {
+    const matches = search.matchRules(
+      language,
+      symbols.map((symbol, index) => ({
+        config: symbolMatchConfig(symbol, kinds),
+        limit: limit - groups[index]!.length,
+      })),
+      prefilter,
+    );
+    if (matches === null) {
       if (language === "python") {
-        matches.push(
-          ...pythonSymbolMatches(root, symbol, {
-            limit: limit - matches.length,
-          }),
-        );
-        return matches.slice(0, limit);
+        for (const [index, symbol] of symbols.entries()) {
+          groups[index]!.push(
+            ...pythonSymbolMatches(root, symbol, { limit: limit - groups[index]!.length }),
+          );
+        }
       }
-      return matches;
+      return groups;
     }
-    for (const match of symbolMatches) {
-      matches.push(astGrepMatch(match));
+    for (const [index, rows] of matches.entries()) {
+      groups[index]!.push(...rows.map(astGrepMatch));
     }
-    if (matches.length >= limit) {
-      return matches;
+    if (groups.every((group) => group.length >= limit)) {
+      break;
     }
   }
-  return matches;
+  return groups;
 }
 
 /** Finds Python definitions or assignments that match a symbol name. */

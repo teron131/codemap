@@ -10,9 +10,14 @@ import {
 import { DETAILED_ANALYSIS_FILE_LIMIT } from "../common.js";
 import { arrayValue, nonblankString, recordValue } from "../json-utils.js";
 import { runScan } from "../source/extraction/index.js";
-import { isGeneratedPath, isSupportedSourcePath, isTestPath } from "../source/scanner/index.js";
+import {
+  discoverFiles,
+  isGeneratedPath,
+  isSupportedSourcePath,
+  isTestPath,
+} from "../source/scanner/index.js";
 import { compareText } from "../text-utils.js";
-import { buildSignalExport, runSignalsExport } from "./build.js";
+import { buildSignalExport, type SignalExportSection } from "./build.js";
 import { buildLightweightSignalPayload } from "./lightweight.js";
 import { buildSignalPayload, selectPayloadSection } from "./payload.js";
 
@@ -223,23 +228,29 @@ function buildCurrentTreeSignalPayload(
     const payload = docstringSignalPayload(root, section);
     return selectPayloadSection(payload, section);
   }
-  const scan = runScan(root);
-  if (scan.files.length > DETAILED_ANALYSIS_FILE_LIMIT) {
+  const files = discoverFiles(root);
+  if (files.length > DETAILED_ANALYSIS_FILE_LIMIT) {
+    const scan = runScan(root, files);
     const payload = buildLightweightSignalPayload(scan.files, {
       includeTests: Boolean(options.includeTests),
       root,
     });
     return selectPayloadSection(payload, section);
   }
-  const signalExport = runSignalsExport(root);
-  if (signalExport.status !== "ok") {
-    throw new Error(`Signals unavailable: ${String(signalExport.message ?? "unknown error")}`);
+  let signalExport;
+  try {
+    signalExport = buildSignalExport(root, { sectionMode: exportSections(section), files });
+  } catch (error) {
+    throw new Error(
+      `Signals unavailable: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
   }
   const payload = buildSignalPayload(signalExport, {
     includeTests: Boolean(options.includeTests),
   });
   if (section === "all") {
-    Object.assign(payload, docstringSignalPayload(root, "docstring-signals"));
+    payload.docstrings = {};
   }
   return selectPayloadSection(payload, section);
 }
@@ -257,4 +268,20 @@ function docstringSignalPayload(
     docstring_signals: sections.docstring_signals ?? {},
     docstrings: sections.docstrings ?? {},
   };
+}
+
+/** Selects collection work before scanning so focused views do not calculate discarded sections. */
+function exportSections(section: string): SignalExportSection[] {
+  switch (section) {
+    case "all":
+      return ["relationships", "usage", "function-lengths", "file-profiles", "docstring-signals"];
+    case "relationships":
+      return ["relationships"];
+    case "files":
+      return ["file-profiles"];
+    case "lengths":
+      return ["function-lengths"];
+    default:
+      return ["usage"];
+  }
 }
