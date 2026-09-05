@@ -1,9 +1,16 @@
-/** Stores per-file scan metrics for imports, definitions, and code signals. */
+/** Retains per-file measurements and declaration spans shared by inspection, signals, and graph extraction. */
 export type FunctionSpan = {
   name: string;
   identifier: string;
   span: number;
   startLine: number;
+};
+
+type ClassSpan = {
+  name: string;
+  span: number;
+  startLine: number;
+  methods: string[];
 };
 
 export type VariableSignal = {
@@ -52,6 +59,7 @@ export type FileMetrics = {
   variableNames: string[];
   variableSignals: VariableSignal[];
   functionSpans: FunctionSpan[];
+  classSpans: ClassSpan[];
 };
 
 /** Starts one file metrics record with zeroed counters and empty samples. */
@@ -93,6 +101,7 @@ export function createFileMetrics({
     variableNames: [],
     variableSignals: [],
     functionSpans: [],
+    classSpans: [],
   };
 }
 

@@ -257,7 +257,7 @@ function pythonDefinitions(source: string): PythonDefinition[] {
         indent,
         lineIndex: index,
         startLine: index + 1,
-        span: blockSpan(lines, index, indent),
+        span: pythonBlockSpan(lines, index, indent),
         decoratorCount: decoratorCount(lines, index, indent),
         bases: [],
       });
@@ -268,7 +268,7 @@ function pythonDefinitions(source: string): PythonDefinition[] {
         indent,
         lineIndex: index,
         startLine: index + 1,
-        span: blockSpan(lines, index, indent),
+        span: pythonBlockSpan(lines, index, indent),
         decoratorCount: decoratorCount(lines, index, indent),
         bases: classBases(classMatch[2] ?? ""),
       });
@@ -305,8 +305,8 @@ function parentNames(
   return parents;
 }
 
-/** Measures a Python definition block using headers, indentation, and strings. */
-function blockSpan(lines: string[], startIndex: number, indent: number): number {
+/** Keeps scanner and graph spans consistent across multiline Python headers and string bodies. */
+export function pythonBlockSpan(lines: string[], startIndex: number, indent: number): number {
   const headerEndIndex = pythonHeaderEndIndex(lines, startIndex);
   let endIndex = headerEndIndex;
   let inTripleString = false;

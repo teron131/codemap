@@ -95,7 +95,7 @@ export const SEARCH_STOP_WORDS = new Set([
   "with",
 ]);
 
-/** Finds exact current-tree definitions for identifier-shaped queries. */
+/** Finds exact definitions while retaining enough phrase candidates for callable filtering before display limits. */
 export function definitionMatches(
   root: string,
   searchText: string,
@@ -111,24 +111,37 @@ export function definitionMatches(
   if (symbols.length === 0) {
     return [];
   }
-  const candidateLimit = includeTests ? limit : Math.max(limit, SOURCE_CANDIDATE_LIMIT);
+  const phraseIntent = !IDENTIFIER_RE.test(searchText);
+  const candidateLimit =
+    includeTests && !phraseIntent ? limit : Math.max(limit, SOURCE_CANDIDATE_LIMIT);
   const matches: SourceMatch[] = [];
   const seen = new Set<string>();
-  const phraseIntent = !IDENTIFIER_RE.test(searchText);
   const symbolGroups = astGrepSymbolMatches(root, symbols, { limit: candidateLimit });
   for (const [index, symbol] of symbols.entries()) {
+    const syntaxMatches = symbolGroups[index] ?? [];
+    const syntaxLines = new Set(
+      syntaxMatches.map((match) => JSON.stringify([path.normalize(match.filePath), match.line])),
+    );
     const candidates = [
-      ...(symbolGroups[index] ?? []),
-      ...ripgrepDefinitionMatches(root, symbol, { limit: candidateLimit }),
+      ...syntaxMatches,
+      ...ripgrepDefinitionMatches(root, symbol, { limit: candidateLimit }).filter(
+        (match) => !syntaxLines.has(JSON.stringify([path.normalize(match.filePath), match.line])),
+      ),
     ];
     for (const match of candidates) {
+      if (matches.length >= candidateLimit) {
+        break;
+      }
+      const location = JSON.stringify([path.normalize(match.filePath), match.line, match.column]);
       if (
         (!includeTests && isTestPath(match.filePath)) ||
-        (phraseIntent && !isCallableDefinition(match, symbol))
+        (phraseIntent && !isCallableDefinition(match, symbol)) ||
+        seen.has(location)
       ) {
         continue;
       }
-      appendMatch(matches, seen, match, { limit: candidateLimit });
+      seen.add(location);
+      matches.push(match);
     }
   }
   return rankSourceMatches(matches, searchText).slice(0, limit);

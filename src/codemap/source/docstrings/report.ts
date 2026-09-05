@@ -326,10 +326,9 @@ export function docstringForSymbol(
   const report = PYTHON_SUFFIXES.has(suffix)
     ? buildPythonFileReport(filePath, { displayPath })
     : buildTypescriptFileReport(filePath, { displayPath });
-  if (kind === "class") {
-    return matchingClassDocstring(report.classes, name, line);
-  }
-  return matchingFunctionDocstring(report.functions, name, line);
+  const functionDocstring =
+    kind === "function" ? matchingFunctionDocstring(report.functions, name, line) : null;
+  return functionDocstring ?? matchingClassDocstring(report.classes, name, line, kind);
 }
 
 /** Finds a function docstring by name with line-number disambiguation. */
@@ -351,16 +350,22 @@ function matchingFunctionDocstring(
 }
 
 /** Finds a class or method docstring by name with line-number disambiguation. */
-function matchingClassDocstring(reports: ClassReport[], name: string, line: number): string | null {
+function matchingClassDocstring(
+  reports: ClassReport[],
+  name: string,
+  line: number,
+  kind: SymbolDocstringKind,
+): string | null {
   for (const report of reports) {
-    if (report.name === name && (line <= 0 || report.lineno === line)) {
+    if (kind === "class" && report.name === name && (line <= 0 || report.lineno === line)) {
       return report.docstring;
     }
-    const nested = matchingClassDocstring(report.nestedClasses, name, line);
+    const nested = matchingClassDocstring(report.nestedClasses, name, line, kind);
     if (nested !== null) {
       return nested;
     }
-    const method = matchingFunctionDocstring(report.methods, name, line);
+    const method =
+      kind === "function" ? matchingFunctionDocstring(report.methods, name, line) : null;
     if (method !== null) {
       return method;
     }

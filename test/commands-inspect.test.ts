@@ -77,6 +77,124 @@ describe("inspect command handler", () => {
     expect(output).not.toContain("calls: createPinnedTarget");
   });
 
+  it.each(["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"])(
+    "inspects an exact class before a similarly named function in %s",
+    (suffix) => {
+      const generic = ["ts", "tsx", "mts", "cts"].includes(suffix) ? "<T>" : "";
+      writeFileSync(
+        path.join(workDir, "src", `target.${suffix}`),
+        [
+          `class ExactTarget${generic} {`,
+          "  invoke(value) {",
+          "    return value;",
+          "  }",
+          "}",
+          "export function isExactTarget(value) { return value instanceof ExactTarget; }",
+        ].join("\n"),
+      );
+
+      expect(commandInspect("ExactTarget", { local: true, projectRoot: workDir })).toBe(0);
+      const output = logLines().join("\n");
+      expect(output.startsWith(`# ExactTarget in src/target.${suffix}:1\n`)).toBe(true);
+      expect(output).toContain("## Class Profile");
+      expect(output).toContain(`file: src/target.${suffix}, lines: 1-5`);
+
+      logSpy.mockClear();
+      expect(commandInspect(`src/target.${suffix}`, { projectRoot: workDir })).toBe(0);
+      expect(logLines().join("\n")).toContain("## Classes In File");
+    },
+  );
+
+  it("retains an abstract class owner alongside an exact variable in another file", () => {
+    writeFileSync(
+      path.join(workDir, "src", "target.ts"),
+      "abstract class ExactTarget<T> {\n  abstract invoke(value: T): T;\n}\n",
+    );
+    writeFileSync(path.join(workDir, "src", "state.ts"), "export const ExactTarget = 'state';\n");
+
+    expect(commandInspect("ExactTarget", { local: true, projectRoot: workDir })).toBe(0);
+    const output = logLines().join("\n");
+    expect(output.startsWith("# ExactTarget in src/target.ts:1\n")).toBe(true);
+    expect(output).toContain("file: src/target.ts, lines: 1-3");
+  });
+
+  it.each(["```ts", "~~~ts"])(
+    "closes a shortened class example opened with %s before the next profile section",
+    (opening) => {
+      const closing = opening.slice(0, 3);
+      writeFileSync(
+        path.join(workDir, "src", "target.ts"),
+        [
+          "/**",
+          " * Runs a sequence.",
+          " * @example",
+          ` * ${opening}`,
+          ...Array.from({ length: 9 }, (_, index) => ` * run(${index});`),
+          ` * ${closing}`,
+          " */",
+          "export class Sequence { run() { return true; } }",
+        ].join("\n"),
+      );
+
+      expect(commandInspect("Sequence", { local: true, projectRoot: workDir })).toBe(0);
+      const output = logLines().join("\n");
+      expect(output).toContain(`\n...\n${closing}\n\n## Functions In File`);
+      expect(output).not.toContain("run(8);");
+    },
+  );
+
+  it.each(["def", "async def"])(
+    "inspects the complete multiline Python %s body and its calls",
+    (declaration) => {
+      writeFileSync(
+        path.join(workDir, "src", "app.py"),
+        [
+          "def helper(): return True",
+          "",
+          "@decorator",
+          `${declaration} handle_function_call(`,
+          "    function_name: str,",
+          '    options: dict = {"kind": ":#"},',
+          "):",
+          '    """Executes one tool.',
+          "Unindented documentation.",
+          '    """',
+          "    return helper()",
+          "",
+          "def later():",
+          "    return False",
+        ].join("\n"),
+      );
+
+      expect(commandInspect("handle_function_call", { local: true, projectRoot: workDir })).toBe(0);
+      const output = logLines().join("\n");
+      expect(output).toContain("file: src/app.py, lines: 4-11");
+      expect(output).toContain("src/app.py::handle_function_call: 8 lines");
+      expect(output).toContain("## Docstring");
+      expect(output).toContain("Executes one tool.");
+      expect(output).toContain("calls: helper in src/app.py:1");
+      expect(output).not.toContain("calls: later");
+    },
+  );
+
+  it("keeps a Python class body after a multiline base list", () => {
+    writeFileSync(
+      path.join(workDir, "src", "app.py"),
+      [
+        "class ToolRunner(",
+        "    object,",
+        "):",
+        "    def run(self):",
+        "        return True",
+        "",
+        "def later(): return False",
+      ].join("\n"),
+    );
+
+    expect(commandInspect("ToolRunner", { local: true, projectRoot: workDir })).toBe(0);
+    expect(logLines().join("\n")).toContain("file: src/app.py, lines: 1-5");
+  });
+
   it("does not repeat contained symbols as other matches for file inspection", () => {
     writeFileSync(
       path.join(workDir, "src", "app.ts"),
