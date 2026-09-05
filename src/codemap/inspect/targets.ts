@@ -67,7 +67,7 @@ export function directoryFilePaths(target: string, filesByPath: Set<string>): Se
   return new Set([...filesByPath].filter((filePath) => filePath.startsWith(prefix)));
 }
 
-/** Finds files that define a requested symbol name. */
+/** Finds symbol owners and retains newly scanned metrics for the same inspection operation. */
 export function symbolFilePaths(
   root: string,
   target: string,
@@ -80,6 +80,7 @@ export function symbolFilePaths(
     let metrics = fileMetricsByPath[relPath];
     if (metrics === undefined && relPath) {
       metrics = scanFile(path.join(root, relPath), { displayRoot: root });
+      fileMetricsByPath[relPath] = metrics;
     }
     if (
       metrics &&

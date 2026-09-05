@@ -50,24 +50,21 @@ type Definition = {
 export function runStructure(
   root: string,
   files: ScanEntry[],
-  _importMap: Record<string, string[]>,
   {
     fileMetricsByPath = null,
-    pythonTreesByPath = null,
+    pythonSourcesByPath = null,
   }: {
     fileMetricsByPath?: Record<string, FileMetrics> | null;
-    pythonTreesByPath?: Record<string, string | null> | null;
+    pythonSourcesByPath?: Record<string, string | null> | null;
   },
 ): StructurePayload {
   return {
-    results: files
-      .map((scanEntry) =>
-        structureForFile(root, scanEntry, {
-          metricsByPath: fileMetricsByPath,
-          pythonTreesByPath,
-        }),
-      )
-      .filter((entry): entry is StructureEntry => entry !== null),
+    results: files.map((scanEntry) =>
+      structureForFile(root, scanEntry, {
+        metricsByPath: fileMetricsByPath,
+        pythonSourcesByPath,
+      }),
+    ),
   };
 }
 
@@ -77,18 +74,18 @@ export function structureForFile(
   scanEntry: ScanEntry,
   {
     metricsByPath = null,
-    pythonTreesByPath = null,
+    pythonSourcesByPath = null,
   }: {
     metricsByPath?: Record<string, FileMetrics> | null;
-    pythonTreesByPath?: Record<string, string | null> | null;
+    pythonSourcesByPath?: Record<string, string | null> | null;
   } = {},
-): StructureEntry | null {
+): StructureEntry {
   const relPath = String(scanEntry.path);
   const filePath = path.join(root, relPath);
   const suffix = path.extname(filePath);
   if (PY_SUFFIXES.has(suffix)) {
     return pythonStructure(filePath, relPath, {
-      tree: pythonTreesByPath?.[relPath] ?? null,
+      source: pythonSourcesByPath?.[relPath] ?? null,
     });
   }
   if (TYPESCRIPT_SUFFIXES.has(suffix)) {
@@ -103,9 +100,9 @@ export function structureForFile(
 export function pythonStructure(
   filePath: string,
   relPath: string,
-  { tree = null }: { tree?: string | null } = {},
+  { source: existingSource = null }: { source?: string | null } = {},
 ): StructureEntry {
-  let source = tree;
+  let source = existingSource;
   if (source === null) {
     try {
       source = readFileSync(filePath, "utf8");

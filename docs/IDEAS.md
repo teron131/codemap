@@ -16,6 +16,8 @@ Upstream session auto-indexing proved unreliable across a working session. The c
 
 Once the command surface stabilized, Codemap became a globally installable npm CLI with a separate companion skill. The executable owns behavior and output; the skill owns when to use each command, how to interpret compact metrics, and which caveats matter to an agent. Source installation works with npm or pnpm, while `npm install -g .` provides the linked global command.
 
+The next performance pass preserved the command surface while separating backend lifecycle, cache locking, transport, and final output budgeting into their owning modules. Structural search began sharing target discovery and related rule parsing, graph inspection reused import-source evidence, and signal selection moved ahead of collection. Comparisons on fixed Python and TypeScript fixtures and production repositories preserved stdout, stderr, and exit status while measured search and signal timings improved. This established reuse within an operation as the first place to look for wasted work while retaining fresh evidence on the next command.
+
 ## Settled Direction
 
 - Do not add persistent Codemap data to the inspected repository.
@@ -26,12 +28,19 @@ Once the command surface stabilized, Codemap became a globally installable npm C
 - Keep the detailed-graph threshold separate from signal availability. Above it, scan the 100 largest eligible source files and report parsed versus eligible counts for bounded function-length and file evidence without claiming complete relationship or mention coverage.
 - Skip default backend function-metric enrichment above 10,000 eligible source files. Keep the bounded current-tree signal useful and leave expensive graph work to explicit backend commands.
 - Keep `src/codemap/codebase-memory` responsible for transport, freshness, serialization, generic tool-result validation, and reusable diagnostic/query operations.
+- Within that boundary, `client.ts` owns project refresh and failure attribution, `cache.ts` owns operational cache placement and lock recovery shared by parent and child, and `transport.ts` owns MCP envelopes and supervised provider calls. `locked-child.ts` supervises the provider and forwards its output using that shared lock protocol.
+- Keep final text and JSON budgeting in `commands/output.ts`; CLI dispatch captures stdout and applies that policy once.
+- Resolve structural-search targets once per operation and evaluate related identifier rules against the same per-file parse, preserving each rule's candidate bound and the existing language order.
+- Select signal collection work before computing sections. `all` shares detailed analysis and documentation coverage; full `docstrings` remains a separate request that avoids source-metric scanning.
+- Keep current-tree graph assembly in `source/graph/canonical.ts`, which sequences structure extraction from the supplied scan and import evidence. Reuse Python source and TypeScript metrics within inspection without retaining source state across commands.
+- Tie ownership changes to clearer contracts or less repeated work. Keep cohesive workflows together when extra helpers would add navigation without an independent responsibility.
 - Let feature modules own provider arguments, payload projection, filtering, ranking, fallback, final composition, and compact output contracts.
 - Keep `summary` focused on repository purpose through introductory README content and a three-level outline with common setup and project-administration subtrees omitted. Follow with an authored-source language mix, a hierarchical repository skeleton, non-generic call-share hotspots, production clusters described by analyzed-symbol share and internal-call share, and a focused public API skeleton.
 - Infer natural repository granularity rather than ranking every barrel equally: use authored package boundaries for workspaces and the dominant importable source root's first feature level in one-package repositories. Establish the skeleton from package dependencies and resolved current-tree imports, then enrich it with bulk Codebase Memory imports and calls. Retain only distinct entry, coordination, core, and shared-foundation roles. Compress repeated same-parent paths as counted groups labeled with their item count and sorted first, middle, and last examples; insert ellipses only where those samples omit siblings, without claiming that the grouped modules are semantically alike. Recursively expand selected one-package paths only while expansion is shorter than a counted group, preserve direct files at the selected boundary, and render every compressed branch on its own line.
 - Present the public API as an at-most-three-level hierarchy of public surfaces selected by entry position, current-tree import reach, and defining-module breadth, plus modules directly exposed through them. Nest already selected descendant surfaces relative to their closest selected ancestor without collecting additional entries, merging repeated module paths so the added depth expresses relationships rather than volume. Deeply nested surfaces must earn inclusion through import centrality rather than export volume. Resolve re-exports to their defining paths, collapse deeper paths to the first meaningful module below the surface, and retain only non-dominated module groups across fan-in, implementation evidence, and defining-module breadth. Retain named exports only when one name uniquely identifies its selected module or names strongly match the module's public role; allow an additional name-bearing module only when its fan-in or implementation breadth is a data-derived upper outlier among its peers. These module labels are structural compression, not semantic capability classifications or recommended next steps. Omit exhaustive symbol lists, positional export samples, repeated origins, unresolved relative re-exports, and test-only modules.
 - Keep local skeleton evidence available when Codebase Memory degrades. Put the outline first within Overview, then structural roles before hotspots and clusters, and graph insight or its explicit degradation status before the public API. Do not repeat raw graph inventory, repeat the package root inside its own skeleton, or rely on the shared stdout ceiling to select summary content.
 - Preserve upstream metric values as upstream facts and use explicit deterministic tie-breakers for Codemap-owned ordering.
+- Keep population statistics on homogeneous numeric measurements before presentation truncation: `count`, `mean`, sample `std`, `min`, `p25`, `p50`, `p75`, `p90`, `max`, and data-derived `bins`. Use the shared Sturges-sized binning heuristic with at most ten equal-width ranges and no metric-specific thresholds. Do not summarize source line positions or treat backend top-N rows as a population; bounded scans describe only their parsed rows.
 - Omit likely test rows by default across backend and local discovery. `--include-tests` opts in, while explicit paths and exact symbol definitions remain direct current-tree targets.
 - Keep direct paths, exact symbol definitions, and bounded exact multi-word implementation text current-tree-first. Also prefer current-tree candidates when every meaningful term occurs in source within one 50-line window, at least two terms share a line, and the result is decisive: at most three complete candidates or one uniquely path-aligned complete candidate. Path affinity ranks candidates but never supplies missing source coverage. Render that evidence once per file with coverage and concrete anchors. For weaker ordinary source search, prioritize Codebase Memory code search and reuse the current-tree preflight when the backend is unavailable or has no usable answer. Keep relationship and vocabulary-bridging work in the explicit `--graph` and `--semantic` lanes, while allowing an exact current-tree definition to end semantic search before noisy backend ranking can hide it.
 - Treat concise multi-word queries as possible camelCase, PascalCase, or snake_case definition intent before broader search, and include class methods in the same current-tree definition and inspection surface as other function-like symbols.
@@ -66,9 +75,8 @@ A new ranking earns default placement only when its ordering is stable, its crit
 Search enhancements should improve target discovery without collapsing distinct evidence lanes. Promising directions include:
 
 - Result-source balance for concept searches so documentation, configuration, production source, and tests do not crowd one another accidentally.
-- Ranking probes that distinguish exact symbol or path intent from broader vocabulary intent before paying for backend search.
 - Relationship context that adds a useful caller, callee, importer, or owner rather than duplicating the matched source row.
-- Consistent truncation and reporting of test rows omitted by default across backend and local fallbacks.
+- Consistent reporting of test rows omitted by default across backend and local fallbacks.
 
 Any ranking change should be judged from the target an agent chooses next, not only from whether a relevant result appears somewhere in the list.
 
@@ -92,8 +100,6 @@ Additional fields should improve ranking, interpretation, or verification. Provi
 
 Provider-derived fields must retain their upstream meaning, while Codemap-derived fields must be identifiable from the owning command or skill. Composite ranking scores should remain internal unless they become independently interpretable evidence rather than merely ordering machinery.
 
-Add automatic pandas-like statistics only to homogeneous numeric populations already owned by a command. Use `count`, `mean`, sample `std`, `min`, `p25`, `p50`, `p75`, `p90`, `max`, and data-derived `bins`, computed before final presentation truncation. Bin ranges must adapt from the observed extent through one shared heuristic: Sturges-sized, at most ten equal-width ranges, with no metric-specific thresholds. Do not summarize arbitrary numeric fields such as source line numbers, and do not treat a backend top-N result as a population. Bounded scans must keep their coverage explicit.
-
 Text and JSON do not need artificial parity everywhere. Row-oriented commands may support both from one normalized shape; composed orientation and inspection may remain text-only when a second public structure would add maintenance without improving use.
 
 TOON has been trialed and showed no material advantage over column-oriented compact JSON; both use the same schema-once, positional-row idea. Keep JSON output minified and object-oriented for `jq` and scripts, and keep compact text as the token-efficient agent surface. Do not add TOON as a third public encoding or wrap internal MCP JSON transport.
@@ -106,18 +112,12 @@ Do not expand language coverage by recognizing file extensions alone. A new lang
 
 Design from the agent user's next action under the settled philosophy, then use repository evaluation to falsify that design. Do not average unrelated repository quirks into an incoherent default merely because the corpus is diverse.
 
-The standing production corpus should include Transformers, LangChain Python, LangChain JS, OpenClaw, and Hermes Agent when those repositories are available, alongside toy repositories with deliberately obvious expected answers.
+Choose the smallest representative corpus that can expose a regression. The [evolve skill's public repository pool](../.agents/skills/evolve/SKILL.md#public-repository-pool) records the selected frontier-agent, framework, application, optional library, and stress cases with their languages and approximate sizes. Use ordinary references to judge useful defaults and extreme repositories to test bounds and degradation. Shared extraction needs both supported language families; backend lifecycle work needs edits, renames, deletions, and failure recovery. Expand when the evidence disagrees.
 
-Before promoting an enhancement into the default surface:
+Behavior-preserving changes should compare stdout, stderr, and exit status on identical source fixtures, including ordering, coverage, and truncation. Performance comparisons need repeated measurements against the same inputs and environment, with local parsing, process startup, and backend refresh costs distinguished where they affect the conclusion. A faster command must retain the evidence and freshness guarantees that made its answer useful.
 
-1. Exercise toy repositories where expected rows are obvious.
-2. Exercise medium production-style repositories for ranking quality.
-3. Exercise at least one unusually large repository for latency and overflow behavior.
-4. Modify and delete indexed code, refresh, and verify that stale symbols disappear.
-5. Inspect readable output for noise rather than judging only test snapshots.
-6. Verify normalized JSON with direct parsing or `jq` when the command exposes it.
-7. Keep tests on public behavior and lifecycle invariants, not private helper structure.
-8. Record the first useful target rank, result-source mix, default row count, output bytes and approximate tokens, elapsed time, and backend freshness across the corpus.
-9. Build and exercise the globally installed command from outside the repository, then confirm that companion-skill examples still match the live CLI.
+For output or ranking changes, judge the first useful target, result-source mix, row count, output size, and the next action an agent can take. Inspect readable output, parse exposed JSON, and keep regression coverage on public behavior and lifecycle invariants. Verify installed execution outside the repository when packaging or executable behavior changes, and check companion-skill examples against the live CLI when usage changes.
+
+Use `.agents/skills/evolve/SKILL.md` for the evaluation loop. Keep active experiments and measurements in the temporary logbook; retain only decisions and evidence that should guide future work here. Assess clearer ownership separately from public behavior so a passing test suite alone does not justify a structural change.
 
 The useful stopping point is a compact default that gives enough evidence to choose a focused next inspection. More available backend data is not, by itself, a reason to print more data.

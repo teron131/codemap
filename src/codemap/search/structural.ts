@@ -1,16 +1,14 @@
 /** Runs explicit ast-grep pattern, call, and rule searches. */
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import path from "node:path";
 
 import {
   loadRule,
   matchConfigFromRule,
-  normalizeLanguage,
   resolveProjectFile,
   ruleMatches,
-  SYNTAX_SUFFIXES_BY_LANGUAGE,
   type SyntaxMatch,
-  targetFiles,
+  SyntaxSearch,
 } from "../ast-grep/index.js";
 import { expandUser } from "../common.js";
 import { escapeRegExp } from "../text-utils.js";
@@ -19,22 +17,19 @@ const CALL_TARGET_RE = /^[A-Za-z_$][A-Za-z0-9_$]*(\.[A-Za-z_$][A-Za-z0-9_$]*)*$/
 
 /** Finds function or method call sites through structural search. */
 export function callMatches(
-  root: string,
+  search: SyntaxSearch,
   language: string,
   name: string,
-  paths: string[],
 ): SyntaxMatch[] | null {
   const target = callTarget(name);
-  const searchPaths = shouldPrefilterCalls(language)
-    ? callCandidatePaths(root, language, target, paths)
-    : paths;
-  if (searchPaths.length === 0) {
-    return [];
-  }
   const patterns = target.includes(".")
     ? [{ pattern: `${target}($$$ARGS)` }]
     : [{ pattern: `${target}($$$ARGS)` }, { pattern: `$RECEIVER.${target}($$$ARGS)` }];
-  const matches = ruleMatches(root, language, { rule: { any: patterns } }, searchPaths);
+  const matches = search.matches(
+    language,
+    { rule: { any: patterns } },
+    { prefilter: callTextPattern(target) },
+  );
   return matches === null ? null : uniqueCallMatches(matches);
 }
 
@@ -92,30 +87,6 @@ function relativeTargetPath(root: string, rawPath: string): string {
     return relative.split(path.sep).join("/");
   }
   return rawPath;
-}
-
-/** Detects call-search patterns that can be narrowed before ast-grep runs. */
-function shouldPrefilterCalls(language: string): boolean {
-  return Object.hasOwn(SYNTAX_SUFFIXES_BY_LANGUAGE, normalizeLanguage(language));
-}
-
-/** Finds source files whose text contains a likely callee name. */
-function callCandidatePaths(
-  root: string,
-  language: string,
-  target: string,
-  paths: string[],
-): string[] {
-  const pattern = callTextPattern(target);
-  const candidates: string[] = [];
-  for (const filePath of targetFiles(root, paths, normalizeLanguage(language))) {
-    try {
-      if (pattern.test(readFileSync(filePath, "utf8"))) {
-        candidates.push(path.relative(root, filePath).split(path.sep).join("/"));
-      }
-    } catch {}
-  }
-  return candidates;
 }
 
 /** Builds a text prefilter for direct or receiver-qualified callees. */

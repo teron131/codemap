@@ -1,7 +1,7 @@
-/** Re-exports source graph payload builders and schemas. */
+/** Exposes current-tree graph construction and entrypoint evidence without persisting analyzed source. */
 export { classifyTags } from "./builder.js";
 export {
-  buildGraphPayload,
+  buildCurrentTreeGraph,
   currentTreeGraph,
   currentTreeSummaryGraph,
   relatedEdges,

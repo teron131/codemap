@@ -207,7 +207,10 @@ export function collectPythonTopLevelDefinitions(
 }
 
 /** Scans one Python file into import, definition, and variable metrics. */
-export function scanPythonFile(filePath: string, { relPath }: { relPath: string }): FileMetrics {
+export function scanPythonFile(
+  filePath: string,
+  { relPath, source: existingSource }: { relPath: string; source?: string | undefined },
+): FileMetrics {
   const metrics = createFileMetrics({
     path: filePath,
     relPath,
@@ -215,7 +218,7 @@ export function scanPythonFile(filePath: string, { relPath }: { relPath: string 
   });
   let source: string;
   try {
-    source = readFileSync(filePath, "utf8");
+    source = existingSource ?? readFileSync(filePath, "utf8");
   } catch {
     return metrics;
   }

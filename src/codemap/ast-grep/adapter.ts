@@ -1,33 +1,17 @@
 /** Adapts ast-grep NAPI behavior to Codemap syntax operations. */
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 
 import python from "@ast-grep/lang-python";
 import { Lang, type NapiConfig, parse, registerDynamicLanguage, type SgNode } from "@ast-grep/napi";
 import { parse as parseYaml } from "yaml";
 
-import { expandUser } from "../common.js";
-import { IGNORED_DIR_NAMES, ROOT_IGNORED_DIR_NAMES } from "../source/scanner/constants.js";
-import { compareText } from "../text-utils.js";
-
-export const LANGUAGE_ALIASES: Record<string, string> = {
-  javascript: "javascript",
-  js: "javascript",
-  jsx: "jsx",
-  py: "python",
-  python: "python",
-  ts: "typescript",
-  tsx: "tsx",
-  typescript: "typescript",
-};
-
-export const SYNTAX_SUFFIXES_BY_LANGUAGE: Record<string, Set<string>> = {
-  javascript: new Set([".cjs", ".js", ".jsx", ".mjs"]),
-  jsx: new Set([".jsx"]),
-  python: new Set([".py"]),
-  tsx: new Set([".tsx"]),
-  typescript: new Set([".cts", ".mts", ".ts", ".tsx"]),
-};
+import {
+  languagesForFiles,
+  normalizeLanguage,
+  SYNTAX_SUFFIXES_BY_LANGUAGE,
+  targetFiles,
+} from "./targets.js";
 
 export type SyntaxMatch = {
   engine: "ast-grep" | "regex";
@@ -39,14 +23,6 @@ export type SyntaxMatch = {
   endColumn: number;
   lines: string;
 };
-
-const INFERRED_SYNTAX_LANGUAGES = [
-  { language: "typescript", suffixes: new Set([".cts", ".mts", ".ts"]) },
-  { language: "tsx", suffixes: new Set([".tsx"]) },
-  { language: "javascript", suffixes: new Set([".cjs", ".js", ".mjs"]) },
-  { language: "jsx", suffixes: new Set([".jsx"]) },
-  { language: "python", suffixes: new Set([".py"]) },
-];
 
 registerDynamicLanguage({ python });
 
@@ -82,43 +58,91 @@ export function ruleMatches(
   paths: string[],
   { limit = null }: { limit?: number | null } = {},
 ): SyntaxMatch[] | null {
-  const language = normalizeLanguage(lang);
-  if (napiLanguageFor(language) === null) {
-    return null;
+  return new SyntaxSearch(root, paths).matches(lang, matchConfig, { limit });
+}
+
+/** Reuses one target inventory and one parse per language/file across a group of related rules. */
+export class SyntaxSearch {
+  private files: string[] | undefined;
+
+  constructor(
+    private readonly root: string,
+    private readonly paths: string[],
+  ) {}
+
+  /** Infers syntax variants lazily so explicit unsupported languages keep their original failure behavior. */
+  languages(): string[] {
+    return languagesForFiles(this.targetFiles());
   }
-  const matches: SyntaxMatch[] = [];
-  for (const filePath of targetFiles(root, paths, language)) {
-    if (limit !== null && matches.length >= limit) {
-      break;
+
+  /** Finds one rule, optionally rejecting irrelevant source before native parsing. */
+  matches(
+    language: string,
+    config: NapiConfig,
+    { limit = null, prefilter }: { limit?: number | null; prefilter?: RegExp } = {},
+  ): SyntaxMatch[] | null {
+    return this.matchRules(language, [{ config, limit }], prefilter)?.[0] ?? null;
+  }
+
+  /** Preserves a separate ordered limit for each rule while reading and parsing each file only once. */
+  matchRules(
+    lang: string,
+    rules: Array<{ config: NapiConfig; limit: number | null }>,
+    prefilter?: RegExp,
+  ): SyntaxMatch[][] | null {
+    const language = normalizeLanguage(lang);
+    if (napiLanguageFor(language) === null) {
+      return null;
     }
-    const relPath = path.relative(root, filePath).split(path.sep).join("/");
-    try {
-      const text = readFileSync(filePath, "utf8");
-      const syntaxRoot = astGrepRoot(text, language);
-      if (syntaxRoot === null) {
+    const groups = rules.map((rule) => ({ ...rule, matches: [] as SyntaxMatch[] }));
+    const suffixes = SYNTAX_SUFFIXES_BY_LANGUAGE[language];
+    for (const filePath of this.targetFiles()) {
+      if (groups.every((group) => group.limit !== null && group.matches.length >= group.limit)) {
+        break;
+      }
+      if (suffixes !== undefined && !suffixes.has(path.extname(filePath))) {
         continue;
       }
-      const matchedNodes = syntaxRoot.findAll(matchConfig);
-      const sourceLines = splitLines(text);
-      for (const node of matchedNodes) {
-        if (limit !== null && matches.length >= limit) {
-          break;
+      try {
+        const text = readFileSync(filePath, "utf8");
+        if (prefilter !== undefined && !prefilter.test(text)) {
+          continue;
         }
-        const nodeRange = node.range();
-        matches.push({
-          engine: "ast-grep",
-          filePath: relPath,
-          text: node.text(),
-          line: nodeRange.start.line + 1,
-          column: nodeRange.start.column + 1,
-          endLine: nodeRange.end.line + 1,
-          endColumn: nodeRange.end.column + 1,
-          lines: contextLines(sourceLines, nodeRange.start.line, nodeRange.end.line),
-        });
-      }
-    } catch {}
+        const syntaxRoot = astGrepRoot(text, language);
+        if (syntaxRoot === null) {
+          continue;
+        }
+        const relPath = path.relative(this.root, filePath).split(path.sep).join("/");
+        const sourceLines = splitLines(text);
+        for (const { config, limit, matches } of groups) {
+          if (limit !== null && matches.length >= limit) {
+            continue;
+          }
+          for (const node of syntaxRoot.findAll(config)) {
+            if (limit !== null && matches.length >= limit) {
+              break;
+            }
+            const range = node.range();
+            matches.push({
+              engine: "ast-grep",
+              filePath: relPath,
+              text: node.text(),
+              line: range.start.line + 1,
+              column: range.start.column + 1,
+              endLine: range.end.line + 1,
+              endColumn: range.end.column + 1,
+              lines: contextLines(sourceLines, range.start.line, range.end.line),
+            });
+          }
+        }
+      } catch {}
+    }
+    return groups.map((group) => group.matches);
   }
-  return matches;
+
+  private targetFiles(): string[] {
+    return (this.files ??= targetFiles(this.root, this.paths));
+  }
 }
 
 /** Loads and parses an ast-grep YAML rule file. */
@@ -149,80 +173,6 @@ export function matchConfigFromRule(rule: Record<string, unknown>): NapiConfig {
   return matchConfig as unknown as NapiConfig;
 }
 
-/** Normalizes language aliases for ast-grep. */
-export function normalizeLanguage(lang: string): string {
-  return LANGUAGE_ALIASES[lang.toLowerCase()] ?? lang;
-}
-
-/** Resolves project target files for ast-grep operations. */
-export function targetFiles(root: string, paths: string[], language: string): string[] {
-  const suffixes = SYNTAX_SUFFIXES_BY_LANGUAGE[language];
-  const files: string[] = [];
-  for (const rawPath of paths.length > 0 ? paths : ["."]) {
-    const resolvedPath = resolveProjectFile(root, rawPath);
-    let candidates: string[] = [];
-    if (existsSync(resolvedPath) && statSync(resolvedPath).isFile()) {
-      candidates = [resolvedPath];
-    } else if (existsSync(resolvedPath) && statSync(resolvedPath).isDirectory()) {
-      candidates = recursiveFiles(resolvedPath).filter((item) => shouldScanAstGrepFile(item, root));
-    }
-    for (const candidate of candidates) {
-      if (!shouldScanAstGrepFile(candidate, root)) {
-        continue;
-      }
-      if (suffixes !== undefined && !suffixes.has(path.extname(candidate))) {
-        continue;
-      }
-      files.push(candidate);
-    }
-  }
-  return files;
-}
-
-/** Infers syntax languages from target file suffixes. */
-export function targetLanguages(root: string, paths: string[]): string[] {
-  const languages: string[] = [];
-  for (const candidate of INFERRED_SYNTAX_LANGUAGES) {
-    const files = targetFiles(root, paths, candidate.language).filter((filePath) =>
-      candidate.suffixes.has(path.extname(filePath)),
-    );
-    if (files.length > 0) {
-      languages.push(candidate.language);
-    }
-  }
-  return languages;
-}
-
-/** Checks whether ast-grep should scan a filesystem path. */
-export function shouldScanAstGrepFile(filePath: string, root: string): boolean {
-  let relParts: string[];
-  const relative = path.relative(root, filePath);
-  if (relative && !relative.startsWith("..") && !path.isAbsolute(relative)) {
-    relParts = relative.split(path.sep);
-  } else {
-    relParts = filePath.split(path.sep).filter(Boolean);
-  }
-  return !relParts
-    .slice(0, -1)
-    .some(
-      (part, index) =>
-        IGNORED_DIR_NAMES.has(part) || (index === 0 && ROOT_IGNORED_DIR_NAMES.has(part)),
-    );
-}
-
-/** Resolves a project-relative file and rejects paths outside the root. */
-export function resolveProjectFile(root: string, rawPath: string): string {
-  const projectRoot = path.resolve(root);
-  const expanded = expandUser(rawPath);
-  const candidate = path.isAbsolute(expanded) ? expanded : path.join(projectRoot, expanded);
-  const resolved = path.resolve(candidate);
-  const relative = path.relative(projectRoot, resolved);
-  if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
-    throw new Error(`path is outside project root: ${rawPath}`);
-  }
-  return resolved;
-}
-
 /** Builds context text around a syntax match range. */
 export function contextLines(sourceLines: string[], startLine: number, endLine: number): string {
   if (sourceLines.length === 0) {
@@ -243,34 +193,6 @@ function napiLanguageFor(language: string): Lang | string | null {
     typescript: Lang.TypeScript,
   };
   return languages[language] ?? null;
-}
-
-/** Lists target files recursively for ast-grep fallback scans. */
-function recursiveFiles(directory: string): string[] {
-  const files: string[] = [];
-  let entries = [];
-  try {
-    entries = readdirSync(directory, { withFileTypes: true }).sort((left, right) =>
-      compareText(left.name, right.name),
-    );
-  } catch {
-    return files;
-  }
-  for (const entry of entries) {
-    if (entry.isSymbolicLink()) {
-      continue;
-    }
-    const entryPath = path.join(directory, entry.name);
-    if (entry.isDirectory()) {
-      if (IGNORED_DIR_NAMES.has(entry.name)) {
-        continue;
-      }
-      files.push(...recursiveFiles(entryPath));
-    } else if (entry.isFile()) {
-      files.push(entryPath);
-    }
-  }
-  return files;
 }
 
 /** Normalizes source text to newline-delimited lines. */

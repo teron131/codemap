@@ -81,8 +81,8 @@ describe("summary CLI", () => {
     );
 
     const result = spawnSync(
-      "pnpm",
-      ["exec", "tsx", "src/codemap/cli.ts", "summary", "--project-root", workDir],
+      process.execPath,
+      ["--import", "tsx", "src/codemap/cli.ts", "summary", "--project-root", workDir],
       { cwd: workspaceRoot, encoding: "utf8" },
     );
 
