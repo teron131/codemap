@@ -9,7 +9,7 @@ Route relationship and semantic questions to Codebase Memory, exact text to `rg`
 
 Graph-backed commands explicitly refresh one non-persistent snapshot per operation and do not write graph data into the inspected repository. An explicit `CBM_CACHE_DIR` remains authoritative; an unwritable default cache falls back to a private OS temporary cache. Local `rg`, ast-grep, and current-tree evidence remain independently verifiable fallbacks.
 
-Local target inventories and source reads are reused only within a command. After editing source, rerun the affected command to inspect the current files.
+Local target inventories, parsed source facts, and import resolution are reused only within a command. After editing source, TypeScript configuration, or package exports, rerun the affected command to inspect current evidence.
 
 ## Orient Before Substantial Work
 
@@ -72,6 +72,10 @@ codemap inspect --backend --project-root <path> <symbol>
 
 Use `inspect` after search identifies one likely target. Prefer a file or directory when a short symbol may be ambiguous. Paths use current-tree evidence. Unambiguous symbols use a fresh backend snippet and call trace; ambiguous or unavailable backend matches fall back locally. Use `--local` for current-tree-only detail and `--backend` when backend resolution itself is under inspection.
 
+Local inspection can build repository-wide source relationships even for one target. For a call-site or syntax lookup in a large tree, use `search calls` or `search match` with explicit file or directory paths.
+
+Current-tree TypeScript/JavaScript import edges use the importing file's configuration, including inherited and nested tsconfig aliases, and distinguish package `import` and `require` conditions. Only resolved targets in the inspected source inventory become edges. For a missing relationship, check the import statement, project configuration, and target eligibility before drawing a conclusion about usage.
+
 ## Compare Source Metrics
 
 ```sh
@@ -117,7 +121,9 @@ Detailed row surfaces filter generated or bundled paths where source-specific an
 
 Treat extracted relative and absolute imports, functions, classes, file containment, same-file call-like edges, and docstring/comment signals as syntax-level leads rather than compiler facts. Start from likely entries such as `__main__.py`, `cli.py`, `main.py`, and `app.py`.
 
-Python patterns run through Codemap's bundled ast-grep parser:
+Python declarations, multiline imports, assignment binders, call sites, and structural patterns use Codemap's bundled ast-grep parser. Calls in comments or string examples do not become call edges; dynamic dispatch still needs source verification.
+
+Use a structural pattern to locate definitions:
 
 ```sh
 codemap search match --project-root <path> --lang python --pattern 'def $NAME($$$ARGS): $$$BODY' [paths...]
