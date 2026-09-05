@@ -85,6 +85,7 @@ export function symbolFilePaths(
     if (
       metrics &&
       (metrics.functionNames.includes(target) ||
+        metrics.classSpans.some((span) => span.name === target) ||
         metrics.variableNames.includes(target) ||
         metrics.exportedNames.includes(target))
     ) {

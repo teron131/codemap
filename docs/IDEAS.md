@@ -1,6 +1,8 @@
 # Codemap Ideas
 
-This document records how Codemap's current design emerged and what evidence should guide future enhancements. It is neither a release history nor a committed roadmap; the README remains the user-facing contract.
+This document records the reasoning behind Codemap's design and the principles that should guide its evolution.
+Retain lasting decisions, tradeoffs, and criteria for revisiting them here; keep individual runs, repository-specific failures, and measurements in the temporary logbook and regression tests.
+The README remains the user-facing contract.
 
 ## Journey So Far
 
@@ -44,6 +46,8 @@ The next performance pass preserved the command surface while separating backend
 - Omit likely test rows by default across backend and local discovery. `--include-tests` opts in, while explicit paths and exact symbol definitions remain direct current-tree targets.
 - Keep direct paths, exact symbol definitions, and bounded exact multi-word implementation text current-tree-first. Also prefer current-tree candidates when every meaningful term occurs in source within one 50-line window, at least two terms share a line, and the result is decisive: at most three complete candidates or one uniquely path-aligned complete candidate. Path affinity ranks candidates but never supplies missing source coverage. Render that evidence once per file with coverage and concrete anchors. For weaker ordinary source search, prioritize Codebase Memory code search and reuse the current-tree preflight when the backend is unavailable or has no usable answer. Keep relationship and vocabulary-bridging work in the explicit `--graph` and `--semantic` lanes, while allowing an exact current-tree definition to end semantic search before noisy backend ranking can hide it.
 - Treat concise multi-word queries as possible camelCase, PascalCase, or snake_case definition intent before broader search, and include class methods in the same current-tree definition and inspection surface as other function-like symbols.
+- Preserve symbol identity and definition boundaries from discovery through inspection, including when backend evidence is unavailable. Share the extraction logic that establishes those facts so their interpretations remain consistent. Use syntax evidence for declarations and ownership, and report parsing failures separately from missing documentation.
+- Apply result limits after filtering and merging repeated evidence, while preserving distinct definitions. Compact output must retain the context and document structure needed to interpret what remains.
 - When a phrase has no useful whole-query source answer, collect matching file paths for each bounded normalized term, prefer supported implementation candidates, and keep only the strongest file-level coverage tier before ordinary source usefulness. Preserve at most two single-term and eight multi-term fallback candidates with an omitted count, read concrete anchors only for displayed candidates, and never claim complete coverage when the query exceeds the term bound or a ripgrep scan is truncated or fails.
 - Keep normal source, graph, and semantic search at 15 displayed matches by default while preserving explicit `--limit` overrides and independent backend over-fetching for test suppression.
 - Treat backend semantic scores below 0.5 as insufficient evidence and use the current-tree fallback instead of presenting low-confidence ranking noise.
@@ -77,6 +81,7 @@ Search enhancements should improve target discovery without collapsing distinct 
 - Result-source balance for concept searches so documentation, configuration, production source, and tests do not crowd one another accidentally.
 - Relationship context that adds a useful caller, callee, importer, or owner rather than duplicating the matched source row.
 - Consistent reporting of test rows omitted by default across backend and local fallbacks.
+- Consistent definition context across discovery and inspection, including documentation and nested scopes.
 
 Any ranking change should be judged from the target an agent chooses next, not only from whether a relevant result appears somewhere in the list.
 
@@ -118,6 +123,6 @@ Behavior-preserving changes should compare stdout, stderr, and exit status on id
 
 For output or ranking changes, judge the first useful target, result-source mix, row count, output size, and the next action an agent can take. Inspect readable output, parse exposed JSON, and keep regression coverage on public behavior and lifecycle invariants. Verify installed execution outside the repository when packaging or executable behavior changes, and check companion-skill examples against the live CLI when usage changes.
 
-Use `.agents/skills/evolve/SKILL.md` for the evaluation loop. Keep active experiments and measurements in the temporary logbook; retain only decisions and evidence that should guide future work here. Assess clearer ownership separately from public behavior so a passing test suite alone does not justify a structural change.
+Use `.agents/skills/evolve/SKILL.md` for the evaluation loop. Keep experiment details in the temporary logbook and reproducible failures in regression tests; distill the reasoning that should guide future work here. Assess clearer ownership separately from public behavior so a passing test suite alone does not justify a structural change.
 
 The useful stopping point is a compact default that gives enough evidence to choose a focused next inspection. More available backend data is not, by itself, a reason to print more data.
