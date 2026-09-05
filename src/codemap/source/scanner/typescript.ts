@@ -2,8 +2,9 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
-import { Lang, type NapiConfig, parse, type SgNode } from "@ast-grep/napi";
+import { type NapiConfig, type SgNode } from "@ast-grep/napi";
 
+import { astGrepRoot } from "../../ast-grep/adapter.js";
 import { ENTRYPOINT_BASENAMES, TYPESCRIPT_LANG_BY_SUFFIX } from "./constants.js";
 import {
   addSample,
@@ -12,6 +13,7 @@ import {
   createFileMetrics,
   type FileMetrics,
   sourceLineCount,
+  type TypeScriptImport,
   type TypeScriptReexportBinding,
 } from "./metrics.js";
 
@@ -23,9 +25,11 @@ const TYPESCRIPT_SCAN_KINDS = [
   "export_statement",
   "class_declaration",
   "function_declaration",
+  "generator_function_declaration",
   "method_definition",
   "variable_declarator",
 ];
+const FUNCTION_EXPRESSION_KINDS = ["arrow_function", "function_expression", "generator_function"];
 
 /** Finds a direct ast-grep child node by kind. */
 function directChild(node: SgNode, ...kinds: string[]): SgNode | null {
@@ -74,11 +78,15 @@ function startLineFor(node: SgNode): number {
 }
 
 /** Records TypeScript import specifiers on file metrics. */
-function addTypescriptImport(metrics: FileMetrics, target: string): void {
+function addTypescriptImport(
+  metrics: FileMetrics,
+  target: string,
+  kind: TypeScriptImport["kind"] = "import",
+): void {
   if (!target) {
     return;
   }
-  metrics.typescriptImportTargets.push(target);
+  metrics.typescriptImports.push({ target, kind });
   if (target.startsWith("./") || target.startsWith("../")) {
     metrics.typescriptLocalImportTargets.push(target);
     metrics.importsLocal += 1;
@@ -180,17 +188,14 @@ function collectTypescriptExportNames(
 ): void {
   for (const child of node.children()) {
     const kind = child.kind();
-    if (kind === "function_declaration") {
+    if (kind === "function_declaration" || kind === "generator_function_declaration") {
       const name = directChild(child, "identifier");
       if (name !== null) {
         addExportedName(metrics, name.text());
       }
-    } else if (kind === "class_declaration" || kind === "abstract_class_declaration") {
-      const name = directChild(child, "type_identifier", "identifier");
-      if (name !== null) {
-        addExportedName(metrics, name.text());
-      }
     } else if (
+      kind === "class_declaration" ||
+      kind === "abstract_class_declaration" ||
       kind === "interface_declaration" ||
       kind === "type_alias_declaration" ||
       kind === "enum_declaration"
@@ -234,10 +239,10 @@ function scanTypescriptWithAstGrep({
   filePath: string;
   relPath: string;
   metrics: FileMetrics;
-}): boolean {
+}): void {
   const root = parseTypescriptRoot(filePath, source);
   if (root === null) {
-    return false;
+    return;
   }
 
   for (const node of root.findAll(typescriptScanRule(filePath))) {
@@ -245,9 +250,10 @@ function scanTypescriptWithAstGrep({
     if (kind === "import_statement") {
       addTypescriptImport(metrics, stringValue(directChild(node, "string")));
     } else if (kind === "call_expression") {
+      addTypescriptCall(metrics, node);
       const callee = directChild(node, "identifier");
       if (callee !== null && callee.text() === "require") {
-        addTypescriptImport(metrics, stringValue(descendant(node, "string")));
+        addTypescriptImport(metrics, stringValue(descendant(node, "string")), "require");
       }
     } else if (kind === "export_statement") {
       collectTypescriptExport(metrics, node);
@@ -282,7 +288,7 @@ function scanTypescriptWithAstGrep({
         metrics.typescriptExtendsBases.push(base.text());
         addSample(metrics.samples, base.text());
       }
-    } else if (kind === "function_declaration") {
+    } else if (kind === "function_declaration" || kind === "generator_function_declaration") {
       const name = directChild(node, "identifier");
       if (name !== null) {
         addTypescriptFunction(metrics, relPath, name.text(), node);
@@ -290,6 +296,12 @@ function scanTypescriptWithAstGrep({
     } else if (kind === "method_definition") {
       const name = directChild(node, "property_identifier", "private_property_identifier");
       if (name !== null) {
+        addTypescriptFunction(metrics, relPath, name.text(), node);
+      }
+    } else if (kind === "public_field_definition" || kind === "field_definition") {
+      const name = node.field("name") ?? node.field("property");
+      const value = node.field("value");
+      if (name && value && FUNCTION_EXPRESSION_KINDS.includes(String(value.kind()))) {
         addTypescriptFunction(metrics, relPath, name.text(), node);
       }
     } else if (kind === "variable_declarator") {
@@ -300,22 +312,15 @@ function scanTypescriptWithAstGrep({
           startLine: startLineFor(node),
           moduleLevel: isTypescriptModuleLevelVariable(node),
         });
-        const initializer =
-          node
-            .children()
-            .find(
-              (child) =>
-                child.kind() === "arrow_function" || child.kind() === "function_expression",
-            ) ?? null;
+        const initializer = directChild(node, ...FUNCTION_EXPRESSION_KINDS);
         if (initializer !== null) {
-          addTypescriptFunction(metrics, relPath, name.text(), initializer);
+          addTypescriptFunction(metrics, relPath, name.text(), node);
         }
       }
     } else if (kind === "jsx_element") {
       metrics.jsxComponents += 1;
     }
   }
-  return true;
 }
 
 /** Selects relevant syntax nodes in native code instead of materializing the whole tree in JS. */
@@ -323,7 +328,9 @@ function typescriptScanRule(filePath: string): NapiConfig {
   const suffix = path.extname(filePath);
   const kinds = [...TYPESCRIPT_SCAN_KINDS];
   if (["typescript", "tsx"].includes(TYPESCRIPT_LANG_BY_SUFFIX[suffix] ?? "")) {
-    kinds.push("abstract_class_declaration");
+    kinds.push("abstract_class_declaration", "public_field_definition");
+  } else {
+    kinds.push("field_definition");
   }
   if (suffix === ".jsx" || suffix === ".tsx") {
     kinds.push("jsx_element");
@@ -340,10 +347,10 @@ function scanTypescriptSurfaceWithAstGrep({
   source: string;
   filePath: string;
   metrics: FileMetrics;
-}): boolean {
+}): void {
   const root = parseTypescriptRoot(filePath, source);
   if (root === null) {
-    return false;
+    return;
   }
   for (const node of root.children()) {
     if (node.kind() === "import_statement") {
@@ -352,16 +359,11 @@ function scanTypescriptSurfaceWithAstGrep({
       collectTypescriptExport(metrics, node);
     }
   }
-  return true;
 }
 
 /** Parses one TypeScript-family source while treating native parser failures as no AST data. */
 function parseTypescriptRoot(filePath: string, source: string): SgNode | null {
-  try {
-    return parse(astGrepLanguageForSuffix(path.extname(filePath)), source).root();
-  } catch {
-    return null;
-  }
+  return astGrepRoot(source, TYPESCRIPT_LANG_BY_SUFFIX[path.extname(filePath)] ?? "typescript");
 }
 
 /** Scans one TypeScript-family file into source metrics. */
@@ -392,17 +394,33 @@ export function scanTypescriptFile(
   return metrics;
 }
 
-/** Maps TypeScript-family file suffixes to ast-grep languages. */
-function astGrepLanguageForSuffix(suffix: string): Lang | string {
-  const language = TYPESCRIPT_LANG_BY_SUFFIX[suffix];
-  if (language === "javascript") {
-    return Lang.JavaScript;
-  }
-  if (language === "typescript") {
-    return Lang.TypeScript;
-  }
-  if (language === "tsx") {
-    return Lang.Tsx;
-  }
-  return language ?? Lang.TypeScript;
+/** Attributes real call expressions to their nearest named function or method, excluding comments and string examples. */
+function addTypescriptCall(metrics: FileMetrics, node: SgNode): void {
+  const owner = node
+    .ancestors()
+    .find((ancestor) =>
+      [
+        "function_declaration",
+        "generator_function_declaration",
+        "method_definition",
+        ...FUNCTION_EXPRESSION_KINDS,
+      ].includes(String(ancestor.kind())),
+    );
+  if (owner === undefined) return;
+  const parent = owner.parent();
+  const binding = ["variable_declarator", "public_field_definition", "field_definition"].includes(
+    String(parent?.kind()),
+  )
+    ? parent
+    : owner;
+  const caller = (binding?.field("name") ?? binding?.field("property"))?.text();
+  const target = node.field("function");
+  const callee =
+    target?.kind() === "identifier"
+      ? target.text()
+      : target?.kind() === "member_expression"
+        ? target.field("property")?.text()
+        : null;
+  if (caller && callee)
+    metrics.callSites.push({ caller, callee, lineNumber: node.range().start.line + 1 });
 }

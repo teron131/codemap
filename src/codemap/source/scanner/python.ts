@@ -1,489 +1,223 @@
-/** Scans Python source for imports, definitions, variables, and entrypoints. */
+/** Extracts Python measurements, imports, declarations, and call sites from one operation-local syntax tree. */
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
+import type { SgNode } from "@ast-grep/napi";
+
+import { astGrepRoot } from "../../ast-grep/adapter.js";
 import { ENTRYPOINT_BASENAMES } from "./constants.js";
 import {
   addSample,
   addVariableSignal,
-  codeSignalIdentifier,
   createFileMetrics,
   type FileMetrics,
+  type PythonImport,
   sourceLineCount,
 } from "./metrics.js";
 
-type PythonDefinition = {
-  kind: "function" | "class";
+type DefinitionScope = {
   name: string;
-  indent: number;
-  lineIndex: number;
-  startLine: number;
-  span: number;
-  decoratorCount: number;
-  bases: string[];
-  parents: string[];
+  kind: "function" | "class";
+  endIndex: number;
+  bodyStart: number;
+  bodyEnd: number;
+  methods: string[];
 };
 
-/** Extracts assignment target names from Python target text. */
-export function targetNames(target: string): string[] {
-  const cleanTarget = target.trim();
-  if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(cleanTarget)) {
-    return [cleanTarget];
+/** Scans supplied or current source without retaining native trees between files or commands. */
+export function scanPythonFile(
+  filePath: string,
+  { relPath, source: supplied }: { relPath: string; source?: string | undefined },
+): FileMetrics {
+  const metrics = createFileMetrics({ path: filePath, relPath, suffix: path.extname(filePath) });
+  let source: string;
+  try {
+    source = supplied ?? readFileSync(filePath, "utf8");
+  } catch {
+    return metrics;
   }
-  if (cleanTarget.includes(",")) {
-    return cleanTarget.split(",").flatMap((item) => targetNames(item));
+  metrics.lines = sourceLineCount(source);
+  metrics.entrypointHint = ENTRYPOINT_BASENAMES.has(path.basename(filePath));
+  const root = astGrepRoot(source, "python");
+  if (root === null) {
+    return metrics;
   }
+  const nodes = root.findAll({
+    rule: {
+      any: [
+        "import_statement",
+        "import_from_statement",
+        "function_definition",
+        "class_definition",
+        "assignment",
+        "augmented_assignment",
+        "call",
+        "comparison_operator",
+      ].map((kind) => ({ kind })),
+    },
+  });
+  // Native matches arrive in source preorder, so scalar scopes replace repeated ancestor walks.
+  const scopes: DefinitionScope[] = [];
+  for (const node of nodes) {
+    const range = node.range();
+    while (scopes.length && range.start.index >= scopes.at(-1)!.endIndex) scopes.pop();
+    const kind = node.kind();
+    if (kind === "import_statement" || kind === "import_from_statement") {
+      collectImport(metrics, node);
+    } else if (kind === "function_definition" || kind === "class_definition") {
+      const name = node.field("name")?.text();
+      if (!name) continue;
+      const span = range.end.line - range.start.line + 1;
+      const startLine = range.start.line + 1;
+      const methods: string[] = [];
+      if (kind === "function_definition") {
+        metrics.functionNames.push(name);
+        metrics.functionSpans.push({
+          name,
+          identifier: `${relPath}::${[...scopes.map((scope) => scope.name), name].join(".")}`,
+          span,
+          startLine,
+        });
+        if (scopes.length === 0) metrics.defines += 1;
+        const owner = scopes.at(-1);
+        if (owner?.kind === "class") owner.methods.push(name);
+      } else {
+        metrics.defines += 1;
+        metrics.classSpans.push({
+          name,
+          span,
+          startLine,
+          methods,
+        });
+        const bases =
+          node
+            .field("superclasses")
+            ?.namedChildren()
+            .filter((base) => !["keyword_argument", "comment"].includes(String(base.kind()))) ?? [];
+        for (const base of bases) {
+          metrics.inherits += 1;
+          metrics.pyBases.push(base.text());
+          addSample(metrics.samples, base.text());
+        }
+      }
+      const body = node.field("body")?.range();
+      scopes.push({
+        name,
+        kind: kind === "function_definition" ? "function" : "class",
+        endIndex: range.end.index,
+        bodyStart: body?.start.index ?? range.end.index,
+        bodyEnd: body?.end.index ?? range.end.index,
+        methods,
+      });
+      const decorated = node.parent();
+      if (decorated?.kind() === "decorated_definition") {
+        metrics.decorators += decorated
+          .namedChildren()
+          .filter((child) => child.kind() === "decorator").length;
+      }
+      addSample(metrics.samples, name);
+    } else if (kind === "assignment" || kind === "augmented_assignment") {
+      const names = assignmentNames(node.field("left"));
+      metrics.variableNames.push(...names);
+      const moduleLevel = scopes.length === 0;
+      if (moduleLevel) {
+        for (const name of names)
+          addVariableSignal(metrics, relPath, name, {
+            startLine: range.start.line + 1,
+            moduleLevel,
+          });
+      }
+      if (node.field("left")?.text() === "__all__") {
+        metrics.exportedNames.push(...literalExportNames(node.field("right")));
+      }
+    } else if (kind === "call") {
+      const owner = scopes.findLast(
+        (scope) =>
+          scope.kind === "function" &&
+          scope.bodyStart <= range.start.index &&
+          scope.bodyEnd >= range.end.index,
+      );
+      const target = node.field("function");
+      const callee =
+        target?.kind() === "identifier"
+          ? target.text()
+          : target?.kind() === "attribute"
+            ? target.field("attribute")?.text()
+            : null;
+      if (owner && callee)
+        metrics.callSites.push({
+          caller: owner.name,
+          callee,
+          lineNumber: range.start.line + 1,
+        });
+    } else if (kind === "comparison_operator") {
+      const children = node.namedChildren();
+      metrics.entrypointHint ||=
+        children.length === 2 &&
+        children.some((child) => child.kind() === "identifier" && child.text() === "__name__") &&
+        children.some(
+          (child) => child.kind() === "string" && /^(['"])__main__\1$/.test(child.text()),
+        ) &&
+        node.children().some((child) => child.text() === "==");
+    }
+  }
+  return metrics;
+}
+
+/** Preserves import names and relative levels before project-specific module resolution. */
+function collectImport(metrics: FileMetrics, node: SgNode): void {
+  const names = node
+    .fieldChildren("name")
+    .map((name) =>
+      name.kind() === "aliased_import" ? (name.field("name")?.text() ?? "") : name.text(),
+    );
+  if (node.namedChildren().some((child) => child.kind() === "wildcard_import")) names.push("*");
+  let statement: PythonImport;
+  if (node.kind() === "import_statement") {
+    statement = { kind: "import", names };
+    metrics.pyImportTargets.push(...names);
+  } else {
+    const raw = node.field("module_name")?.text() ?? "";
+    const level = raw.match(/^\.+/)?.[0].length ?? 0;
+    statement = { kind: "from", level, module: raw.slice(level), names };
+    for (const name of names) {
+      const target = raw || name;
+      metrics.pyImportTargets.push(target);
+      if (level > 0) {
+        metrics.pyLocalImportTargets.push(target);
+        metrics.importsLocal += 1;
+        addSample(metrics.samples, target);
+      }
+    }
+  }
+  metrics.pythonImports.push(statement);
+}
+
+/** Reads assignment binders without confusing attribute writes, annotations, or default parameters with new variables. */
+function assignmentNames(node: SgNode | null): string[] {
+  if (node === null) return [];
+  if (node.kind() === "identifier") return [node.text()];
   if (
-    (cleanTarget.startsWith("(") && cleanTarget.endsWith(")")) ||
-    (cleanTarget.startsWith("[") && cleanTarget.endsWith("]"))
+    ["pattern_list", "tuple_pattern", "list_pattern", "list_splat_pattern"].includes(
+      String(node.kind()),
+    )
   ) {
-    return cleanTarget
-      .slice(1, -1)
-      .split(",")
-      .flatMap((item) => targetNames(item));
+    return node.namedChildren().flatMap(assignmentNames);
   }
   return [];
 }
 
-/** Extracts Python string literal contents from a raw expression. */
-export function literalStrings(value: string): string[] {
-  const cleanValue = value.trim();
-  if (
-    !(
-      (cleanValue.startsWith("[") && cleanValue.endsWith("]")) ||
-      (cleanValue.startsWith("(") && cleanValue.endsWith(")")) ||
-      (cleanValue.startsWith("{") && cleanValue.endsWith("}"))
-    )
-  ) {
-    return [];
+/** Reads static __all__ members without evaluating expressions, byte strings, or interpolated values. */
+function literalExportNames(value: SgNode | null): string[] {
+  if (value === null || !["list", "tuple", "set"].includes(String(value.kind()))) return [];
+  const names: string[] = [];
+  for (const item of value.namedChildren()) {
+    if (item.kind() !== "string") continue;
+    const children = item.namedChildren();
+    const start = children.find((child) => child.kind() === "string_start")?.text() ?? "";
+    const end = children.find((child) => child.kind() === "string_end")?.text() ?? "";
+    if (start && end && !/[bf]/i.test(start))
+      names.push(item.text().slice(start.length, -end.length));
   }
-  const strings: string[] = [];
-  for (const match of cleanValue.matchAll(/(['"])(.*?)\1/g)) {
-    strings.push(match[2] ?? "");
-  }
-  return strings;
-}
-
-/** Builds a stable identifier for a Python function span. */
-export function pythonFunctionIdentifier(relPath: string, parents: string[], name: string): string {
-  const qualified = parents.length > 0 ? [...parents, name].join(".") : name;
-  return `${relPath}::${qualified}`;
-}
-
-/** Collects Python imports, definitions, variables, and function spans. */
-function collectPythonImportsAndVariables(metrics: FileMetrics, source: string): void {
-  const lines = source.split(/\r?\n/);
-  let headerBalance = 0;
-  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
-    const line = lines[lineIndex] ?? "";
-    const stripped = line.trim();
-    if (!stripped || stripped.startsWith("#")) {
-      continue;
-    }
-    const uncommented = stripPythonLineComment(line);
-    if (headerBalance > 0) {
-      headerBalance += bracketBalance(uncommented);
-      if (headerBalance < 0) {
-        headerBalance = 0;
-      }
-      continue;
-    }
-    if (/^(?:async\s+def|def|class)\b/.test(stripped)) {
-      const balance = bracketBalance(uncommented);
-      if (balance > 0 || !stripped.endsWith(":")) {
-        headerBalance = balance;
-      }
-      continue;
-    }
-    const importMatch = /^import\s+(.+)$/.exec(stripped);
-    if (importMatch) {
-      for (const alias of importMatch[1]?.split(",") ?? []) {
-        const name = alias
-          .trim()
-          .split(/\s+as\s+/)[0]
-          ?.trim();
-        if (name) {
-          metrics.pyImportTargets.push(name);
-        }
-      }
-      continue;
-    }
-    const fromMatch = /^from\s+([.\w]*)\s+import\s+(.+)$/.exec(stripped);
-    if (fromMatch) {
-      const rawModule = fromMatch[1] ?? "";
-      const level = rawModule.match(/^\.+/)?.[0]?.length ?? 0;
-      const moduleName = rawModule.slice(level);
-      const targetName = level > 0 ? `${".".repeat(level)}${moduleName}` : moduleName;
-      for (const alias of fromMatch[2]?.split(",") ?? []) {
-        const aliasName = alias
-          .trim()
-          .split(/\s+as\s+/)[0]
-          ?.trim();
-        const target = targetName || aliasName;
-        if (target) {
-          metrics.pyImportTargets.push(target);
-        }
-        if (level > 0 && target) {
-          metrics.pyLocalImportTargets.push(target);
-          metrics.importsLocal += 1;
-          addSample(metrics.samples, target);
-        }
-      }
-      continue;
-    }
-    const assignment = assignmentParts(stripped);
-    if (assignment === null) {
-      continue;
-    }
-    const names = targetNames(assignment.target);
-    metrics.variableNames.push(...names);
-    if (assignment.target.trim() === "__all__") {
-      metrics.exportedNames.push(
-        ...literalStrings(multilinePythonValue(lines, lineIndex, assignment.value)),
-      );
-    }
-  }
-}
-
-/** Collects module-level Python variable assignment names. */
-export function collectPythonModuleVariables(
-  metrics: FileMetrics,
-  relPath: string,
-  source: string,
-): void {
-  const lines = source.split(/\r?\n/);
-  for (const [index, line] of lines.entries()) {
-    if (indentOf(line) !== 0) {
-      continue;
-    }
-    const assignment = assignmentParts(line.trim());
-    if (assignment === null) {
-      continue;
-    }
-    for (const name of targetNames(assignment.target)) {
-      addVariableSignal(metrics, relPath, name, {
-        startLine: index + 1,
-        moduleLevel: true,
-      });
-    }
-  }
-}
-
-/** Collects top-level Python function and class names. */
-export function collectPythonTopLevelDefinitions(
-  metrics: FileMetrics,
-  relPath: string,
-  source: string,
-): void {
-  for (const definition of pythonDefinitions(source)) {
-    if (definition.kind === "function") {
-      metrics.functionNames.push(definition.name);
-      metrics.functionSpans.push({
-        name: definition.name,
-        identifier:
-          definition.parents.length === 0
-            ? codeSignalIdentifier(relPath, definition.name)
-            : pythonFunctionIdentifier(relPath, definition.parents, definition.name),
-        span: definition.span,
-        startLine: definition.startLine,
-      });
-      if (definition.parents.length === 0) {
-        metrics.defines += 1;
-      }
-    } else {
-      metrics.defines += 1;
-      addSample(metrics.samples, definition.name);
-      for (const base of definition.bases) {
-        metrics.inherits += 1;
-        metrics.pyBases.push(base);
-        addSample(metrics.samples, base);
-      }
-    }
-    metrics.decorators += definition.decoratorCount;
-    if (definition.kind === "function") {
-      addSample(metrics.samples, definition.name);
-    }
-  }
-}
-
-/** Scans one Python file into import, definition, and variable metrics. */
-export function scanPythonFile(
-  filePath: string,
-  { relPath, source: existingSource }: { relPath: string; source?: string | undefined },
-): FileMetrics {
-  const metrics = createFileMetrics({
-    path: filePath,
-    relPath,
-    suffix: path.extname(filePath),
-  });
-  let source: string;
-  try {
-    source = existingSource ?? readFileSync(filePath, "utf8");
-  } catch {
-    return metrics;
-  }
-
-  metrics.lines = sourceLineCount(source);
-  metrics.entrypointHint = isPythonEntrypoint(filePath, source);
-  collectPythonImportsAndVariables(metrics, source);
-  collectPythonModuleVariables(metrics, relPath, source);
-  collectPythonTopLevelDefinitions(metrics, relPath, source);
-  return metrics;
-}
-
-/** Checks whether Python source is likely executable as an entrypoint. */
-export function isPythonEntrypoint(filePath: string, source: string): boolean {
-  return (
-    ENTRYPOINT_BASENAMES.has(path.basename(filePath)) ||
-    source.includes('__name__ == "__main__"') ||
-    source.includes("__name__ == '__main__'")
-  );
-}
-
-/** Parses Python definitions and nested structure from source lines. */
-function pythonDefinitions(source: string): PythonDefinition[] {
-  const lines = source.split(/\r?\n/);
-  const definitions: Array<Omit<PythonDefinition, "parents">> = [];
-  for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index] ?? "";
-    const stripped = line.trim();
-    const indent = indentOf(line);
-    const functionMatch = /^(?:async\s+def|def)\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/.exec(stripped);
-    const classMatch = /^class\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:\((.*?)\))?\s*:/.exec(stripped);
-    if (functionMatch) {
-      definitions.push({
-        kind: "function",
-        name: functionMatch[1] ?? "",
-        indent,
-        lineIndex: index,
-        startLine: index + 1,
-        span: pythonBlockSpan(lines, index, indent),
-        decoratorCount: decoratorCount(lines, index, indent),
-        bases: [],
-      });
-    } else if (classMatch) {
-      definitions.push({
-        kind: "class",
-        name: classMatch[1] ?? "",
-        indent,
-        lineIndex: index,
-        startLine: index + 1,
-        span: pythonBlockSpan(lines, index, indent),
-        decoratorCount: decoratorCount(lines, index, indent),
-        bases: classBases(classMatch[2] ?? ""),
-      });
-    }
-  }
-  return definitions.map((definition, index) => ({
-    ...definition,
-    parents: parentNames(definitions, index),
-  }));
-}
-
-/** Finds containing parent names for nested Python definitions. */
-function parentNames(
-  definitions: Array<Omit<PythonDefinition, "parents">>,
-  index: number,
-): string[] {
-  const child = definitions[index];
-  if (child === undefined) {
-    return [];
-  }
-  const parents: string[] = [];
-  let currentIndent = child.indent;
-  for (let candidateIndex = index - 1; candidateIndex >= 0; candidateIndex -= 1) {
-    const candidate = definitions[candidateIndex];
-    if (
-      candidate !== undefined &&
-      candidate.indent < currentIndent &&
-      candidate.lineIndex + candidate.span > child.lineIndex
-    ) {
-      parents.unshift(candidate.name);
-      currentIndent = candidate.indent;
-    }
-  }
-  return parents;
-}
-
-/** Keeps scanner and graph spans consistent across multiline Python headers and string bodies. */
-export function pythonBlockSpan(lines: string[], startIndex: number, indent: number): number {
-  const headerEndIndex = pythonHeaderEndIndex(lines, startIndex);
-  let endIndex = headerEndIndex;
-  let inTripleString = false;
-  for (let index = headerEndIndex + 1; index < lines.length; index += 1) {
-    const line = lines[index] ?? "";
-    if (inTripleString) {
-      endIndex = index;
-      inTripleString = updateTripleStringState(inTripleString, line);
-      continue;
-    }
-    if (!line.trim()) {
-      continue;
-    }
-    if (indentOf(line) <= indent) {
-      break;
-    }
-    endIndex = index;
-    inTripleString = updateTripleStringState(inTripleString, line);
-  }
-  return Math.max(1, endIndex - startIndex + 1);
-}
-
-/** Finds the final physical line of a Python definition header. */
-function pythonHeaderEndIndex(lines: string[], startIndex: number): number {
-  let balance = 0;
-  for (let index = startIndex; index < lines.length; index += 1) {
-    const stripped = stripPythonLineComment(lines[index] ?? "").trim();
-    const state = pythonHeaderLineState(stripped, balance);
-    balance = state.balance;
-    if (balance <= 0 && state.terminated) {
-      return index;
-    }
-  }
-  return startIndex;
-}
-
-/** Tracks bracket balance and top-level colon state for one header line. */
-function pythonHeaderLineState(
-  line: string,
-  initialBalance: number,
-): { balance: number; terminated: boolean } {
-  let balance = initialBalance;
-  let quote: string | null = null;
-  for (let index = 0; index < line.length; index += 1) {
-    const char = line[index];
-    if ((char === "'" || char === '"') && line[index - 1] !== "\\") {
-      quote = quote === char ? null : (quote ?? char);
-      continue;
-    }
-    if (quote !== null) {
-      continue;
-    }
-    if (char === "(" || char === "[" || char === "{") {
-      balance += 1;
-    } else if (char === ")" || char === "]" || char === "}") {
-      balance -= 1;
-    } else if (char === ":" && balance === 0) {
-      return { balance, terminated: true };
-    }
-  }
-  return { balance, terminated: false };
-}
-
-/** Removes Python line comments outside strings. */
-function stripPythonLineComment(line: string): string {
-  let quote: string | null = null;
-  for (let index = 0; index < line.length; index += 1) {
-    const char = line[index];
-    if ((char === "'" || char === '"') && line[index - 1] !== "\\") {
-      quote = quote === char ? null : (quote ?? char);
-    }
-    if (char === "#" && quote === null) {
-      return line.slice(0, index);
-    }
-  }
-  return line;
-}
-
-/** Reads a continued Python assignment value. */
-function multilinePythonValue(lines: string[], startIndex: number, initialValue: string): string {
-  const collected = [initialValue];
-  let balance = bracketBalance(stripPythonLineComment(initialValue));
-  for (let index = startIndex + 1; index < lines.length && balance > 0; index += 1) {
-    const line = lines[index] ?? "";
-    collected.push(line.trim());
-    balance += bracketBalance(stripPythonLineComment(line));
-  }
-  return collected.join("\n");
-}
-
-/** Calculates bracket balance for continued Python assignments. */
-function bracketBalance(value: string): number {
-  let balance = 0;
-  for (const char of value) {
-    if (char === "[" || char === "(" || char === "{") {
-      balance += 1;
-    } else if (char === "]" || char === ")" || char === "}") {
-      balance -= 1;
-    }
-  }
-  return balance;
-}
-
-/** Tracks Python triple-quoted string state while scanning lines. */
-function updateTripleStringState(inTripleString: boolean, line: string): boolean {
-  let state = inTripleString;
-  for (const delimiter of ['"""', "'''"]) {
-    const matchCount = [...line.matchAll(new RegExp(delimiter, "g"))].length;
-    if (matchCount % 2 !== 0) {
-      state = !state;
-    }
-  }
-  return state;
-}
-
-/** Counts decorators immediately above a Python definition. */
-function decoratorCount(lines: string[], startIndex: number, indent: number): number {
-  let count = 0;
-  for (let index = startIndex - 1; index >= 0; index -= 1) {
-    const line = lines[index] ?? "";
-    if (!line.trim()) {
-      break;
-    }
-    if (indentOf(line) !== indent || !line.trim().startsWith("@")) {
-      break;
-    }
-    count += 1;
-  }
-  return count;
-}
-
-/** Extracts Python class base names from a class header. */
-function classBases(rawBases: string): string[] {
-  if (!rawBases.trim()) {
-    return [];
-  }
-  return rawBases
-    .split(",")
-    .map((base) => base.trim())
-    .filter(Boolean);
-}
-
-/** Extracts a Python assignment target name and declaration kind. */
-function assignmentParts(stripped: string): { target: string; value: string } | null {
-  if (
-    !stripped ||
-    stripped.startsWith("#") ||
-    stripped.startsWith("return ") ||
-    stripped.endsWith(",") ||
-    stripped.includes("==") ||
-    stripped.includes("!=") ||
-    stripped.includes("<=") ||
-    stripped.includes(">=")
-  ) {
-    return null;
-  }
-  const augAssign = /^(.+?)\s*(?:\+=|-=|\*=|\/=|%=)\s*(.*)$/.exec(stripped);
-  if (augAssign) {
-    return { target: augAssign[1] ?? "", value: augAssign[2] ?? "" };
-  }
-  const assign = /^(.+?)\s*=\s*(.*)$/.exec(stripped);
-  if (assign) {
-    const rawTarget = assign[1] ?? "";
-    if (rawTarget.includes(":=")) {
-      return null;
-    }
-    const target = rawTarget.includes(":") ? (rawTarget.split(":", 1)[0] ?? "") : rawTarget;
-    return { target, value: assign[2] ?? "" };
-  }
-  const annAssign = /^(.+?)\s*:\s*[^=]+$/.exec(stripped);
-  if (annAssign) {
-    return { target: annAssign[1] ?? "", value: "" };
-  }
-  return null;
-}
-
-/** Counts leading spaces for Python indentation-sensitive parsing. */
-function indentOf(line: string): number {
-  return line.match(/^[ \t]*/)?.[0]?.length ?? 0;
+  return names;
 }

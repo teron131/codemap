@@ -85,7 +85,6 @@ export function buildCurrentTreeGraph(
     emitPaths === null ? scan.files : scan.files.filter((item) => emitPaths.has(item.path));
   const structure = runStructure(root, files, {
     fileMetricsByPath: importResult.fileMetrics,
-    pythonSourcesByPath: importResult.pythonSources,
   });
   const [nodes, edges] = buildNodesAndEdges(scan, structure, importMap, {
     emitPaths,

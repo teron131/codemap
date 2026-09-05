@@ -30,10 +30,7 @@ export function currentTreeInspectGraph(
     structureFiles = structureFiles.filter((item) => emitPaths.has(item.path));
   }
   const graph = buildCurrentTreeGraph(root, scan, importResult, { emitPaths });
-  return [
-    graph,
-    metricsForFiles(root, structureFiles, fileMetricsByPath, importResult.pythonSources),
-  ];
+  return [graph, metricsForFiles(root, structureFiles, fileMetricsByPath)];
 }
 
 /** Builds import incoming and outgoing rows for inspection. */
@@ -92,14 +89,13 @@ export function metricsForFiles(
   root: string,
   files: ScanEntry[],
   fileMetricsByPath: Record<string, FileMetrics | undefined>,
-  sources: Record<string, string | undefined> = {},
 ): Record<string, unknown> {
   const scanned: FileMetrics[] = [];
   for (const item of files) {
     const relPath = item.path;
     let metrics = fileMetricsByPath[relPath];
     if (metrics === undefined) {
-      metrics = scanFile(path.join(root, relPath), { displayRoot: root, source: sources[relPath] });
+      metrics = scanFile(path.join(root, relPath), { displayRoot: root });
     }
     const sizeLines = item.sizeLines;
     if (sizeLines > 0 && metrics.lines === 0) {

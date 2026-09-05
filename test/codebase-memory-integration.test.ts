@@ -14,6 +14,7 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { canonicalPath, projectLockPath } from "../src/codemap/codebase-memory/cache.js";
 import {
   callCodebaseMemoryTool,
   codebaseMemoryFailureReason,
@@ -105,6 +106,34 @@ describe("Codebase Memory integration", () => {
       ]),
     });
     expect(readChildCwds()).toEqual([homedir()]);
+  });
+
+  it("retains the provider failure when restoring the lock also fails", () => {
+    vi.stubEnv("CODEBASE_MEMORY_MOCK_LOSE_LOCK_RPC_ERROR", projectLockPath(canonicalPath(workDir)));
+    const result = withFreshCodebaseMemoryProject(workDir, () =>
+      callCodebaseMemoryTool("get_graph_schema", {}),
+    );
+    expect(result?.ok).toBe(false);
+    if (result?.ok === false) {
+      expect(result.reason).toContain("provider failed deliberately");
+      expect(result.reason).toContain("cache lock ownership was lost after launch");
+    }
+  });
+
+  it("reaps a timed-out provider before returning control and permits the next refresh", () => {
+    const pidLog = path.join(workDir, "provider-pids.jsonl");
+    vi.stubEnv("CODEBASE_MEMORY_MOCK_PID_LOG", pidLog);
+    vi.stubEnv("CODEBASE_MEMORY_MOCK_OPERATION_ID", "deadline");
+    vi.stubEnv("CODEBASE_MEMORY_MOCK_QUERY_DELAY_MS", "500");
+    const result = withFreshCodebaseMemoryProject(workDir, () =>
+      callCodebaseMemoryTool("get_graph_schema", {}, { timeoutMs: 150 }),
+    );
+    expect(result?.ok).toBe(false);
+    if (result?.ok === false) expect(result.reason).toContain("timed out");
+    const pid = Number(readFileSync(pidLog, "utf8").trim().split("\n").at(-1));
+    expect(() => process.kill(pid, 0)).toThrow(expect.objectContaining({ code: "ESRCH" }));
+    vi.stubEnv("CODEBASE_MEMORY_MOCK_QUERY_DELAY_MS", "0");
+    expect(codebaseMemorySchema(workDir)).not.toBeNull();
   });
 
   it("indexes ready projects before use", () => {
@@ -1733,21 +1762,36 @@ function mockServerSource(): string {
   return `#!/usr/bin/env node
 const fs = require("node:fs");
 
-const input = fs.readFileSync(0, "utf8");
-const lines = input
-  .split(/\\r?\\n/)
-  .map((line) => line.trim())
-  .filter(Boolean);
-const calls = lines.map((line) => JSON.parse(line));
-const toolCall = calls.find((call) => call.method === "tools/call");
+const readline = require("node:readline");
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.method === "initialize") {
+    console.log(JSON.stringify({
+      jsonrpc: "2.0", id: message.id,
+      result: { protocolVersion: "2024-11-05", serverInfo: { name: "mock-codebase-memory-mcp", version: "0.0.0" }, capabilities: { tools: {} } },
+    }));
+  } else if (message.method === "tools/call") {
+    handleTool(message);
+  }
+});
+function handleTool(toolCall) {
 const toolName = toolCall?.params?.name;
 const toolArgs = toolCall?.params?.arguments ?? {};
+if (toolName === "get_graph_schema" && process.env.CODEBASE_MEMORY_MOCK_LOSE_LOCK_RPC_ERROR) {
+  const lockPath = process.env.CODEBASE_MEMORY_MOCK_LOSE_LOCK_RPC_ERROR;
+  const owner = JSON.parse(fs.readFileSync(lockPath, "utf8"));
+  fs.writeFileSync(lockPath, JSON.stringify({ ...owner, token: "replacement-owner" }));
+  console.log(JSON.stringify({ jsonrpc: "2.0", id: toolCall.id, error: { code: -32603, message: "provider failed deliberately" } }));
+  return;
+}
+
 const root = process.env.CODEBASE_MEMORY_MOCK_ROOT ?? ${JSON.stringify(workDir)};
 const indexLogPath = ${JSON.stringify(path.join(workDir, "index-calls.jsonl"))};
 const deleteLogPath = ${JSON.stringify(path.join(workDir, "delete-calls.jsonl"))};
 const queryLogPath = ${JSON.stringify(path.join(workDir, "query-calls.jsonl"))};
 const cwdLogPath = ${JSON.stringify(path.join(workDir, "child-cwds.jsonl"))};
 fs.appendFileSync(cwdLogPath, JSON.stringify(process.cwd()) + "\\n");
+if (process.env.CODEBASE_MEMORY_MOCK_PID_LOG) fs.appendFileSync(process.env.CODEBASE_MEMORY_MOCK_PID_LOG, String(process.pid) + String.fromCharCode(10));
 const operationId = process.env.CODEBASE_MEMORY_MOCK_OPERATION_ID;
 if (operationId) {
   const eventLogPath = ${JSON.stringify(path.join(workDir, "operation-events.jsonl"))};
@@ -2267,21 +2311,15 @@ const toolResult =
           ],
         };
 
-console.log(JSON.stringify({
-  jsonrpc: "2.0",
-  id: 1,
-  result: {
-    protocolVersion: "2024-11-05",
-    serverInfo: { name: "mock-codebase-memory-mcp", version: "0.0.0" },
-    capabilities: { tools: {} },
-  },
-}));
 if (!omitToolResponse) {
   console.log(JSON.stringify({
     jsonrpc: "2.0",
-    id: 2,
+    id: toolCall.id,
     result: toolResult,
   }));
+} else {
+  process.exit(0);
+}
 }
 `;
 }

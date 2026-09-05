@@ -3,9 +3,8 @@
 import path from "node:path";
 
 import { stringField } from "../../json-utils.js";
-import { pythonModuleIndex, resolvePythonModule } from "../../source/extraction/python-imports.js";
+import { pythonImportTargets, pythonModuleIndex } from "../../source/extraction/python-imports.js";
 import { typescriptImportTargets } from "../../source/extraction/typescript-imports.js";
-import { type FileMetrics } from "../../source/scanner/index.js";
 import { compareText, extentSamples } from "../../text-utils.js";
 import { renderStructuralReference } from "../presentation.js";
 import type { StructuralOutline, StructuralReference, StructuralSignal } from "../schema.js";
@@ -166,33 +165,13 @@ export function currentTreeRelationshipRows(source: SourceContext): Relationship
   for (const metrics of source.files) {
     const targets =
       metrics.suffix === ".py"
-        ? pythonMetricImportTargets(metrics, source.filePaths, pythonModules)
+        ? pythonImportTargets(metrics, source.filePaths, pythonModules)
         : typescriptImportTargets(metrics.path, metrics, source.resolver);
     for (const target of targets) {
       relationships.push({ source: metrics.relPath, target, weight: 1 });
     }
   }
   return relationships;
-}
-
-/** Resolves scanner-owned Python import names against the project module index. */
-function pythonMetricImportTargets(
-  metrics: FileMetrics,
-  filePaths: Set<string>,
-  modules: ReturnType<typeof pythonModuleIndex>,
-): string[] {
-  const targets = new Set<string>();
-  const packageParts = path.posix.dirname(metrics.relPath).split("/").filter(Boolean);
-  for (const rawTarget of metrics.pyImportTargets) {
-    const level = rawTarget.match(/^\.+/)?.[0].length ?? 0;
-    const moduleParts = rawTarget.slice(level).split(".").filter(Boolean);
-    const baseParts =
-      level > 0 ? packageParts.slice(0, Math.max(0, packageParts.length - level + 1)) : [];
-    for (const target of resolvePythonModule([...baseParts, ...moduleParts], filePaths, modules)) {
-      targets.add(target);
-    }
-  }
-  return [...targets].sort(compareText);
 }
 
 /** Finds the deepest source directory that contains a strict majority of eligible files. */

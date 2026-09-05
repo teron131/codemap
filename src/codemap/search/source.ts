@@ -1,10 +1,9 @@
 /** Owns source-search lanes, symbol extraction, path matching, and result ranking policy. */
-import { readFileSync } from "node:fs";
 import path from "node:path";
 
 import type { NapiConfig } from "@ast-grep/napi";
 
-import { contextLines, type SyntaxMatch, SyntaxSearch, targetFiles } from "../ast-grep/index.js";
+import { type SyntaxMatch, SyntaxSearch } from "../ast-grep/index.js";
 import {
   categoryForPath,
   CONFIG_BASENAMES,
@@ -397,16 +396,7 @@ function astGrepSymbolMatches(
       })),
       prefilter,
     );
-    if (matches === null) {
-      if (language === "python") {
-        for (const [index, symbol] of symbols.entries()) {
-          groups[index]!.push(
-            ...pythonSymbolMatches(root, symbol, { limit: limit - groups[index]!.length }),
-          );
-        }
-      }
-      return groups;
-    }
+    if (matches === null) return groups;
     for (const [index, rows] of matches.entries()) {
       groups[index]!.push(...rows.map(astGrepMatch));
     }
@@ -415,67 +405,6 @@ function astGrepSymbolMatches(
     }
   }
   return groups;
-}
-
-/** Finds Python definitions or assignments that match a symbol name. */
-function pythonSymbolMatches(
-  root: string,
-  symbol: string,
-  { limit }: { limit: number },
-): SourceMatch[] {
-  const matches: SourceMatch[] = [];
-  for (const filePath of targetFiles(root, ["."], "python")) {
-    if (matches.length >= limit) {
-      break;
-    }
-    let source = "";
-    try {
-      source = readFileSync(filePath, "utf8");
-    } catch {
-      continue;
-    }
-    const sourceLines = source.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
-    const relPath = filePathRelative(root, filePath);
-    for (let index = 0; index < sourceLines.length; index += 1) {
-      if (matches.length >= limit) {
-        break;
-      }
-      const line = sourceLines[index] ?? "";
-      const definition = pythonDefinitionMatch(line, symbol);
-      if (definition !== null) {
-        const endIndex = pythonBlockEnd(sourceLines, index, definition.indent);
-        matches.push(
-          astGrepMatch({
-            engine: "regex",
-            filePath: relPath,
-            text: sourceLines.slice(index, endIndex + 1).join("\n"),
-            line: index + 1,
-            column: definition.column,
-            endLine: endIndex + 1,
-            endColumn: (sourceLines[endIndex] ?? "").length + 1,
-            lines: contextLines(sourceLines, index, endIndex),
-          }),
-        );
-        continue;
-      }
-      const assignment = pythonAssignmentMatch(line, symbol);
-      if (assignment !== null) {
-        matches.push(
-          astGrepMatch({
-            engine: "regex",
-            filePath: relPath,
-            text: line,
-            line: index + 1,
-            column: assignment.column,
-            endLine: index + 1,
-            endColumn: line.length + 1,
-            lines: line,
-          }),
-        );
-      }
-    }
-  }
-  return matches;
 }
 
 /** Builds ast-grep patterns for function, class, and export symbol queries. */
@@ -532,56 +461,4 @@ function appendMatch(
   }
   seen.add(key);
   matches.push(sourceMatch);
-}
-
-/** Locates a Python function, async function, or class definition line. */
-function pythonDefinitionMatch(
-  line: string,
-  symbol: string,
-): { indent: number; column: number } | null {
-  const escaped = escapeRegExp(symbol);
-  const match = new RegExp(`^(\\s*)(?:async\\s+def|def|class)\\s+${escaped}\\b`).exec(line);
-  if (!match) {
-    return null;
-  }
-  const indent = match[1]?.length ?? 0;
-  return { indent, column: indent + 1 };
-}
-
-/** Locates a Python assignment line for a requested symbol. */
-function pythonAssignmentMatch(line: string, symbol: string): { column: number } | null {
-  const escaped = escapeRegExp(symbol);
-  const match = new RegExp(`^(\\s*)${escaped}\\s*(?::[^=]+)?=`).exec(line);
-  if (!match) {
-    return null;
-  }
-  return { column: (match[1]?.length ?? 0) + 1 };
-}
-
-/** Finds where a Python definition block ends by indentation. */
-function pythonBlockEnd(lines: string[], startIndex: number, baseIndent: number): number {
-  let endIndex = startIndex;
-  for (let index = startIndex + 1; index < lines.length; index += 1) {
-    const line = lines[index] ?? "";
-    if (!line.trim()) {
-      endIndex = index;
-      continue;
-    }
-    const indent = leadingWhitespaceLength(line);
-    if (indent <= baseIndent) {
-      break;
-    }
-    endIndex = index;
-  }
-  return endIndex;
-}
-
-/** Counts indentation characters before non-whitespace text. */
-function leadingWhitespaceLength(value: string): number {
-  return value.match(/^\s*/)?.[0].length ?? 0;
-}
-
-/** Returns a project-relative path when a file is inside the root. */
-function filePathRelative(root: string, filePath: string): string {
-  return filePath.startsWith(`${root}/`) ? filePath.slice(root.length + 1) : filePath;
 }

@@ -47,7 +47,7 @@ function buildRelationshipsSection(
   return {
     counts: {
       module_agents_files: displayFiles.filter((filePath) => filePath.endsWith("AGENTS.md")).length,
-      typescript_import_edges: sumLengths(scannedFiles, "typescriptImportTargets"),
+      typescript_import_edges: sumLengths(scannedFiles, "typescriptImports"),
       typescript_relative_imports: sumLengths(scannedFiles, "typescriptLocalImportTargets"),
       typescript_reexport_edges: sumLengths(scannedFiles, "typescriptReexportTargets"),
       typescript_local_reexports: sumLengths(scannedFiles, "typescriptLocalReexportTargets"),
@@ -192,7 +192,7 @@ export function buildSignalExport(
 function sumLengths(
   scannedFiles: FileMetrics[],
   key:
-    | "typescriptImportTargets"
+    | "typescriptImports"
     | "typescriptLocalImportTargets"
     | "typescriptReexportTargets"
     | "typescriptLocalReexportTargets"
