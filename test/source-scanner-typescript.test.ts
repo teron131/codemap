@@ -1,5 +1,5 @@
 /** Checks TypeScript-family scanner edge cases. */
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -174,20 +174,12 @@ describe("TypeScript-family scanner", () => {
   });
 
   it("resolves imports across JavaScript and TypeScript module suffixes", () => {
-    const rows = [
+    const files = writeResolutionSources([
       ["src/main.mts", "import './worker.js';\n"],
       ["src/worker.cts", "export const worker = true;\n"],
       ["src/loader.cjs", "import './feature';\n"],
       ["src/feature.mjs", "export const feature = true;\n"],
-    ] as const;
-    for (const [relativePath, source] of rows) {
-      const filePath = path.join(workDir, relativePath);
-      mkdirSync(path.dirname(filePath), { recursive: true });
-      writeFileSync(filePath, source, "utf8");
-    }
-    const files = rows.map(([relativePath]) =>
-      scanEntry(workDir, path.join(workDir, relativePath)),
-    );
+    ]);
 
     expect(runImportMap(workDir, files).importMap).toMatchObject({
       "src/main.mts": ["src/worker.cts"],
@@ -211,4 +203,91 @@ describe("TypeScript-family scanner", () => {
       focusFiles.map((filePath) => path.basename(filePath)).sort(),
     );
   });
+
+  it("resolves inherited JSONC aliases relative to their declaring config", () => {
+    const files = writeResolutionSources([
+      ["src/main.ts", "import { value } from '@/feature.js';"],
+      ["src/feature.ts", "export const value = true;"],
+    ]);
+    mkdirSync(path.join(workDir, "config"));
+    writeFileSync(
+      path.join(workDir, "config", "base.json"),
+      '{"compilerOptions":{"baseUrl":"..","paths":{"@/*":["src/*"]}}}',
+    );
+    writeFileSync(
+      path.join(workDir, "tsconfig.json"),
+      '{\n// project configuration\n"extends":"./config/base.json",\n}',
+    );
+    expect(runImportMap(workDir, files).importMap["src/main.ts"]).toEqual(["src/feature.ts"]);
+  });
+
+  it("uses nested project configs and refreshes their aliases on the next operation", () => {
+    const files = writeResolutionSources([
+      ["packages/app/src/main.ts", "import '@/value';"],
+      ["packages/app/src/first.ts", "export const value = 1;"],
+      ["packages/app/src/second.ts", "export const value = 2;"],
+    ]);
+    const config = path.join(workDir, "packages", "app", "tsconfig.json");
+    writeFileSync(
+      config,
+      '{"compilerOptions":{"baseUrl":".","paths":{"@/value":["src/first.ts"]}}}',
+    );
+    expect(runImportMap(workDir, files).importMap["packages/app/src/main.ts"]).toEqual([
+      "packages/app/src/first.ts",
+    ]);
+    writeFileSync(
+      config,
+      '{"compilerOptions":{"baseUrl":".","paths":{"@/value":["src/second.ts"]}}}',
+    );
+    expect(runImportMap(workDir, files).importMap["packages/app/src/main.ts"]).toEqual([
+      "packages/app/src/second.ts",
+    ]);
+  });
+
+  it("resolves import and require exports of the same workspace package separately", () => {
+    const files = writeResolutionSources([
+      [
+        "src/main.ts",
+        "import value from 'library';\nconst other = require('library');\nimport 'external';",
+      ],
+      ["packages/library/import.ts", "export default true;"],
+      ["packages/library/require.cts", "module.exports = true;"],
+    ]);
+    writeFileSync(
+      path.join(workDir, "packages", "library", "package.json"),
+      '{"name":"library","exports":{"import":"./import.ts","require":"./require.cts"}}',
+    );
+    mkdirSync(path.join(workDir, "node_modules", "external"), { recursive: true });
+    symlinkSync(
+      path.join(workDir, "packages", "library"),
+      path.join(workDir, "node_modules", "library"),
+    );
+    writeFileSync(
+      path.join(workDir, "node_modules", "external", "index.js"),
+      "module.exports = true;",
+    );
+    expect(runImportMap(workDir, files).importMap["src/main.ts"]).toEqual([
+      "packages/library/import.ts",
+      "packages/library/require.cts",
+    ]);
+  });
+
+  it("keeps relative source edges when an inherited config is unavailable", () => {
+    const files = writeResolutionSources([
+      ["src/main.ts", "import './feature.js';"],
+      ["src/feature.ts", "export const feature = true;"],
+    ]);
+    writeFileSync(path.join(workDir, "tsconfig.json"), '{"extends":"missing-config/base.json"}');
+    expect(runImportMap(workDir, files).importMap["src/main.ts"]).toEqual(["src/feature.ts"]);
+  });
 });
+
+/** Creates a source inventory without treating dependency files as inspected project code. */
+function writeResolutionSources(rows: Array<[string, string]>) {
+  return rows.map(([relative, source]) => {
+    const file = path.join(workDir, relative);
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(file, source);
+    return scanEntry(workDir, file);
+  });
+}

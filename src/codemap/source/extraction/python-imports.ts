@@ -1,39 +1,20 @@
 /** Resolves Python import statements to project-relative source paths. */
-import { readFileSync } from "node:fs";
 import path from "node:path";
 
-import { relativePath } from "../scanner/index.js";
+import type { FileMetrics } from "../scanner/metrics.js";
 
 type PythonModuleIndex = Map<string, string[]>;
 
-type PythonImportStatement =
-  | { kind: "import"; names: string[] }
-  | { kind: "from"; level: number; module: string; names: string[] };
-
-/** Reads import source while preserving unreadable-file fallback. */
-export function readPythonSource(filePath: string): string | null {
-  try {
-    return readFileSync(filePath, "utf8");
-  } catch {
-    return null;
-  }
-}
-
 /** Resolves imports in one Python file against the project module index. */
 export function pythonImportTargets(
-  filePath: string,
-  root: string,
+  metrics: FileMetrics,
   filePaths: Set<string>,
   moduleIndex: PythonModuleIndex,
-  { source = readPythonSource(filePath) }: { source?: string | null } = {},
 ): string[] {
-  if (source === null) {
-    return [];
-  }
   const targets = new Set<string>();
-  const relPath = relativePath(filePath, { displayRoot: root });
+  const relPath = metrics.relPath;
   const packageParts = path.posix.dirname(toPosixPath(relPath)).split("/");
-  for (const statement of pythonImportStatements(source)) {
+  for (const statement of metrics.pythonImports) {
     if (statement.kind === "import") {
       for (const name of statement.names) {
         for (const target of targetsForModule(name.split("."))) {
@@ -121,51 +102,6 @@ export function resolvePythonModule(
     return exactMatches;
   }
   return moduleIndex.get(moduleKey(parts)) ?? [];
-}
-
-/** Parses simple Python import and from-import statements. */
-function pythonImportStatements(source: string): PythonImportStatement[] {
-  const statements: PythonImportStatement[] = [];
-  for (const rawLine of source.split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line || line.startsWith("#")) {
-      continue;
-    }
-    const importMatch = /^import\s+(.+)$/.exec(line);
-    if (importMatch) {
-      statements.push({
-        kind: "import",
-        names: splitImportNames(importMatch[1] ?? ""),
-      });
-      continue;
-    }
-    const fromMatch = /^from\s+([.\w]+)\s+import\s+(.+)$/.exec(line);
-    if (fromMatch) {
-      const rawModule = fromMatch[1] ?? "";
-      const level = rawModule.match(/^\.+/)?.[0].length ?? 0;
-      statements.push({
-        kind: "from",
-        level,
-        module: rawModule.slice(level),
-        names: splitImportNames(fromMatch[2] ?? ""),
-      });
-    }
-  }
-  return statements;
-}
-
-/** Splits comma-separated imported names and drops aliases. */
-function splitImportNames(rawNames: string): string[] {
-  return rawNames
-    .split(",")
-    .map(
-      (name) =>
-        name
-          .trim()
-          .split(/\s+as\s+/)[0]
-          ?.trim() ?? "",
-    )
-    .filter(Boolean);
 }
 
 /** Encodes dotted Python module parts for lookup-map keys. */

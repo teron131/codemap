@@ -4,10 +4,7 @@ import { statSync } from "node:fs";
 import path from "node:path";
 
 import { buildFilePreviews, docstringForSymbol } from "../../source/docstrings/index.js";
-import {
-  typescriptPathAliases,
-  TypeScriptResolver,
-} from "../../source/extraction/typescript-imports.js";
+import { TypeScriptResolver } from "../../source/extraction/typescript-imports.js";
 import {
   discoverFiles,
   type FileMetrics,
@@ -105,7 +102,7 @@ export function buildSourceContext(root: string): SourceContext {
     filePaths,
     symbolsByName,
     previews: new Map(),
-    resolver: new TypeScriptResolver(root, filePaths, typescriptPathAliases(root)),
+    resolver: new TypeScriptResolver(root, filePaths),
   };
 }
 
@@ -118,7 +115,7 @@ export function emptySourceContext(): SourceContext {
     filePaths: new Set(),
     symbolsByName: new Map(),
     previews: new Map(),
-    resolver: new TypeScriptResolver(".", new Set(), []),
+    resolver: new TypeScriptResolver(".", new Set()),
   };
 }
 
