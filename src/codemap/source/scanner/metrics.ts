@@ -25,6 +25,21 @@ export type TypeScriptReexportBinding = {
   exported: string;
 };
 
+export type TypeScriptImport = {
+  target: string;
+  kind: "import" | "require";
+};
+
+export type PythonImport =
+  | { kind: "import"; names: string[] }
+  | { kind: "from"; level: number; module: string; names: string[] };
+
+export type SourceCall = {
+  caller: string;
+  callee: string;
+  lineNumber: number;
+};
+
 export type TypeScriptReexport = {
   target: string;
   bindings: TypeScriptReexportBinding[] | null;
@@ -46,13 +61,14 @@ export type FileMetrics = {
   samples: string[];
   exportedNames: string[];
   entrypointHint: boolean;
-  typescriptImportTargets: string[];
+  typescriptImports: TypeScriptImport[];
   typescriptLocalImportTargets: string[];
   typescriptReexportTargets: string[];
   typescriptLocalReexportTargets: string[];
   typescriptReexports: TypeScriptReexport[];
   typescriptExtendsBases: string[];
   pyImportTargets: string[];
+  pythonImports: PythonImport[];
   pyLocalImportTargets: string[];
   pyBases: string[];
   functionNames: string[];
@@ -60,6 +76,7 @@ export type FileMetrics = {
   variableSignals: VariableSignal[];
   functionSpans: FunctionSpan[];
   classSpans: ClassSpan[];
+  callSites: SourceCall[];
 };
 
 /** Starts one file metrics record with zeroed counters and empty samples. */
@@ -88,13 +105,14 @@ export function createFileMetrics({
     samples: [],
     exportedNames: [],
     entrypointHint: false,
-    typescriptImportTargets: [],
+    typescriptImports: [],
     typescriptLocalImportTargets: [],
     typescriptReexportTargets: [],
     typescriptLocalReexportTargets: [],
     typescriptReexports: [],
     typescriptExtendsBases: [],
     pyImportTargets: [],
+    pythonImports: [],
     pyLocalImportTargets: [],
     pyBases: [],
     functionNames: [],
@@ -102,6 +120,7 @@ export function createFileMetrics({
     variableSignals: [],
     functionSpans: [],
     classSpans: [],
+    callSites: [],
   };
 }
 

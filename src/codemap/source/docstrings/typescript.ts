@@ -1,288 +1,23 @@
-/** Extracts TypeScript comments, signatures, classes, functions, and values. */
+/** Extracts TypeScript-family documentation from syntax nodes while preserving Codemap's comment and report policies. */
 import { readFileSync } from "node:fs";
+import path from "node:path";
 
-import type { FileReport } from "./models.js";
+import type { SgNode } from "@ast-grep/napi";
 
-export const TYPESCRIPT_FUNCTION_DECL_RE =
-  /^\s*(?:export\s+default\s+)?(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(([^)]*)\)/gm;
-export const TYPESCRIPT_ARROW_DECL_RE =
-  /^\s*(?:export\s+default\s+)?(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*(?::[^=\n]+)?=\s*(?:async\s*)?(?:\(([^)]*)\)|([A-Za-z_$][A-Za-z0-9_$]*))\s*=>/gm;
-export const TYPESCRIPT_CLASS_DECL_RE =
-  /^\s*(?:export\s+default\s+)?(?:export\s+)?class\s+([A-Za-z_$][A-Za-z0-9_$]*)\b/gm;
-export const TYPESCRIPT_VALUE_DECL_RE =
-  /^\s*(?:export\s+default\s+)?(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\b/gm;
+import { astGrepRoot } from "../../ast-grep/adapter.js";
+import { TYPESCRIPT_LANG_BY_SUFFIX } from "../scanner/constants.js";
+import type { ClassReport, FileReport, FunctionReport } from "./models.js";
 
-type SeenFunctionKey = `${number}\0${string}`;
+type Declaration = {
+  node: SgNode;
+  signature: SgNode | null;
+  name: string;
+  kind: "class" | "function";
+  docstring: string | null;
+  children: Declaration[];
+};
 
-/** Calculates source offsets for every line start. */
-export function lineStarts(source: string): number[] {
-  const starts = [0];
-  for (let index = 0; index < source.length; index += 1) {
-    if (source[index] === "\n") {
-      starts.push(index + 1);
-    }
-  }
-  return starts;
-}
-
-/** Maps a source byte offset to a line index. */
-export function lineIndexForOffset(starts: number[], offset: number): number {
-  let low = 0;
-  let high = starts.length;
-  while (low < high) {
-    const mid = Math.floor((low + high) / 2);
-    if ((starts[mid] ?? 0) <= offset) {
-      low = mid + 1;
-    } else {
-      high = mid;
-    }
-  }
-  return Math.max(0, low - 1);
-}
-
-/** Normalizes a TypeScript block comment body. */
-export function cleanBlockComment(lines: string[]): string {
-  const cleanedLines: string[] = [];
-  for (const line of lines) {
-    let stripped = line.trim();
-    stripped = removePrefix(removePrefix(stripped, "/**"), "/*");
-    if (stripped.endsWith("*/")) {
-      stripped = stripped.slice(0, -2);
-    }
-    if (stripped.startsWith("*")) {
-      stripped = stripped.slice(1);
-    }
-    cleanedLines.push(stripped.trim());
-  }
-  return cleanedLines.filter(Boolean).join("\n").trim();
-}
-
-/** Normalizes a TypeScript line comment body. */
-export function cleanLineComment(lines: string[]): string {
-  return lines
-    .filter((line) => line.trim())
-    .map((line) => removePrefix(line.trim(), "//").trim())
-    .join("\n")
-    .trim();
-}
-
-/** Checks whether a TypeScript file comment lacks useful intent. */
-export function isIgnorableFileComment(comment: string): boolean {
-  const lowered = comment.trim().toLowerCase();
-  return (
-    lowered.startsWith("eslint-") ||
-    lowered.startsWith("@ts-") ||
-    lowered.startsWith("biome-ignore") ||
-    /^\/?\s*<reference\b/.test(lowered) ||
-    lowered.startsWith("oxlint-")
-  );
-}
-
-/** Finds a meaningful TypeScript file-level comment. */
-export function fileComment(lines: string[]): string | null {
-  let lineIndex = 0;
-  if ((lines[0] ?? "").startsWith("#!")) {
-    lineIndex += 1;
-  }
-  while (lineIndex < lines.length) {
-    while (lineIndex < lines.length && !(lines[lineIndex] ?? "").trim()) {
-      lineIndex += 1;
-    }
-    if (lineIndex >= lines.length) {
-      return null;
-    }
-
-    const firstLine = (lines[lineIndex] ?? "").trimStart();
-    if (firstLine.startsWith("//")) {
-      const commentLines: string[] = [];
-      while (lineIndex < lines.length && (lines[lineIndex] ?? "").trimStart().startsWith("//")) {
-        commentLines.push(lines[lineIndex] ?? "");
-        lineIndex += 1;
-      }
-      const comment = cleanLineComment(commentLines);
-      if (comment && !isIgnorableFileComment(comment)) {
-        return comment;
-      }
-      continue;
-    }
-
-    if (firstLine.startsWith("/*")) {
-      const commentLines = [lines[lineIndex] ?? ""];
-      while (!(lines[lineIndex] ?? "").includes("*/")) {
-        lineIndex += 1;
-        if (lineIndex >= lines.length) {
-          return null;
-        }
-        commentLines.push(lines[lineIndex] ?? "");
-      }
-      lineIndex += 1;
-      const comment = cleanBlockComment(commentLines);
-      if (comment && !isIgnorableFileComment(comment)) {
-        return comment;
-      }
-      continue;
-    }
-
-    return null;
-  }
-  return null;
-}
-
-/** Finds the nearest useful TypeScript comment for a declaration. */
-export function declarationComment(lines: string[], declarationLineIndex: number): string | null {
-  if (declarationLineIndex <= 0) {
-    return null;
-  }
-
-  let lineIndex = declarationLineIndex - 1;
-  if (!(lines[lineIndex] ?? "").trim()) {
-    return null;
-  }
-
-  const stripped = (lines[lineIndex] ?? "").trimStart();
-  if (stripped.startsWith("//")) {
-    const commentLines: string[] = [];
-    while (lineIndex >= 0 && (lines[lineIndex] ?? "").trimStart().startsWith("//")) {
-      commentLines.push(lines[lineIndex] ?? "");
-      lineIndex -= 1;
-    }
-    const comment = cleanLineComment(commentLines.reverse());
-    return comment || null;
-  }
-
-  if (!stripped.includes("*/")) {
-    return null;
-  }
-
-  const commentLines = [lines[lineIndex] ?? ""];
-  while (!(lines[lineIndex] ?? "").includes("/*")) {
-    lineIndex -= 1;
-    if (lineIndex < 0) {
-      return null;
-    }
-    commentLines.push(lines[lineIndex] ?? "");
-  }
-  const comment = cleanBlockComment(commentLines.reverse());
-  return comment || null;
-}
-
-/** Checks whether a TypeScript declaration has a leading block doc comment. */
-export function hasLeadingBlockComment(lines: string[], declarationLineIndex: number): boolean {
-  if (declarationLineIndex <= 0) {
-    return false;
-  }
-  const lineIndex = declarationLineIndex - 1;
-  if (!(lines[lineIndex] ?? "").trim()) {
-    return false;
-  }
-  return (lines[lineIndex] ?? "").includes("*/");
-}
-
-/** Formats TypeScript parameter text for report output. */
-export function formatTypescriptParams(rawParams: string): string {
-  const normalized = rawParams.replaceAll("\n", " ").trim().split(/\s+/).join(" ");
-  return normalized || "none";
-}
-
-/** Adds documented TypeScript function declarations to a file report. */
-export function appendFunctionDeclarations(
-  report: FileReport,
-  source: string,
-  lines: string[],
-  starts: number[],
-  seenFunctionKeys: Set<SeenFunctionKey>,
-): void {
-  for (const match of source.matchAll(TYPESCRIPT_FUNCTION_DECL_RE)) {
-    const lineIndex = lineIndexForOffset(starts, match.index ?? 0);
-    const name = match[1] ?? "";
-    seenFunctionKeys.add(functionKey(lineIndex, name));
-    report.functions.push({
-      name,
-      lineno: lineIndex + 1,
-      inputs: formatTypescriptParams(match[2] ?? ""),
-      outputs: "unannotated",
-      docstring: declarationComment(lines, lineIndex),
-      nestedFunctions: [],
-    });
-  }
-}
-
-/** Adds undocumented arrow-function declarations to the docstring report. */
-export function appendArrowDeclarations(
-  report: FileReport,
-  source: string,
-  lines: string[],
-  starts: number[],
-  seenFunctionKeys: Set<SeenFunctionKey>,
-): void {
-  for (const match of source.matchAll(TYPESCRIPT_ARROW_DECL_RE)) {
-    const lineIndex = lineIndexForOffset(starts, match.index ?? 0);
-    const name = match[1] ?? "";
-    seenFunctionKeys.add(functionKey(lineIndex, name));
-    const params = match[2] ?? match[3] ?? "";
-    report.functions.push({
-      name,
-      lineno: lineIndex + 1,
-      inputs: formatTypescriptParams(params),
-      outputs: "unannotated",
-      docstring: declarationComment(lines, lineIndex),
-      nestedFunctions: [],
-    });
-  }
-}
-
-/** Marks exported or local TypeScript values that already have doc comments. */
-export function appendDocumentedValues(
-  report: FileReport,
-  source: string,
-  lines: string[],
-  starts: number[],
-  seenFunctionKeys: Set<SeenFunctionKey>,
-): void {
-  for (const match of source.matchAll(TYPESCRIPT_VALUE_DECL_RE)) {
-    const lineIndex = lineIndexForOffset(starts, match.index ?? 0);
-    const name = match[1] ?? "";
-    if (
-      seenFunctionKeys.has(functionKey(lineIndex, name)) ||
-      !hasLeadingBlockComment(lines, lineIndex)
-    ) {
-      continue;
-    }
-    const comment = declarationComment(lines, lineIndex);
-    if (!comment) {
-      continue;
-    }
-    report.functions.push({
-      name,
-      lineno: lineIndex + 1,
-      inputs: "none",
-      outputs: "unannotated",
-      docstring: comment,
-      nestedFunctions: [],
-    });
-  }
-}
-
-/** Adds TypeScript class declarations to the docstring coverage report. */
-export function appendClassDeclarations(
-  report: FileReport,
-  source: string,
-  lines: string[],
-  starts: number[],
-): void {
-  for (const match of source.matchAll(TYPESCRIPT_CLASS_DECL_RE)) {
-    const lineIndex = lineIndexForOffset(starts, match.index ?? 0);
-    report.classes.push({
-      name: match[1] ?? "",
-      lineno: lineIndex + 1,
-      docstring: declarationComment(lines, lineIndex),
-      methods: [],
-      nestedClasses: [],
-    });
-  }
-}
-
-/** Builds a comment coverage report for one TypeScript-family source file. */
+/** Builds current documentation without treating code examples or multiline types as declarations. */
 export function buildTypescriptFileReport(
   filePath: string,
   { displayPath }: { displayPath: string },
@@ -302,52 +37,190 @@ export function buildTypescriptFileReport(
     report.parseError = error instanceof Error ? error.message : String(error);
     return report;
   }
-
-  const lines = splitLines(source);
-  const starts = lineStarts(source);
-  report.fileDocstring = fileComment(lines);
-
-  const seenFunctionKeys = new Set<SeenFunctionKey>();
-  appendFunctionDeclarations(report, source, lines, starts, seenFunctionKeys);
-  appendArrowDeclarations(report, source, lines, starts, seenFunctionKeys);
-  appendDocumentedValues(report, source, lines, starts, seenFunctionKeys);
-  appendClassDeclarations(report, source, lines, starts);
-
-  report.functions.sort(
-    (left, right) => left.lineno - right.lineno || stringCompare(left.name, right.name),
-  );
-  report.classes.sort(
-    (left, right) => left.lineno - right.lineno || stringCompare(left.name, right.name),
-  );
+  const language = TYPESCRIPT_LANG_BY_SUFFIX[path.extname(filePath)] ?? "typescript";
+  const root = astGrepRoot(source, language);
+  if (root === null) {
+    report.parseError = "TypeScript syntax parser unavailable";
+    return report;
+  }
+  if (
+    root.find({
+      rule: { any: [{ kind: "ERROR" }, { all: [{ regex: "^$" }, { not: { kind: "program" } }] }] },
+    })
+  ) {
+    report.parseError = "invalid syntax";
+    return report;
+  }
+  const lines = source.split(/\r?\n/);
+  report.fileDocstring = fileComment(root);
+  const kinds = [
+    "function_declaration",
+    "generator_function_declaration",
+    "method_definition",
+    "variable_declarator",
+    "class_declaration",
+  ];
+  if (language === "typescript" || language === "tsx")
+    kinds.push(
+      "abstract_class_declaration",
+      "function_signature",
+      "method_signature",
+      "abstract_method_signature",
+      "public_field_definition",
+    );
+  else kinds.push("field_definition");
+  const declarations: Declaration[] = [];
+  for (const node of root.findAll({ rule: { any: kinds.map((kind) => ({ kind })) } })) {
+    const name = (node.field("name") ?? node.field("property"))?.text();
+    if (!name) continue;
+    const kind = String(node.kind());
+    if (kind === "method_signature" && node.parent()?.kind() !== "class_body") continue;
+    const variable = kind === "variable_declarator";
+    const field = kind === "public_field_definition" || kind === "field_definition";
+    let signature: SgNode | null = node;
+    let anchor = node;
+    while (
+      ["export_statement", "lexical_declaration", "variable_declaration"].includes(
+        String(anchor.parent()?.kind()),
+      )
+    )
+      anchor = anchor.parent()!;
+    const comment = declarationComment(anchor, lines);
+    if (variable || field) {
+      const value = node.field("value");
+      signature =
+        value &&
+        ["arrow_function", "function_expression", "generator_function"].includes(
+          String(value.kind()),
+        )
+          ? value
+          : null;
+      if (signature === null && (field || !comment?.block)) continue;
+    }
+    declarations.push({
+      node,
+      signature,
+      name,
+      kind: kind.includes("class_declaration") ? "class" : "function",
+      docstring: comment?.text ?? null,
+      children: [],
+    });
+  }
+  const byId = new Map(declarations.map((declaration) => [declaration.node.id(), declaration]));
+  const topLevel: Declaration[] = [];
+  for (const declaration of declarations) {
+    const owner = declaration.node.ancestors().find((ancestor) => byId.has(ancestor.id()));
+    if (owner) byId.get(owner.id())!.children.push(declaration);
+    else topLevel.push(declaration);
+  }
+  for (const declaration of topLevel) {
+    if (declaration.kind === "class") report.classes.push(classReport(declaration));
+    else report.functions.push(functionReport(declaration));
+  }
   return report;
 }
 
-/** Builds a stable key for TypeScript function report sorting. */
-function functionKey(lineIndex: number, name: string): SeenFunctionKey {
-  return `${lineIndex}\0${name}`;
+function functionReport(declaration: Declaration): FunctionReport {
+  const parameters = declaration.signature?.field("parameters");
+  const single = declaration.signature?.field("parameter");
+  const params = parameters?.text().slice(1, -1) ?? single?.text() ?? "";
+  return {
+    name: declaration.name,
+    lineno: declaration.node.range().start.line + 1,
+    inputs: params.replace(/\s+/g, " ").trim() || "none",
+    outputs:
+      declaration.signature?.field("return_type")?.text().replace(/^:\s*/, "") ?? "unannotated",
+    docstring: declaration.docstring,
+    nestedFunctions: declaration.children
+      .filter((child) => child.kind === "function")
+      .map(functionReport),
+  };
 }
 
-/** Normalizes source text to newline-delimited lines. */
-function splitLines(source: string): string[] {
-  const lines = source.split(/\r?\n/);
-  if (source.endsWith("\n") || source.endsWith("\r\n")) {
-    lines.pop();
-  }
-  return lines;
+function classReport(declaration: Declaration): ClassReport {
+  return {
+    name: declaration.name,
+    lineno: declaration.node.range().start.line + 1,
+    docstring: declaration.docstring,
+    methods: declaration.children.filter((child) => child.kind === "function").map(functionReport),
+    nestedClasses: declaration.children.filter((child) => child.kind === "class").map(classReport),
+  };
 }
 
-/** Removes a prefix from text when present. */
-function removePrefix(value: string, prefix: string): string {
-  return value.startsWith(prefix) ? value.slice(prefix.length) : value;
+/** Associates adjacent leading comments with their declaration without borrowing a previous statement's trailing comment. */
+function declarationComment(
+  anchor: SgNode,
+  lines: string[],
+): { text: string; block: boolean } | null {
+  let previous = anchor.prev();
+  let nextLine = anchor.range().start.line;
+  const comments: SgNode[] = [];
+  while (previous?.kind() === "comment" && nextLine - previous.range().end.line <= 1) {
+    if (
+      !(lines[previous.range().start.line] ?? "")
+        .trimStart()
+        .startsWith(previous.text().split(/\r?\n/)[0] ?? "")
+    )
+      break;
+    comments.unshift(previous);
+    nextLine = previous.range().start.line;
+    if (previous.text().startsWith("/*")) break;
+    previous = previous.prev();
+  }
+  return comments.length === 0
+    ? null
+    : {
+        text: comments.map((comment) => cleanComment(comment.text())).join("\n"),
+        block: comments.some((comment) => comment.text().startsWith("/*")),
+      };
 }
 
-/** Sorts text values with stable lexical ordering. */
-function stringCompare(left: string, right: string): number {
-  if (left < right) {
-    return -1;
+/** Keeps tool directives out of file intent while preserving the first meaningful comment group. */
+function fileComment(root: SgNode): string | null {
+  const nodes = root.namedChildren();
+  for (let index = 0; index < nodes.length; index += 1) {
+    const node = nodes[index]!;
+    if (node.kind() === "hash_bang_line") continue;
+    if (node.kind() !== "comment") return null;
+    const group = [node];
+    if (node.text().startsWith("//")) {
+      while (
+        nodes[index + 1]?.kind() === "comment" &&
+        nodes[index + 1]!.text().startsWith("//") &&
+        nodes[index + 1]!.range().start.line === nodes[index]!.range().end.line + 1
+      )
+        group.push(nodes[++index]!);
+    }
+    const comment = group.map((item) => cleanComment(item.text())).join("\n");
+    if (comment && !isIgnorableFileComment(comment)) return comment;
   }
-  if (left > right) {
-    return 1;
-  }
-  return 0;
+  return null;
+}
+
+/** Normalizes comment delimiters while retaining the established readable documentation projection. */
+function cleanComment(text: string): string {
+  return text
+    .replace(/^\/\*\*?/, "")
+    .replace(/\*\/$/, "")
+    .split(/\r?\n/)
+    .map((line) =>
+      line
+        .trim()
+        .replace(/^(?:\/\/|\*)\s?/, "")
+        .trim(),
+    )
+    .filter(Boolean)
+    .join("\n");
+}
+
+/** Identifies tooling directives that do not describe source intent. */
+export function isIgnorableFileComment(comment: string): boolean {
+  const lowered = comment.trim().toLowerCase();
+  return (
+    lowered.startsWith("eslint-") ||
+    lowered.startsWith("@ts-") ||
+    lowered.startsWith("biome-ignore") ||
+    /^\/?\s*<reference\b/.test(lowered) ||
+    lowered.startsWith("oxlint-")
+  );
 }

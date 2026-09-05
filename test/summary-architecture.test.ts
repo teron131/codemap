@@ -22,6 +22,28 @@ afterEach(() => {
 });
 
 describe("README summary extraction", () => {
+  it("respects longer fences and reference-style links without inventing headings", () => {
+    const sections = readmeSummaryFromText(
+      [
+        "# [Project][home]",
+        "",
+        "Read [the guide](https://example.com/path(with-parentheses)).",
+        "",
+        "````markdown",
+        "```typescript",
+        "## Inside code",
+        "```",
+        "````",
+        "",
+        "## Architecture",
+        "Real content.",
+        "",
+        "[home]: https://example.com",
+      ].join("\n"),
+    );
+    expect(sections.map((section) => section.title)).toEqual(["Project", "Architecture"]);
+    expect(sections[0]?.content).toContain("Read the guide.");
+  });
   it("keeps a three-level outline and content from only the first two useful sections", () => {
     const sections = readmeSummaryFromText(
       [

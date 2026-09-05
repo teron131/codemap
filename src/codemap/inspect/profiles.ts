@@ -360,7 +360,7 @@ function appendFileImportSpecs(
 ): void {
   const imports = uniqueTextRows([
     ...metrics.pyImportTargets,
-    ...metrics.typescriptImportTargets,
+    ...metrics.typescriptImports.map((item) => item.target),
     ...metrics.typescriptReexportTargets.map((target) => `re-export ${target}`),
   ]);
   if (imports.length === 0) {
