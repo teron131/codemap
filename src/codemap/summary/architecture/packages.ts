@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 
 import { recordValue, stringField } from "../../json-utils.js";
-import { discoverFiles, isGeneratedPath, isTestPath } from "../../source/scanner/index.js";
+import { isGeneratedPath, isTestPath } from "../../source/scanner/index.js";
 import { compareText, uniqueStrings } from "../../text-utils.js";
 import type { SourceContext } from "./source-context.js";
 
@@ -63,7 +63,7 @@ export function isConventionalSurface(filePath: string): boolean {
 /** Reads authored package boundaries and their declared in-repository dependencies. */
 export function sourcePackages(source: SourceContext): SourcePackage[] {
   const packages = new Map<string, SourcePackage>();
-  for (const manifestPath of discoverFiles(source.root)) {
+  for (const manifestPath of source.discoveredFiles) {
     const name = path.basename(manifestPath);
     if (name !== "package.json" && name !== "pyproject.toml") {
       continue;

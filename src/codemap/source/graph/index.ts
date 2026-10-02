@@ -3,9 +3,10 @@ export { classifyTags } from "./builder.js";
 export {
   buildCurrentTreeGraph,
   currentTreeGraph,
-  currentTreeSummaryGraph,
   edgeRelationshipLabel,
+  inventoryFileNodes,
   relatedEdges,
 } from "./canonical.js";
+export type { LikelyEntry } from "./likely-entries.js";
 export { buildLikelyEntries, buildPathRankedLikelyEntries } from "./likely-entries.js";
 export type { GraphEdge, GraphNode, GraphPayload } from "./schema.js";

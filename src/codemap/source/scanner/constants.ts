@@ -41,9 +41,9 @@ export const TYPESCRIPT_SUFFIXES = new Set([
   ".mts",
   ".cts",
 ]);
-export const PY_SUFFIXES = new Set([".py"]);
+export const PYTHON_SUFFIXES = new Set([".py"]);
 
-export const TEXT_SUFFIXES = new Set([
+const TEXT_SUFFIXES = new Set([
   ".c",
   ".cc",
   ".conf",
@@ -78,7 +78,11 @@ export const TEXT_SUFFIXES = new Set([
   ".yml",
 ]);
 
-export const SCAN_SUFFIXES = new Set([...PY_SUFFIXES, ...TYPESCRIPT_SUFFIXES, ...TEXT_SUFFIXES]);
+export const SCAN_SUFFIXES = new Set([
+  ...PYTHON_SUFFIXES,
+  ...TYPESCRIPT_SUFFIXES,
+  ...TEXT_SUFFIXES,
+]);
 
 export const SCAN_BASENAMES = new Set([
   ".env",

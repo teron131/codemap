@@ -130,6 +130,47 @@ describe("TypeScript-family scanner", () => {
     );
   });
 
+  it("does not mistake destructuring initializers for variable or export names", () => {
+    const metrics = scanTypescriptFile(path.join(workDir, "bindings.ts"), {
+      relPath: "bindings.ts",
+      source: [
+        "const { local } = localSource;",
+        "export const { value: renamed } = objectSource;",
+        "export const [first] = arraySource;",
+        "export const plain = source;",
+      ].join("\n"),
+    });
+
+    expect(metrics.variableNames).toEqual(["plain"]);
+    expect(metrics.exportedNames).toEqual(["plain"]);
+  });
+
+  it("restores call ownership after nested and anonymous function scopes", () => {
+    const metrics = scanTypescriptFile(path.join(workDir, "scopes.ts"), {
+      relPath: "scopes.ts",
+      source: [
+        "function outer() {",
+        "  before();",
+        "  const inner = () => inside();",
+        "  visit(() => anonymous());",
+        "  const named = function internal() { bound(); };",
+        "  after();",
+        "}",
+        "outside();",
+        "function sibling() { last(); }",
+      ].join("\n"),
+    });
+
+    expect(metrics.callSites).toEqual([
+      { caller: "outer", callee: "before", lineNumber: 2 },
+      { caller: "inner", callee: "inside", lineNumber: 3 },
+      { caller: "outer", callee: "visit", lineNumber: 4 },
+      { caller: "named", callee: "bound", lineNumber: 5 },
+      { caller: "outer", callee: "after", lineNumber: 6 },
+      { caller: "sibling", callee: "last", lineNumber: 9 },
+    ]);
+  });
+
   it("collects value, type, and aliased public export names", () => {
     const filePath = path.join(workDir, "surface.ts");
     writeFileSync(
@@ -164,7 +205,7 @@ describe("TypeScript-family scanner", () => {
     const filePath = path.join(workDir, "large-surface.ts");
     writeFileSync(
       filePath,
-      `export const publicApi = true;\n/*${"x".repeat(256 * 1024)}*/\n`,
+      `export const publicApi = true;\nexport const { value } = source;\n/*${"x".repeat(256 * 1024)}*/\n`,
       "utf8",
     );
 

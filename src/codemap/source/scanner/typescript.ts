@@ -30,6 +30,22 @@ const TYPESCRIPT_SCAN_KINDS = [
   "variable_declarator",
 ];
 const FUNCTION_EXPRESSION_KINDS = ["arrow_function", "function_expression", "generator_function"];
+const FUNCTION_SCOPE_KINDS = new Set([
+  "function_declaration",
+  "generator_function_declaration",
+  "method_definition",
+  ...FUNCTION_EXPRESSION_KINDS,
+]);
+const CALLER_BINDING_KINDS = new Set([
+  "variable_declarator",
+  "public_field_definition",
+  "field_definition",
+]);
+
+type FunctionScope = {
+  endIndex: number;
+  caller: string | null;
+};
 
 /** Finds a direct ast-grep child node by kind. */
 function directChild(node: SgNode, ...kinds: string[]): SgNode | null {
@@ -136,6 +152,12 @@ function typescriptReexportBindings(node: SgNode): TypeScriptReexportBinding[] |
     : [{ imported: null, exported: exported.text() }];
 }
 
+/** Reads a declarator's bound name, leaving destructuring patterns unrecorded rather than misreading their initializer. */
+function declaratorName(declarator: SgNode): string | null {
+  const name = declarator.field("name");
+  return name?.kind() === "identifier" ? name.text() : null;
+}
+
 /** Records a TypeScript exported symbol on file metrics. */
 function addExportedName(metrics: FileMetrics, name: string): void {
   if (name && !metrics.exportedNames.includes(name)) {
@@ -208,9 +230,9 @@ function collectTypescriptExportNames(
       for (const declarator of child
         .children()
         .filter((candidate) => candidate.kind() === "variable_declarator")) {
-        const name = directChild(declarator, "identifier");
+        const name = declaratorName(declarator);
         if (name !== null) {
-          addExportedName(metrics, name.text());
+          addExportedName(metrics, name);
         }
       }
     }
@@ -245,14 +267,30 @@ function scanTypescriptWithAstGrep({
     return;
   }
 
+  // Native matches arrive in source preorder, so a scope stack replaces one ancestor walk per call.
+  const scopes: FunctionScope[] = [];
   for (const node of root.findAll(typescriptScanRule(filePath))) {
+    const range = node.range();
+    while (scopes.length && range.start.index >= scopes.at(-1)!.endIndex) scopes.pop();
     const kind = node.kind();
+    if (FUNCTION_SCOPE_KINDS.has(String(kind))) {
+      scopes.push({ endIndex: range.end.index, caller: functionScopeCaller(node) });
+    }
     if (kind === "import_statement") {
       addTypescriptImport(metrics, stringValue(directChild(node, "string")));
     } else if (kind === "call_expression") {
-      addTypescriptCall(metrics, node);
-      const callee = directChild(node, "identifier");
-      if (callee !== null && callee.text() === "require") {
+      const target = node.field("function");
+      const caller = scopes.at(-1)?.caller;
+      const callee =
+        target?.kind() === "identifier"
+          ? target.text()
+          : target?.kind() === "member_expression"
+            ? target.field("property")?.text()
+            : null;
+      if (caller && callee) {
+        metrics.callSites.push({ caller, callee, lineNumber: range.start.line + 1 });
+      }
+      if (target?.kind() === "identifier" && callee === "require") {
         addTypescriptImport(metrics, stringValue(descendant(node, "string")), "require");
       }
     } else if (kind === "export_statement") {
@@ -260,23 +298,10 @@ function scanTypescriptWithAstGrep({
     } else if (kind === "class_declaration" || kind === "abstract_class_declaration") {
       const name = directChild(node, "type_identifier", "identifier");
       if (name !== null) {
-        const methods = directChild(node, "class_body")?.children() ?? [];
         metrics.classSpans.push({
           name: name.text(),
           span: spanFor(node),
           startLine: startLineFor(node),
-          methods: methods
-            .filter((method) =>
-              ["method_definition", "abstract_method_signature"].includes(String(method.kind())),
-            )
-            .flatMap((method) => {
-              const methodName = directChild(
-                method,
-                "property_identifier",
-                "private_property_identifier",
-              );
-              return methodName === null ? [] : [methodName.text()];
-            }),
         });
         metrics.defines += 1;
         addSample(metrics.samples, name.text());
@@ -305,16 +330,15 @@ function scanTypescriptWithAstGrep({
         addTypescriptFunction(metrics, relPath, name.text(), node);
       }
     } else if (kind === "variable_declarator") {
-      const name = directChild(node, "identifier");
+      const name = declaratorName(node);
       if (name !== null) {
-        metrics.variableNames.push(name.text());
-        addVariableSignal(metrics, relPath, name.text(), {
-          startLine: startLineFor(node),
+        metrics.variableNames.push(name);
+        addVariableSignal(metrics, relPath, name, {
+          startLine: range.start.line + 1,
           moduleLevel: isTypescriptModuleLevelVariable(node),
         });
-        const initializer = directChild(node, ...FUNCTION_EXPRESSION_KINDS);
-        if (initializer !== null) {
-          addTypescriptFunction(metrics, relPath, name.text(), node);
+        if (FUNCTION_EXPRESSION_KINDS.includes(String(node.field("value")?.kind()))) {
+          addTypescriptFunction(metrics, relPath, name, node);
         }
       }
     } else if (kind === "jsx_element") {
@@ -326,7 +350,7 @@ function scanTypescriptWithAstGrep({
 /** Selects relevant syntax nodes in native code instead of materializing the whole tree in JS. */
 function typescriptScanRule(filePath: string): NapiConfig {
   const suffix = path.extname(filePath);
-  const kinds = [...TYPESCRIPT_SCAN_KINDS];
+  const kinds = [...TYPESCRIPT_SCAN_KINDS, ...FUNCTION_EXPRESSION_KINDS];
   if (["typescript", "tsx"].includes(TYPESCRIPT_LANG_BY_SUFFIX[suffix] ?? "")) {
     kinds.push("abstract_class_declaration", "public_field_definition");
   } else {
@@ -394,33 +418,14 @@ export function scanTypescriptFile(
   return metrics;
 }
 
-/** Attributes real call expressions to their nearest named function or method, excluding comments and string examples. */
-function addTypescriptCall(metrics: FileMetrics, node: SgNode): void {
-  const owner = node
-    .ancestors()
-    .find((ancestor) =>
-      [
-        "function_declaration",
-        "generator_function_declaration",
-        "method_definition",
-        ...FUNCTION_EXPRESSION_KINDS,
-      ].includes(String(ancestor.kind())),
-    );
-  if (owner === undefined) return;
-  const parent = owner.parent();
-  const binding = ["variable_declarator", "public_field_definition", "field_definition"].includes(
-    String(parent?.kind()),
-  )
-    ? parent
-    : owner;
-  const caller = (binding?.field("name") ?? binding?.field("property"))?.text();
-  const target = node.field("function");
-  const callee =
-    target?.kind() === "identifier"
-      ? target.text()
-      : target?.kind() === "member_expression"
-        ? target.field("property")?.text()
-        : null;
-  if (caller && callee)
-    metrics.callSites.push({ caller, callee, lineNumber: node.range().start.line + 1 });
+/**
+ * Names the function scope that owns real call expressions, excluding comments and string examples.
+ *
+ * Function expressions take the name of the variable or class field they initialize; an anonymous innermost scope owns its calls without a caller name, so those calls are not attributed to an outer function.
+ */
+function functionScopeCaller(node: SgNode): string | null {
+  const parent = node.parent();
+  const binding =
+    parent !== null && CALLER_BINDING_KINDS.has(String(parent.kind())) ? parent : node;
+  return (binding.field("name") ?? binding.field("property"))?.text() ?? null;
 }

@@ -22,7 +22,12 @@ import {
 } from "../search/index.js";
 import { currentTreeGraph } from "../source/graph/index.js";
 import { discoverFiles } from "../source/scanner/index.js";
-import { addProjectRootArgument, parseIntegerOption } from "./options.js";
+import {
+  addProjectRootArgument,
+  limitOption,
+  parseIntegerOption,
+  type ProjectRootOptions,
+} from "./options.js";
 import {
   addSearchCallsParser,
   addSearchMatchParser,
@@ -46,15 +51,11 @@ type SearchOptions = {
   includeTests?: boolean;
 };
 
-type RootOptions = {
-  projectRoot?: string;
-};
-
 type CurrentTreeSourceSearch = {
   fallback: SourceFallbackSearch | undefined;
   matches: SourceMatch[];
   preferFallback: boolean;
-  textOnly: boolean;
+  largeRepo: boolean;
 };
 
 const EXACT_SOURCE_MATCH_LIMIT = 3;
@@ -88,10 +89,11 @@ export function addSearchParser(program: Command): void {
     .option("--offset <count>", "Page --graph results from an offset.", parseIntegerOption)
     .option("--include-tests", "Include likely test rows in search output.")
     .action(async (searchText: string[], options: SearchOptions) => {
-      const exitCode = await commandSearch(searchText, options, program.opts<RootOptions>());
-      if (exitCode !== 0) {
-        process.exitCode = exitCode;
-      }
+      process.exitCode = await commandSearch(
+        searchText,
+        options,
+        program.opts<ProjectRootOptions>(),
+      );
     });
   addProjectRootArgument(search);
   addSearchMatchParser(search.command("match"));
@@ -103,7 +105,7 @@ export function addSearchParser(program: Command): void {
 export async function commandSearch(
   searchArgs: string[],
   options: SearchOptions,
-  rootOptions: RootOptions = {},
+  rootOptions: ProjectRootOptions = {},
 ): Promise<number> {
   if (searchArgs.length === 0) {
     console.log("Search requires text or a search subcommand: match, calls, or rule.");
@@ -118,14 +120,14 @@ export async function commandSearch(
     return 2;
   }
   const searchText = searchArgs.join(" ");
-  const limit = searchLimit(options.limit);
+  const limit = limitOption(options.limit, DEFAULT_SEARCH_LIMIT);
   const root = resolveProjectRoot(options.projectRoot ?? rootOptions.projectRoot);
-  const outputOptions = { includeTests: Boolean(options.includeTests) };
+  const includeTests = Boolean(options.includeTests);
   console.log(`Search: ${searchText}`);
   let fallbackPreflight: SourceFallbackSearch | undefined;
   if (options.semantic) {
     const directDefinitions = definitionMatches(root, searchText, {
-      includeTests: Boolean(options.includeTests),
+      includeTests,
       limit,
     });
     if (directDefinitions.length > 0) {
@@ -142,7 +144,7 @@ export async function commandSearch(
       return 0;
     }
     const directDefinitions = definitionMatches(root, searchText, {
-      includeTests: Boolean(options.includeTests),
+      includeTests,
       limit,
     });
     if (directDefinitions.length > 0) {
@@ -150,7 +152,7 @@ export async function commandSearch(
       return 0;
     }
     fallbackPreflight = sourceFallbackMatches(root, searchText, {
-      includeTests: Boolean(options.includeTests),
+      includeTests,
       limit,
     });
     if (fallbackPreflight.fullCoverage) {
@@ -162,9 +164,8 @@ export async function commandSearch(
       !fallbackPreflight.hasPathSupplementedCoverage
     ) {
       const exactTextMatches = sourceMatches(root, searchText, {
-        includeTests: Boolean(options.includeTests),
+        includeTests,
         limit: Math.min(limit, EXACT_SOURCE_MATCH_LIMIT),
-        textOnly: true,
       }).filter(isImplementationSourceMatch);
       if (exactTextMatches.length > 0) {
         printSourceMatches(exactTextMatches);
@@ -174,7 +175,7 @@ export async function commandSearch(
   }
   if (
     options.semantic &&
-    printCodebaseMemorySemanticSearch(root, searchText, limit, outputOptions)
+    printCodebaseMemorySemanticSearch(root, searchText, limit, { includeTests })
   ) {
     return 0;
   }
@@ -194,10 +195,16 @@ export async function commandSearch(
     );
     return 0;
   }
-  if (!options.semantic && printCodebaseMemorySearch(root, searchText, limit, outputOptions)) {
+  if (!options.semantic && printCodebaseMemorySearch(root, searchText, limit, { includeTests })) {
     return 0;
   }
-  const currentTree = currentTreeSourceSearch(root, searchText, limit, options, fallbackPreflight);
+  const currentTree = currentTreeSourceSearch(
+    root,
+    searchText,
+    limit,
+    includeTests,
+    fallbackPreflight,
+  );
   if (options.semantic) {
     printCurrentTreeSourceSearch(currentTree);
     console.log("\nSemantic graph matches:");
@@ -215,12 +222,11 @@ function currentTreeSourceSearch(
   root: string,
   searchText: string,
   limit: number,
-  options: SearchOptions,
+  includeTests: boolean,
   fallbackPreflight: SourceFallbackSearch | undefined,
 ): CurrentTreeSourceSearch {
   const filePaths = discoverFiles(root);
-  const textOnly = filePaths.length > DETAILED_ANALYSIS_FILE_LIMIT;
-  const includeTests = Boolean(options.includeTests);
+  const largeRepo = filePaths.length > DETAILED_ANALYSIS_FILE_LIMIT;
   const conceptPaths = conceptPathMatches(root, searchText, {
     filePaths,
     includeTests,
@@ -229,7 +235,6 @@ function currentTreeSourceSearch(
   const textMatches = sourceMatches(root, searchText, {
     includeTests,
     limit: limit - conceptPaths.length,
-    textOnly,
   });
   const matches = [...conceptPaths, ...textMatches];
   const directUseful = matches.some(
@@ -251,14 +256,14 @@ function currentTreeSourceSearch(
     fallback,
     matches,
     preferFallback: fallbackUseful || matches.length === 0,
-    textOnly,
+    largeRepo,
   };
 }
 
 /** Prints current-tree source or partial fallback results with large-repository status. */
 function printCurrentTreeSourceSearch(result: CurrentTreeSourceSearch): void {
   const notes = [];
-  if (result.textOnly) {
+  if (result.largeRepo) {
     notes.push(
       result.preferFallback && (result.fallback?.candidates.length ?? 0) > 0
         ? "Fallback: large repo; structural partial search skipped."
@@ -297,10 +302,7 @@ function hasGraphOnlyFilters(options: SearchOptions): boolean {
 }
 
 /** Prints source search matches in CLI text format. */
-export function printSourceMatches(
-  matches: SourceMatch[],
-  { note = "" }: { note?: string } = {},
-): void {
+function printSourceMatches(matches: SourceMatch[], { note = "" }: { note?: string } = {}): void {
   console.log("\nSource matches:");
   if (note) {
     console.log(`  ${note}`);
@@ -363,13 +365,4 @@ function graphSearchOptions(options: SearchOptions): CodebaseMemoryGraphSearchOp
       : {}),
     ...(options.offset !== undefined ? { offset: options.offset } : {}),
   };
-}
-
-/** Parses the search result limit option. */
-function searchLimit(value: string | number | undefined): number {
-  if (value === undefined) {
-    return DEFAULT_SEARCH_LIMIT;
-  }
-  const parsed = typeof value === "number" ? value : Number.parseInt(String(value), 10);
-  return Number.isNaN(parsed) ? DEFAULT_SEARCH_LIMIT : parsed;
 }

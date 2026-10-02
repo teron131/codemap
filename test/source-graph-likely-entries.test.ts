@@ -191,7 +191,6 @@ function node(filePath: string): GraphNode {
     filePath,
     summary: "",
     tags,
-    complexity: "low",
   };
 }
 
@@ -211,7 +210,6 @@ function pythonNode(filePath: string): GraphNode {
     filePath,
     summary: "",
     tags,
-    complexity: "low",
   };
 }
 

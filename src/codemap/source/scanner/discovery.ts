@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 
+import { isFile } from "../../common.js";
 import {
   IGNORED_DIR_NAMES,
   IGNORED_FILE_SUFFIXES,
@@ -39,7 +40,7 @@ export function discoverFiles(targetPath: string): string[] {
 }
 
 /** Walks scan-eligible files under a target path. */
-export function walkFiles(targetPath: string): string[] {
+function walkFiles(targetPath: string): string[] {
   const ignoreRules = loadGitignoreRules(targetPath);
   const files: string[] = [];
 
@@ -89,7 +90,7 @@ export function walkFiles(targetPath: string): string[] {
 }
 
 /** Checks whether file discovery should enter a directory. */
-export function shouldScanDir(name: string, { root = false }: { root?: boolean } = {}): boolean {
+function shouldScanDir(name: string, { root = false }: { root?: boolean } = {}): boolean {
   if (IGNORED_DIR_NAMES.has(name) || (root && ROOT_IGNORED_DIR_NAMES.has(name))) {
     return false;
   }
@@ -97,7 +98,7 @@ export function shouldScanDir(name: string, { root = false }: { root?: boolean }
 }
 
 /** Checks whether file discovery should include a file. */
-export function shouldScanFile(filePath: string): boolean {
+function shouldScanFile(filePath: string): boolean {
   const parsed = path.parse(filePath);
   if (SCAN_BASENAMES.has(parsed.base)) {
     return true;
@@ -121,7 +122,7 @@ export function relativePath(filePath: string, { displayRoot }: { displayRoot: s
 }
 
 /** Discovers files using ripgrep for search target expansion. */
-export function discoverRipgrepFiles(targetPath: string): string[] | null {
+function discoverRipgrepFiles(targetPath: string): string[] | null {
   const result = spawnSync("rg", ["--files", "-0"], {
     cwd: targetPath,
     encoding: "buffer",
@@ -149,7 +150,7 @@ export function discoverRipgrepFiles(targetPath: string): string[] | null {
 }
 
 /** Loads ignore rules from the project gitignore file. */
-export function loadGitignoreRules(targetPath: string): IgnoreRule[] {
+function loadGitignoreRules(targetPath: string): IgnoreRule[] {
   const gitignorePath = path.join(targetPath, ".gitignore");
   if (!isFile(gitignorePath)) {
     return [];
@@ -179,7 +180,7 @@ export function loadGitignoreRules(targetPath: string): IgnoreRule[] {
 }
 
 /** Compiles one gitignore line into an internal ignore rule. */
-export function compileGitignoreRule(
+function compileGitignoreRule(
   pattern: string,
   { include }: { include: boolean },
 ): IgnoreRule | null {
@@ -213,12 +214,12 @@ export function compileGitignoreRule(
 }
 
 /** Compiles a glob pattern into a regular expression. */
-export function compileGlob(pattern: string): RegExp {
+function compileGlob(pattern: string): RegExp {
   return new RegExp(`^${globToRegExpSource(pattern)}$`);
 }
 
 /** Checks whether a relative path matches any ignore rule. */
-export function gitignoreMatches(
+function gitignoreMatches(
   filePath: string,
   root: string,
   rules: IgnoreRule[],
@@ -239,7 +240,7 @@ export function gitignoreMatches(
 }
 
 /** Checks whether one ignore rule matches a path. */
-export function gitignoreRuleMatches(
+function gitignoreRuleMatches(
   rule: IgnoreRule,
   relPath: string,
   relName: string,
@@ -272,15 +273,6 @@ function hasAnyFile(targetPath: string): boolean {
     }
   }
   return false;
-}
-
-/** Checks whether a path exists and is a file. */
-function isFile(filePath: string): boolean {
-  try {
-    return statSync(filePath).isFile();
-  } catch {
-    return false;
-  }
 }
 
 /** Checks the file or dir condition used by source scanner discovery. */

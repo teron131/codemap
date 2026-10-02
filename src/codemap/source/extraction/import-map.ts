@@ -1,7 +1,7 @@
 /** Builds the project-wide import map across Python and TypeScript-family files. */
 import path from "node:path";
 
-import { PY_SUFFIXES, TYPESCRIPT_SUFFIXES } from "../scanner/constants.js";
+import { PYTHON_SUFFIXES, TYPESCRIPT_SUFFIXES } from "../scanner/constants.js";
 import type { FileMetrics } from "../scanner/metrics.js";
 import { scanFile } from "../scanner/scan-file.js";
 import { pythonImportTargets, pythonModuleIndex } from "./python-imports.js";
@@ -15,10 +15,6 @@ import { typescriptImportTargets, TypeScriptResolver } from "./typescript-import
  */
 export type ImportMapPayload = {
   importMap: Record<string, string[]>;
-  stats: {
-    filesScanned: number;
-    edges: number;
-  };
   fileMetrics: Record<string, FileMetrics>;
 };
 
@@ -33,22 +29,15 @@ export function runImportMap(root: string, files: ScanEntry[]): ImportMapPayload
     const relPath = String(scanEntry.path);
     const filePath = path.join(root, relPath);
     const suffix = path.extname(filePath);
-    if (PY_SUFFIXES.has(suffix) || TYPESCRIPT_SUFFIXES.has(suffix)) {
+    if (PYTHON_SUFFIXES.has(suffix) || TYPESCRIPT_SUFFIXES.has(suffix)) {
       const metrics = scanFile(filePath, { displayRoot: root });
       fileMetricsByPath[relPath] = metrics;
-      importMap[relPath] = PY_SUFFIXES.has(suffix)
+      importMap[relPath] = PYTHON_SUFFIXES.has(suffix)
         ? pythonImportTargets(metrics, filePaths, pythonModules)
         : typescriptImportTargets(filePath, metrics, typescriptResolver);
     } else {
       importMap[relPath] = [];
     }
   }
-  return {
-    importMap,
-    stats: {
-      filesScanned: files.length,
-      edges: Object.values(importMap).reduce((total, targets) => total + targets.length, 0),
-    },
-    fileMetrics: fileMetricsByPath,
-  };
+  return { importMap, fileMetrics: fileMetricsByPath };
 }

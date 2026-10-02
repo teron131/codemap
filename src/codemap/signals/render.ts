@@ -1,13 +1,13 @@
 /** Renders signal payload sections as readable text output. */
 import { arrayValue, numberValue, recordValue } from "../json-utils.js";
 import { languageRows, rankDefinitionRowsByMentions, rankFunctionRowsByLength } from "./payload.js";
-import type { SignalRow } from "./schema.js";
+import type { SignalRow, SignalSection } from "./schema.js";
 
 type Row = SignalRow;
 
 /** Renders selected signal payload sections as text. */
-export function renderSignalText(payload: Record<string, unknown>, section: string): string {
-  const lines = [signalTitle(section), ""];
+export function renderSignalText(payload: Record<string, unknown>, section: SignalSection): string {
+  const lines = [SIGNAL_TITLES[section], ""];
   if (payload.freshness === "partial") {
     lines.push("backend: partial index", "");
   } else if (payload.freshness === "degraded") {
@@ -74,24 +74,18 @@ export function renderSignalText(payload: Record<string, unknown>, section: stri
   return `${lines.join("\n")}\n`;
 }
 
-/** Formats a signal section title for text output. */
-function signalTitle(section: string): string {
-  if (section === "all") {
-    return "# Ranked Source Metrics";
-  }
-  const titles: Record<string, string> = {
-    top: "# Ranked Source Metrics",
-    relationships: "# Relationship Signals",
-    files: "# File Profile Signals",
-    lengths: "# Function Lengths",
-    functions: "# Function Rankings",
-    variables: "# Variable Rankings",
-    usage: "# Usage Signals",
-    "docstring-signals": "# Docstring Signals",
-    docstrings: "# Docstrings",
-  };
-  return titles[section] ?? `# ${titleCaseWords(section.replaceAll("-", " "))} Signals`;
-}
+const SIGNAL_TITLES: Record<SignalSection, string> = {
+  all: "# Ranked Source Metrics",
+  top: "# Ranked Source Metrics",
+  relationships: "# Relationship Signals",
+  files: "# File Profile Signals",
+  lengths: "# Function Lengths",
+  functions: "# Function Rankings",
+  variables: "# Variable Rankings",
+  usage: "# Usage Signals",
+  "docstring-signals": "# Docstring Signals",
+  docstrings: "# Docstrings",
+};
 
 /** Appends top ranked metric sections to text output. */
 function appendTop(lines: string[], top: Record<string, unknown>): void {
@@ -218,7 +212,7 @@ function appendRelationships(lines: string[], relationships: Record<string, unkn
     ["typescript_reexport_edges", "TypeScript re-export edges"],
     ["python_inheritance_edges", "Python inheritance edges"],
   ] as const) {
-    lines.push(`- ${label}: ${valueOrDefault(counts[key], 0)}`);
+    lines.push(`- ${label}: ${counts[key] ?? 0}`);
   }
   appendFileCountRows(
     lines,
@@ -374,7 +368,7 @@ function binsText(bins: Record<string, unknown>): string {
 function appendFiles(lines: string[], rows: Row[]): void {
   lines.push("## File Profiles");
   for (const item of rows) {
-    lines.push(`- ${item.file}: ${denseFileCounters(item, { includeProfileDetails: true })}`);
+    lines.push(`- ${item.file}: ${denseFileCounters(item)}`);
   }
   lines.push("");
 }
@@ -384,11 +378,9 @@ function appendDocstringSignals(lines: string[], payload: Record<string, unknown
   lines.push("## Docstring Coverage");
   const fileDocstrings = recordValue(payload.file_docstrings);
   lines.push(
-    `- files: ${valueOrDefault(payload.files_considered, 0)} considered (${valueOrDefault(payload.typescript_files_considered, 0)} TypeScript, ${valueOrDefault(payload.python_files_considered, 0)} Python)`,
+    `- files: ${payload.files_considered ?? 0} considered (${payload.typescript_files_considered ?? 0} TypeScript, ${payload.python_files_considered ?? 0} Python)`,
   );
-  lines.push(
-    `- file docstrings: ${valueOrDefault(fileDocstrings.present, 0)}/${valueOrDefault(fileDocstrings.total, 0)}`,
-  );
+  lines.push(`- file docstrings: ${fileDocstrings.present ?? 0}/${fileDocstrings.total ?? 0}`);
   appendDocstringPreviewRows(
     lines,
     "File Docstring Previews",
@@ -407,10 +399,10 @@ function appendDocstringSignals(lines: string[], payload: Record<string, unknown
 function appendDocstrings(lines: string[], payload: Record<string, unknown>): void {
   lines.push("## Docstring Files");
   lines.push(
-    `- files: ${valueOrDefault(payload.files, 0)} (${valueOrDefault(payload.typescript_files, 0)} TypeScript, ${valueOrDefault(payload.python_files, 0)} Python)`,
+    `- files: ${payload.files ?? 0} (${payload.typescript_files ?? 0} TypeScript, ${payload.python_files ?? 0} Python)`,
   );
   lines.push(
-    `- definitions: ${valueOrDefault(payload.functions, 0)} functions, ${valueOrDefault(payload.class_methods, 0)} methods, ${valueOrDefault(payload.classes, 0)} classes`,
+    `- definitions: ${payload.functions ?? 0} functions, ${payload.class_methods ?? 0} methods, ${payload.classes ?? 0} classes`,
   );
   const reports = arrayValue<Row>(payload.file_reports);
   if (reports.length === 0) {
@@ -511,22 +503,13 @@ function previewText(value: unknown): string {
 }
 
 /** Formats the dense-file counters shared by signals and inspect output. */
-export function denseFileCounters(
-  item: Row,
-  { includeProfileDetails = false }: { includeProfileDetails?: boolean } = {},
-): string {
-  const counters = [
-    includeProfileDetails
-      ? `${denseFileScoreText(item)}${sourceLineDetail(item)}`
-      : denseFileScoreText(item),
-  ];
+export function denseFileCounters(item: Row): string {
+  const counters = [`${denseFileScoreText(item)}${sourceLineDetail(item)}`];
   appendKnownCounter(counters, item, "defines", "defines");
   appendKnownCounter(counters, item, "imports_local", "local_imports");
   appendKnownCounter(counters, item, "exports", "exports");
   appendKnownCounter(counters, item, "reexports_local", "reexports");
-  if (includeProfileDetails) {
-    appendKnownCounter(counters, item, "decorators", "decorators");
-  }
+  appendKnownCounter(counters, item, "decorators", "decorators");
   return counters.join(", ");
 }
 
@@ -565,17 +548,4 @@ function mentionsText(value: unknown): string {
   const count = Number(value || 0);
   const label = count === 1 ? "mention" : "mentions";
   return `${count} ${label}`;
-}
-
-/** Formats missing values with a fallback display string. */
-function valueOrDefault(value: unknown, fallback: unknown): unknown {
-  return value ?? fallback;
-}
-
-/** Title-cases every word while normalizing the remaining letters. */
-function titleCaseWords(value: string): string {
-  return value.replace(
-    /\w\S*/g,
-    (word) => `${word[0]?.toUpperCase() ?? ""}${word.slice(1).toLowerCase()}`,
-  );
 }

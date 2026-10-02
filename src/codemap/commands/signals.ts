@@ -2,17 +2,18 @@
 import type { Command } from "commander";
 
 import { resolveProjectRoot } from "../common.js";
-import { buildSignalView, renderSignalText, SIGNAL_SECTION_CHOICES } from "../signals/index.js";
-import { addProjectRootArgument } from "./options.js";
+import {
+  buildSignalView,
+  isSignalSection,
+  renderSignalText,
+  SIGNAL_SECTION_CHOICES,
+} from "../signals/index.js";
+import { addProjectRootArgument, type ProjectRootOptions } from "./options.js";
 
 type SignalOptions = {
   projectRoot?: string;
   includeTests?: boolean;
   json?: boolean;
-};
-
-type RootOptions = {
-  projectRoot?: string;
 };
 
 /** Registers ranked source-metric commands and output modes. */
@@ -24,10 +25,7 @@ export function addSignalsParser(program: Command): void {
     .option("--include-tests", "Include likely test files in file-specific signal rows.")
     .option("--json", "Print signal tables as JSON for jq, scripts, and agent pipelines.")
     .action((section: string, options: SignalOptions) => {
-      const exitCode = commandSignals(section, options, program.opts<RootOptions>());
-      if (exitCode !== 0) {
-        process.exitCode = exitCode;
-      }
+      process.exitCode = commandSignals(section, options, program.opts<ProjectRootOptions>());
     });
   addProjectRootArgument(signals);
 }
@@ -36,9 +34,9 @@ export function addSignalsParser(program: Command): void {
 export function commandSignals(
   section: string,
   options: SignalOptions,
-  rootOptions: RootOptions = {},
+  rootOptions: ProjectRootOptions = {},
 ): number {
-  if (!SIGNAL_SECTION_CHOICES.includes(section as never)) {
+  if (!isSignalSection(section)) {
     console.error(
       `error: argument section: invalid choice: '${section}' (choose from ${SIGNAL_SECTION_CHOICES.map((choice) => `'${choice}'`).join(", ")})`,
     );

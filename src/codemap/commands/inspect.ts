@@ -8,17 +8,19 @@ import {
   renderCodebaseMemoryInspect,
   renderCurrentTreeInspection,
 } from "../inspect/index.js";
-import { addProjectRootArgument, DEFAULT_ROW_LIMIT, parseIntegerOption } from "./options.js";
+import {
+  addProjectRootArgument,
+  DEFAULT_ROW_LIMIT,
+  limitOption,
+  parseIntegerOption,
+  type ProjectRootOptions,
+} from "./options.js";
 
 type InspectOptions = {
   projectRoot?: string;
   limit?: string | number;
   backend?: boolean;
   local?: boolean;
-};
-
-type RootOptions = {
-  projectRoot?: string;
 };
 
 /** Registers the inspect command and its output options. */
@@ -31,10 +33,7 @@ export function addInspectParser(program: Command): void {
     .option("--backend", "Use Codebase Memory backend inspection only.")
     .option("--local", "Use current-tree local inspection only.")
     .action((target: string, options: InspectOptions) => {
-      const exitCode = commandInspect(target, options, program.opts<RootOptions>());
-      if (exitCode !== 0) {
-        process.exitCode = exitCode;
-      }
+      process.exitCode = commandInspect(target, options, program.opts<ProjectRootOptions>());
     });
   addProjectRootArgument(inspect);
 }
@@ -43,15 +42,16 @@ export function addInspectParser(program: Command): void {
 export function commandInspect(
   target: string,
   options: InspectOptions,
-  rootOptions: RootOptions = {},
+  rootOptions: ProjectRootOptions = {},
 ): number {
   const root = resolveProjectRoot(options.projectRoot ?? rootOptions.projectRoot);
-  const limit = inspectLimit(options.limit);
+  const limit = limitOption(options.limit, DEFAULT_ROW_LIMIT);
   if (options.backend && options.local) {
     console.log("Choose only one inspect lane: --backend or --local.");
     return 2;
   }
-  if (!options.backend && inspectPathTargetKind(root, target) !== null) {
+  const pathTarget = !options.backend && inspectPathTargetKind(root, target) !== null;
+  if (pathTarget) {
     const inspection = renderCurrentTreeInspection(root, target, { limit });
     if (inspection !== null) {
       console.log(inspection);
@@ -70,7 +70,7 @@ export function commandInspect(
     console.log("Backend: Codebase Memory");
     return 1;
   }
-  const inspection = renderCurrentTreeInspection(root, target, { limit });
+  const inspection = pathTarget ? null : renderCurrentTreeInspection(root, target, { limit });
   if (inspection === null) {
     const quotedTarget = `'${target.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
     console.log(`No match: ${target}`);
@@ -79,13 +79,4 @@ export function commandInspect(
   }
   console.log(inspection);
   return 0;
-}
-
-/** Parses the inspect output limit option. */
-function inspectLimit(value: string | number | undefined): number {
-  if (value === undefined) {
-    return DEFAULT_ROW_LIMIT;
-  }
-  const parsed = typeof value === "number" ? value : Number.parseInt(String(value), 10);
-  return Number.isNaN(parsed) ? DEFAULT_ROW_LIMIT : parsed;
 }

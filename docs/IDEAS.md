@@ -35,6 +35,7 @@ The next performance pass preserved the command surface while separating backend
 - Resolve structural-search targets once per operation and evaluate related identifier rules against the same per-file parse, preserving each rule's candidate bound and the existing language order.
 - Select signal collection work before computing sections. `all` shares detailed analysis and documentation coverage; full `docstrings` remains a separate request that avoids source-metric scanning.
 - Keep current-tree graph assembly in `source/graph/canonical.ts`, which projects the supplied scan and import evidence. Reuse parsed declarations, imports, and calls within an operation without retaining source state across commands.
+- Make every extracted function and class a current-tree graph node so exact symbol inspection reaches short private definitions. Derive call, scope, and documentation ownership from ast-grep's preorder match stream with open-range stacks rather than per-node ancestor walks.
 - Reuse one documentation report per file within a summary so hotspot, cluster, and public-surface descriptions share the same parse. Keep reports in the summary's source context and rebuild them on the next command.
 - Tie ownership changes to clearer contracts or less repeated work. Keep cohesive workflows together when extra helpers would add navigation without an independent responsibility.
 - Let feature modules own provider arguments, payload projection, filtering, ranking, fallback, final composition, and compact output contracts.

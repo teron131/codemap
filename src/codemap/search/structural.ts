@@ -5,7 +5,6 @@ import path from "node:path";
 import {
   loadRule,
   matchConfigFromRule,
-  resolveProjectFile,
   type SyntaxMatch,
   SyntaxSearch,
 } from "../ast-grep/index.js";
@@ -32,14 +31,13 @@ export function callMatches(
   return matches === null ? null : uniqueCallMatches(matches);
 }
 
-/** Runs ast-grep YAML rule search for target paths. */
-export function searchRuleMatches(
+/** Runs ast-grep YAML rule search for target paths with an already resolved rule file. */
+export async function searchRuleMatches(
   root: string,
-  ruleFile: string,
+  rulePath: string,
   paths: string[],
-): SyntaxMatch[] | null {
-  const rulePath = resolveProjectFile(root, ruleFile);
-  const rule = loadRule(rulePath);
+): Promise<SyntaxMatch[] | null> {
+  const rule = await loadRule(rulePath);
   return new SyntaxSearch(root, paths).matches(
     String(rule.language ?? ""),
     matchConfigFromRule(rule),

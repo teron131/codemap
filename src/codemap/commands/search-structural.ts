@@ -39,14 +39,11 @@ export function addSearchMatchParser(command: Command): void {
     .argument("[paths...]", "Project-relative target paths.")
     .option("--json")
     .action((paths: string[], options: Omit<SearchMatchOptions, "paths">) => {
-      const exitCode = commandSearchMatch({
+      process.exitCode = commandSearchMatch({
         ...options,
         paths,
         projectRoot: rootOption(options, command),
       });
-      if (exitCode !== 0) {
-        process.exitCode = exitCode;
-      }
     });
 }
 
@@ -64,15 +61,12 @@ export function addSearchCallsParser(command: Command): void {
     .option("--json")
     .action(
       (name: string, paths: string[], options: Omit<SearchCallsOptions, "name" | "paths">) => {
-        const exitCode = commandSearchCalls({
+        process.exitCode = commandSearchCalls({
           ...options,
           name,
           paths,
           projectRoot: rootOption(options, command),
         });
-        if (exitCode !== 0) {
-          process.exitCode = exitCode;
-        }
       },
     );
 }
@@ -84,20 +78,17 @@ export function addSearchRuleParser(command: Command): void {
     .requiredOption("--rule <rule>", "ast-grep YAML rule file.")
     .argument("[paths...]", "Project-relative target paths. Defaults to the project root.")
     .option("--json", "Print compact JSON output.")
-    .action((paths: string[], options: Omit<SearchRuleOptions, "paths">) => {
-      const exitCode = commandSearchRule({
+    .action(async (paths: string[], options: Omit<SearchRuleOptions, "paths">) => {
+      process.exitCode = await commandSearchRule({
         ...options,
         paths,
         projectRoot: rootOption(options, command),
       });
-      if (exitCode !== 0) {
-        process.exitCode = exitCode;
-      }
     });
 }
 
 /** Runs explicit ast-grep pattern search and prints matches. */
-export function commandSearchMatch(options: SearchMatchOptions): number {
+function commandSearchMatch(options: SearchMatchOptions): number {
   const root = resolveProjectRoot(options.projectRoot);
   const paths = resolveTargetPaths(root, options.paths ?? []);
   const search = new SyntaxSearch(root, paths);
@@ -132,7 +123,7 @@ export function commandSearchMatch(options: SearchMatchOptions): number {
 }
 
 /** Runs structural call-site search and prints matches. */
-export function commandSearchCalls(options: SearchCallsOptions): number {
+function commandSearchCalls(options: SearchCallsOptions): number {
   const limit = options.limit ?? DEFAULT_ROW_LIMIT;
   if (!Number.isInteger(limit) || limit < 1) {
     console.log("Call-site limit must be a positive integer.");
@@ -175,11 +166,11 @@ export function commandSearchCalls(options: SearchCallsOptions): number {
 }
 
 /** Runs read-only ast-grep YAML rule search and prints matches. */
-export function commandSearchRule(options: SearchRuleOptions): number {
+async function commandSearchRule(options: SearchRuleOptions): Promise<number> {
   const root = resolveProjectRoot(options.projectRoot);
   const paths = resolveTargetPaths(root, options.paths ?? []);
   const rulePath = resolveProjectFile(root, options.rule);
-  const matches = searchRuleMatches(root, rulePath, paths);
+  const matches = await searchRuleMatches(root, rulePath, paths);
   if (matches === null) {
     console.error("Unavailable: ast-grep cannot run this rule language.");
     return 127;

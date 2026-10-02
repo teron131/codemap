@@ -37,7 +37,7 @@ const activeOperations: ActiveCodebaseMemoryOperation[] = [];
 const failureReasons = new Map<string, string>();
 
 /** Returns whether the optional CodebaseMemory integration is enabled. */
-export function codebaseMemoryEnabled(): boolean {
+function codebaseMemoryEnabled(): boolean {
   const value = process.env.CODEMAP_CODEBASE_MEMORY;
   if (process.env.VITEST === "true" && value === undefined) {
     return false;

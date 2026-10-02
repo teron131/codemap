@@ -6,7 +6,7 @@ import { ROOT_IGNORED_DIR_NAMES } from "../source/scanner/constants.js";
 import {
   IGNORED_DIR_NAMES,
   isTestPath,
-  PY_SUFFIXES,
+  PYTHON_SUFFIXES,
   TYPESCRIPT_SUFFIXES,
 } from "../source/scanner/index.js";
 import { escapeRegExp } from "../text-utils.js";
@@ -15,7 +15,9 @@ import type { SourceMatch } from "./source.js";
 const SOURCE_MATCH_TEXT_LIMIT = 240;
 const SOURCE_SEARCH_BUFFER_LIMIT = 16 * 1024 * 1024;
 const DEFINITION_SOURCE_GLOBS = ["*.js", "*.jsx", "*.py", "*.ts", "*.tsx"];
-const SOURCE_CODE_GLOBS = [...PY_SUFFIXES, ...TYPESCRIPT_SUFFIXES].map((suffix) => `*${suffix}`);
+const SOURCE_CODE_GLOBS = [...PYTHON_SUFFIXES, ...TYPESCRIPT_SUFFIXES].map(
+  (suffix) => `*${suffix}`,
+);
 
 export type RipgrepScanStatus = "complete" | "failed" | "truncated";
 

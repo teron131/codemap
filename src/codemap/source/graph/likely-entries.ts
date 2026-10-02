@@ -5,7 +5,12 @@ import { compareText } from "../../text-utils.js";
 import { isGeneratedPath } from "../scanner/index.js";
 import type { GraphEdge, GraphNode } from "./schema.js";
 
-type Row = Record<string, unknown>;
+export type LikelyEntry = {
+  title: string;
+  role: string;
+  reason: string;
+  description: string;
+};
 
 type LikelyEntryRole = {
   label: string;
@@ -13,7 +18,7 @@ type LikelyEntryRole = {
 };
 
 /** Builds likely entrypoint rows from graph node centrality. */
-export function buildLikelyEntries(nodes: GraphNode[], edges: GraphEdge[]): Row[] {
+export function buildLikelyEntries(nodes: GraphNode[], edges: GraphEdge[]): LikelyEntry[] {
   const candidates = likelyEntryCandidates(nodes);
   const fanIn = countBy(
     edges.filter((edge) => edge.type === "imports"),
@@ -23,18 +28,13 @@ export function buildLikelyEntries(nodes: GraphNode[], edges: GraphEdge[]): Row[
     edges.filter((edge) => edge.type === "imports"),
     (edge) => edge.source,
   );
-  const scored = candidates.slice().sort((left, right) => {
-    const tuple = [
-      -likelyEntryScore(left, fanIn, fanOut) - -likelyEntryScore(right, fanIn, fanOut),
-      pathDepth(left.filePath) - pathDepth(right.filePath),
-    ];
-    for (const diff of tuple) {
-      if (diff !== 0) {
-        return diff;
-      }
-    }
-    return compareText(left.filePath, right.filePath);
-  });
+  const scores = new Map(candidates.map((node) => [node, likelyEntryScore(node, fanIn, fanOut)]));
+  const scored = candidates.toSorted(
+    (left, right) =>
+      (scores.get(right) ?? 0) - (scores.get(left) ?? 0) ||
+      pathDepth(left.filePath) - pathDepth(right.filePath) ||
+      compareText(left.filePath, right.filePath),
+  );
   return selectLikelyEntriesWithSurfaceCap(scored, 8).map((node) =>
     likelyEntryRow(node, {
       description: likelyEntryDescription(node, fanIn, fanOut),
@@ -44,22 +44,14 @@ export function buildLikelyEntries(nodes: GraphNode[], edges: GraphEdge[]): Row[
 }
 
 /** Builds path-ranked likely entrypoint rows when detailed graph edges were skipped. */
-export function buildPathRankedLikelyEntries(nodes: GraphNode[]): Row[] {
-  const scored = likelyEntryCandidates(nodes)
-    .slice()
-    .sort((left, right) => {
-      const tuple = [
-        pathRoleRank(left.filePath) - pathRoleRank(right.filePath),
-        entryCandidateRank(left) - entryCandidateRank(right),
-        pathDepth(left.filePath) - pathDepth(right.filePath),
-      ];
-      for (const diff of tuple) {
-        if (diff !== 0) {
-          return diff;
-        }
-      }
-      return compareText(left.filePath, right.filePath);
-    });
+export function buildPathRankedLikelyEntries(nodes: GraphNode[]): LikelyEntry[] {
+  const scored = likelyEntryCandidates(nodes).toSorted(
+    (left, right) =>
+      pathRoleRank(left.filePath) - pathRoleRank(right.filePath) ||
+      entryCandidateRank(left) - entryCandidateRank(right) ||
+      pathDepth(left.filePath) - pathDepth(right.filePath) ||
+      compareText(left.filePath, right.filePath),
+  );
   return scored.slice(0, 8).map((node) =>
     likelyEntryRow(node, {
       description: "Fallback entry candidate; detailed graph skipped.",
@@ -91,7 +83,7 @@ function likelyEntryCandidates(nodes: GraphNode[]): GraphNode[] {
 function likelyEntryRow(
   node: GraphNode,
   { description, relationshipCount }: { description: string; relationshipCount?: number },
-): Row {
+): LikelyEntry {
   const role = likelyEntryRole(node, relationshipCount);
   return {
     title: String(node.filePath || node.name || node.id),

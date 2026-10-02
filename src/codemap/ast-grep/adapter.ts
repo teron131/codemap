@@ -4,7 +4,6 @@ import path from "node:path";
 
 import python from "@ast-grep/lang-python";
 import { Lang, type NapiConfig, parse, registerDynamicLanguage, type SgNode } from "@ast-grep/napi";
-import { parse as parseYaml } from "yaml";
 
 import {
   languagesForFiles,
@@ -123,9 +122,10 @@ export class SyntaxSearch {
   }
 }
 
-/** Loads and parses an ast-grep YAML rule file. */
-export function loadRule(rulePath: string): Record<string, unknown> {
-  const data = parseYaml(readFileSync(rulePath, "utf8"));
+/** Loads and parses an ast-grep YAML rule file, loading the YAML parser only when a rule search needs it. */
+export async function loadRule(rulePath: string): Promise<Record<string, unknown>> {
+  const { parse: parseYaml } = await import("yaml");
+  const data: unknown = parseYaml(readFileSync(rulePath, "utf8"));
   if (data === null || typeof data !== "object" || Array.isArray(data)) {
     throw new Error(`Invalid ast-grep rule file: ${rulePath}`);
   }
@@ -152,7 +152,7 @@ export function matchConfigFromRule(rule: Record<string, unknown>): NapiConfig {
 }
 
 /** Builds context text around a syntax match range. */
-export function contextLines(sourceLines: string[], startLine: number, endLine: number): string {
+function contextLines(sourceLines: string[], startLine: number, endLine: number): string {
   if (sourceLines.length === 0) {
     return "";
   }

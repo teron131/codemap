@@ -1,7 +1,7 @@
 /** Dispatches one source file to the scanner for its language. */
 import path from "node:path";
 
-import { PY_SUFFIXES, TYPESCRIPT_SUFFIXES } from "./constants.js";
+import { PYTHON_SUFFIXES, TYPESCRIPT_SUFFIXES } from "./constants.js";
 import { relativePath } from "./discovery.js";
 import { createFileMetrics, type FileMetrics } from "./metrics.js";
 import { scanPythonFile } from "./python.js";
@@ -19,7 +19,7 @@ export function scanFile(
 ): FileMetrics {
   const relPath = relativePath(filePath, { displayRoot });
   const suffix = path.extname(filePath);
-  if (PY_SUFFIXES.has(suffix)) {
+  if (PYTHON_SUFFIXES.has(suffix)) {
     return scanPythonFile(filePath, { relPath, source });
   }
   if (TYPESCRIPT_SUFFIXES.has(suffix)) {

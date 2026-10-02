@@ -1,7 +1,7 @@
 /** Builds full signal exports from scanned files and selected sections. */
-import { existsSync, statSync } from "node:fs";
 import path from "node:path";
 
+import { isDirectory, isFile } from "../common.js";
 import {
   buildDocstringsData,
   buildDocstringSignals,
@@ -11,7 +11,7 @@ import {
   discoverFiles,
   type FileMetrics,
   type FunctionSpan,
-  PY_SUFFIXES,
+  PYTHON_SUFFIXES,
   relativePath,
   scanFile,
   TYPESCRIPT_SUFFIXES,
@@ -90,7 +90,7 @@ function functionSpans(scannedFiles: FileMetrics[], suffixes: Set<string>): Func
 function buildFunctionLengthsSection(scannedFiles: FileMetrics[]): Row {
   return {
     typescript: functionLengthSection(functionSpans(scannedFiles, TYPESCRIPT_SUFFIXES)),
-    python: functionLengthSection(functionSpans(scannedFiles, PY_SUFFIXES)),
+    python: functionLengthSection(functionSpans(scannedFiles, PYTHON_SUFFIXES)),
   };
 }
 
@@ -183,14 +183,4 @@ function sumLengths(
     | "pyBases",
 ): number {
   return scannedFiles.reduce((total, metrics) => total + metrics[key].length, 0);
-}
-
-/** Checks whether a path exists and is a file. */
-function isFile(filePath: string): boolean {
-  return existsSync(filePath) && statSync(filePath).isFile();
-}
-
-/** Checks whether a path exists and is a directory. */
-function isDirectory(filePath: string): boolean {
-  return existsSync(filePath) && statSync(filePath).isDirectory();
 }

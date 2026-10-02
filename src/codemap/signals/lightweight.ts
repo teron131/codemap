@@ -7,7 +7,7 @@ import {
   type FileMetrics,
   isGeneratedPath,
   isTestPath,
-  PY_SUFFIXES,
+  PYTHON_SUFFIXES,
   scanFile,
   TYPESCRIPT_SUFFIXES,
 } from "../source/scanner/index.js";
@@ -53,7 +53,7 @@ export function buildLightweightSignalPayload(
     buildLightweightSignalRow(entry, metricsByPath.get(entry.path)),
   );
   const scannedFiles = [...metricsByPath.values()];
-  const pythonFunctions = lightweightFunctionRows(scannedFiles, PY_SUFFIXES, "python");
+  const pythonFunctions = lightweightFunctionRows(scannedFiles, PYTHON_SUFFIXES, "python");
   const typescriptFunctions = lightweightFunctionRows(
     scannedFiles,
     TYPESCRIPT_SUFFIXES,
@@ -107,7 +107,7 @@ export function buildLightweightSignalPayload(
     lengths: {
       python: functionLengthSection(
         scannedFiles
-          .filter((metrics) => PY_SUFFIXES.has(metrics.suffix))
+          .filter((metrics) => PYTHON_SUFFIXES.has(metrics.suffix))
           .flatMap((metrics) => metrics.functionSpans),
       ),
       typescript: functionLengthSection(

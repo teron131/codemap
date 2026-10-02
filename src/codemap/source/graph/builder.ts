@@ -1,13 +1,10 @@
 /** Builds graph nodes and edges from scan, import, and structure evidence. */
 import path from "node:path";
 
-import { arrayValue, numberField } from "../../json-utils.js";
 import { compareText } from "../../text-utils.js";
+import type { StructureEntry } from "../extraction/index.js";
 import { ENTRYPOINT_BASENAMES } from "../scanner/index.js";
 import type { GraphEdge, GraphNode } from "./schema.js";
-
-export const SIGNIFICANT_FUNCTION_LINES = 10;
-export const SIGNIFICANT_CLASS_LINES = 20;
 
 export type ScanLikeEntry = {
   path: string;
@@ -16,14 +13,7 @@ export type ScanLikeEntry = {
   sizeLines?: number;
 };
 
-export type StructureEntry = {
-  path: string;
-  functions?: Array<Record<string, unknown>>;
-  classes?: Array<Record<string, unknown>>;
-  exports?: Array<Record<string, unknown>>;
-  callGraph?: Array<Record<string, unknown>>;
-  [key: string]: unknown;
-};
+type DefinitionSpan = { name: string; startLine: number; endLine: number };
 
 /** Classifies a scanned file with language, category, and role tags. */
 export function classifyTags(scanEntry: ScanLikeEntry): string[] {
@@ -62,7 +52,7 @@ export function classifyTags(scanEntry: ScanLikeEntry): string[] {
 }
 
 /** Classifies a file graph node type from path and category. */
-export function nodeTypeForFile(scanEntry: ScanLikeEntry): string {
+function nodeTypeForFile(scanEntry: ScanLikeEntry): string {
   const category = String(scanEntry.fileCategory ?? "code");
   const language = String(scanEntry.language ?? "unknown");
   const filePath = String(scanEntry.path).toLowerCase();
@@ -93,9 +83,9 @@ export function nodeTypeForFile(scanEntry: ScanLikeEntry): string {
 }
 
 /** Builds the short file summary used on graph file nodes. */
-export function fileSummary(
+function fileSummary(
   scanEntry: ScanLikeEntry,
-  structure: StructureEntry | null | undefined,
+  structure: StructureEntry | null,
   importTargets: string[],
 ): string {
   const filePath = String(scanEntry.path);
@@ -103,24 +93,12 @@ export function fileSummary(
   const category = String(scanEntry.fileCategory ?? "code");
   const lines = Number(scanEntry.sizeLines ?? 0) || 0;
   const bits = [`${category} file in ${language}`, `${lines} lines`];
-  if (structure) {
-    const counts: string[] = [];
-    for (const [key, label] of [
-      ["functions", "functions"],
-      ["classes", "classes"],
-      ["endpoints", "endpoints"],
-      ["services", "services"],
-      ["resources", "resources"],
-      ["definitions", "definitions"],
-    ] as const) {
-      const count = arrayValue<Record<string, unknown>>(structure[key]).length;
-      if (count) {
-        counts.push(`${count} ${label}`);
-      }
-    }
-    if (counts.length > 0) {
-      bits.push(counts.join(", "));
-    }
+  const counts = [
+    structure?.functions.length ? `${structure.functions.length} functions` : null,
+    structure?.classes.length ? `${structure.classes.length} classes` : null,
+  ].filter((count) => count !== null);
+  if (counts.length > 0) {
+    bits.push(counts.join(", "));
   }
   if (importTargets.length > 0) {
     bits.push(`imports ${importTargets.length} project files`);
@@ -128,52 +106,30 @@ export function fileSummary(
   return `${filePath}: ${bits.join("; ")}.`;
 }
 
-/** Calculates a coarse complexity score from source line count. */
-export function complexityForLines(lines: number): string {
-  if (lines < 50) {
-    return "simple";
-  }
-  if (lines <= 200) {
-    return "moderate";
-  }
-  return "complex";
-}
-
-/** Builds a start and end line range. */
-export function lineSpan(item: Record<string, unknown>): number {
-  return Number(item.endLine ?? 0) - Number(item.startLine ?? 0) + 1;
-}
-
 /** Adds a graph edge while deduplicating source-target-type triples. */
-export function addEdge(
+function addEdge(
   edges: GraphEdge[],
   seen: Set<string>,
   source: string,
   target: string,
   edgeType: string,
-  { evidence = "" }: { evidence?: string } = {},
 ): void {
   const key = `${source}\0${target}\0${edgeType}`;
   if (seen.has(key)) {
     return;
   }
   seen.add(key);
-  const edge: GraphEdge = { source, target, type: edgeType };
-  if (evidence) {
-    edge.evidence = evidence;
-  }
-  edges.push(edge);
+  edges.push({ source, target, type: edgeType });
 }
 
 /** Builds a graph node for one source file. */
 export function fileNode(
   relPath: string,
   scanEntry: ScanLikeEntry,
-  fileStructure: StructureEntry | null | undefined,
+  fileStructure: StructureEntry | null,
   importTargets: string[],
 ): GraphNode {
   const nodeType = nodeTypeForFile(scanEntry);
-  const lines = Number(scanEntry.sizeLines ?? 0) || 0;
   return {
     id: `${nodeType}:${relPath}`,
     type: nodeType,
@@ -181,185 +137,92 @@ export function fileNode(
     filePath: relPath,
     summary: fileSummary(scanEntry, fileStructure, importTargets),
     tags: classifyTags(scanEntry),
-    complexity: complexityForLines(lines),
-    metrics: {
-      lines,
-      fanOut: importTargets.length,
-    },
   };
 }
 
-/** Adds graph edges from a file node to its resolved import targets. */
-export function addImportEdges(
-  edges: GraphEdge[],
-  seenEdges: Set<string>,
-  sourceId: string,
-  importTargets: string[],
-  allFilesByPath: Record<string, ScanLikeEntry>,
-): void {
-  for (const target of importTargets) {
-    const targetScanEntry = allFilesByPath[target];
-    if (!targetScanEntry) {
-      continue;
-    }
-    addEdge(
-      edges,
-      seenEdges,
-      sourceId,
-      `${nodeTypeForFile(targetScanEntry)}:${target}`,
-      "imports",
-      {
-        evidence: "native-import-map",
-      },
-    );
-  }
-}
-
-/** Builds a graph node for a function definition. */
-export function functionNode(relPath: string, functionInfo: Record<string, unknown>): GraphNode {
-  const functionName = String(functionInfo.name ?? "");
-  return {
-    id: `function:${relPath}:${functionName}`,
-    type: "function",
-    name: functionName,
-    filePath: relPath,
-    lineRange: [numberField(functionInfo.startLine), numberField(functionInfo.endLine)],
-    summary: `${functionName} in ${relPath}.`,
-    tags: ["function"],
-    complexity: complexityForLines(lineSpan(functionInfo)),
-  };
-}
-
-/** Builds a graph node for a class definition. */
-export function classNode(relPath: string, classInfo: Record<string, unknown>): GraphNode {
-  const className = String(classInfo.name ?? "");
-  return {
-    id: `class:${relPath}:${className}`,
-    type: "class",
-    name: className,
-    filePath: relPath,
-    lineRange: [numberField(classInfo.startLine), numberField(classInfo.endLine)],
-    summary: `${className} class in ${relPath}.`,
-    tags: ["class"],
-    complexity: complexityForLines(lineSpan(classInfo)),
-  };
-}
-
-/** Adds graph nodes and containment edges for file-level symbols. */
-export function addStructureNodes(
-  nodes: GraphNode[],
-  edges: GraphEdge[],
-  seenEdges: Set<string>,
-  fileNodeId: string,
+/** Builds a graph node for one function or class definition. */
+function definitionNode(
+  kind: "function" | "class",
   relPath: string,
-  fileStructure: StructureEntry,
-): Set<string> {
-  const exports = new Set(
-    arrayValue<Record<string, unknown>>(fileStructure.exports).map((exportInfo) =>
-      String(exportInfo.name),
-    ),
-  );
-  const functionNodeIds = new Set<string>();
-  for (const functionInfo of arrayValue<Record<string, unknown>>(fileStructure.functions)) {
-    const functionName = String(functionInfo.name ?? "");
-    if (lineSpan(functionInfo) < SIGNIFICANT_FUNCTION_LINES && !exports.has(functionName)) {
-      continue;
-    }
-    const node = functionNode(relPath, functionInfo);
-    functionNodeIds.add(String(node.id));
-    nodes.push(node);
-    addEdge(edges, seenEdges, fileNodeId, String(node.id), "contains", {
-      evidence: "native-structure",
-    });
-  }
-  for (const classInfo of arrayValue<Record<string, unknown>>(fileStructure.classes)) {
-    const className = String(classInfo.name ?? "");
-    const methodCount = arrayValue<Record<string, unknown>>(classInfo.methods).length;
-    if (
-      lineSpan(classInfo) < SIGNIFICANT_CLASS_LINES &&
-      methodCount < 2 &&
-      !exports.has(className)
-    ) {
-      continue;
-    }
-    const node = classNode(relPath, classInfo);
-    nodes.push(node);
-    addEdge(edges, seenEdges, fileNodeId, String(node.id), "contains", {
-      evidence: "native-structure",
-    });
-  }
-  return functionNodeIds;
+  definition: DefinitionSpan,
+): GraphNode {
+  return {
+    id: `${kind}:${relPath}:${definition.name}`,
+    type: kind,
+    name: definition.name,
+    filePath: relPath,
+    lineRange: [definition.startLine, definition.endLine],
+    summary:
+      kind === "function"
+        ? `${definition.name} in ${relPath}.`
+        : `${definition.name} class in ${relPath}.`,
+    tags: [kind],
+  };
 }
 
-/** Adds call graph edges from function structure into graph payloads. */
-export function addCallEdges(
-  edges: GraphEdge[],
-  seenEdges: Set<string>,
-  structure: { results?: StructureEntry[] },
-  functionNodeIds: Set<string>,
-): void {
-  for (const structureEntry of structure.results ?? []) {
-    const relPath = structureEntry.path;
-    for (const call of arrayValue<Record<string, unknown>>(structureEntry.callGraph)) {
-      const source = `function:${relPath}:${String(call.caller)}`;
-      const target = `function:${relPath}:${String(call.callee)}`;
-      if (functionNodeIds.has(source) && functionNodeIds.has(target)) {
-        addEdge(edges, seenEdges, source, target, "calls", {
-          evidence: `line ${String(call.lineNumber)}`,
-        });
-      }
-    }
-  }
-}
-
-/** Builds the full graph node and edge set from source evidence. */
+/**
+ * Builds file, definition, import, containment, and same-file call relationships.
+ *
+ * Every extracted function and class becomes a node so exact symbol inspection can resolve short private definitions as well as large public ones.
+ * Structure entries name the emitted files; the complete inventory still resolves import targets outside that emitted set.
+ */
 export function buildNodesAndEdges(
-  scan: { files?: ScanLikeEntry[] },
-  structure: { results?: StructureEntry[] },
+  files: ScanLikeEntry[],
+  structures: StructureEntry[],
   importMap: Record<string, string[]>,
-  { emitPaths }: { emitPaths?: Set<string> | null } = {},
 ): [GraphNode[], GraphEdge[]] {
-  const allFilesByPath = Object.fromEntries(
-    (scan.files ?? []).map((scanEntry) => [scanEntry.path, scanEntry]),
-  );
-  const filesByPath =
-    emitPaths === undefined || emitPaths === null
-      ? allFilesByPath
-      : Object.fromEntries(
-          Object.entries(allFilesByPath).filter(([filePath]) => emitPaths.has(filePath)),
-        );
-  const structureByPath = Object.fromEntries(
-    (structure.results ?? []).map((structureEntry) => [structureEntry.path, structureEntry]),
-  );
+  const filesByPath = new Map(files.map((scanEntry) => [scanEntry.path, scanEntry]));
   const nodes: GraphNode[] = [];
   const edges: GraphEdge[] = [];
   const seenEdges = new Set<string>();
   const functionNodeIds = new Set<string>();
 
-  for (const [relPath, scanEntry] of Object.entries(filesByPath).sort(([left], [right]) =>
-    compareText(left, right),
+  for (const structure of structures.toSorted((left, right) =>
+    compareText(left.path, right.path),
   )) {
-    const fileStructure = structureByPath[relPath];
-    const importTargets = importMap[relPath] ?? [];
-    const node = fileNode(relPath, scanEntry, fileStructure, importTargets);
-    const nodeId = String(node.id);
-    nodes.push(node);
-    addImportEdges(edges, seenEdges, nodeId, importTargets, allFilesByPath);
-    if (!fileStructure) {
+    const relPath = structure.path;
+    const scanEntry = filesByPath.get(relPath);
+    if (scanEntry === undefined) {
       continue;
     }
-    for (const functionNodeId of addStructureNodes(
-      nodes,
-      edges,
-      seenEdges,
-      nodeId,
-      relPath,
-      fileStructure,
-    )) {
-      functionNodeIds.add(functionNodeId);
+    const importTargets = importMap[relPath] ?? [];
+    const node = fileNode(relPath, scanEntry, structure, importTargets);
+    nodes.push(node);
+    for (const target of importTargets) {
+      const targetScanEntry = filesByPath.get(target);
+      if (targetScanEntry !== undefined) {
+        addEdge(
+          edges,
+          seenEdges,
+          node.id,
+          `${nodeTypeForFile(targetScanEntry)}:${target}`,
+          "imports",
+        );
+      }
+    }
+    for (const [kind, definitions] of [
+      ["function", structure.functions],
+      ["class", structure.classes],
+    ] as const) {
+      for (const definition of definitions) {
+        const child = definitionNode(kind, relPath, definition);
+        if (kind === "function") {
+          functionNodeIds.add(child.id);
+        }
+        nodes.push(child);
+        addEdge(edges, seenEdges, node.id, child.id, "contains");
+      }
     }
   }
 
-  addCallEdges(edges, seenEdges, structure, functionNodeIds);
+  for (const structure of structures) {
+    for (const call of structure.callGraph) {
+      const source = `function:${structure.path}:${call.caller}`;
+      const target = `function:${structure.path}:${call.callee}`;
+      if (functionNodeIds.has(source) && functionNodeIds.has(target)) {
+        addEdge(edges, seenEdges, source, target, "calls");
+      }
+    }
+  }
   return [nodes, edges];
 }
