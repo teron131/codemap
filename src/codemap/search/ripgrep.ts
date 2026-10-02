@@ -26,11 +26,6 @@ type RipgrepMatchOptions = {
   limit: number;
 };
 
-type SourceMatchCollection = {
-  matches: SourceMatch[];
-  scanTruncated: boolean;
-};
-
 export type RipgrepFileCollection = {
   filePaths: string[];
   scanStatus: RipgrepScanStatus;
@@ -71,7 +66,7 @@ export function ripgrepDefinitionMatches(
       return match === null ? null : { ...match, engine: "regex", kind: "symbol" };
     },
     { limit },
-  ).matches;
+  );
 }
 
 /** Finds all candidate file paths for one term without collecting repeated match rows. */
@@ -123,11 +118,11 @@ export function ripgrepMatches(
   root: string,
   searchText: string,
   options: RipgrepMatchOptions,
-): SourceMatchCollection {
+): SourceMatch[] {
   const includeTests = options.includeTests ?? false;
   const limit = options.limit;
   if (limit <= 0) {
-    return { matches: [], scanTruncated: false };
+    return [];
   }
   return streamedJsonMatches(
     [
@@ -178,9 +173,9 @@ function streamedJsonMatches(
   root: string,
   parser: JsonMatchParser,
   { limit }: { limit: number },
-): SourceMatchCollection {
+): SourceMatch[] {
   if (limit <= 0) {
-    return { matches: [], scanTruncated: false };
+    return [];
   }
   const result = spawnSync(command[0] ?? "", command.slice(1), {
     cwd: root,
@@ -189,7 +184,7 @@ function streamedJsonMatches(
   });
   const scanTruncated = (result.error as NodeJS.ErrnoException | undefined)?.code === "ENOBUFS";
   if ((result.error && !scanTruncated) || !result.stdout) {
-    return { matches: [], scanTruncated: false };
+    return [];
   }
   const matches: SourceMatch[] = [];
   for (const line of result.stdout.split(/\r?\n/)) {
@@ -210,7 +205,7 @@ function streamedJsonMatches(
       break;
     }
   }
-  return { matches, scanTruncated };
+  return matches;
 }
 
 /** Converts one ripgrep JSON match event into a source row. */

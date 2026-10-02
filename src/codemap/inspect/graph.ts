@@ -76,14 +76,6 @@ export function uniqueRows(rows: string[], limit: number): string[] {
   return unique;
 }
 
-/** Creates the empty usage-metric buckets used by inspection output. */
-export function emptyUsageMetrics(): Record<string, Record<string, Row[]>> {
-  return {
-    lowUsageFunctions: { python: [], typescript: [] },
-    lowUsageVariables: { python: [], typescript: [] },
-  };
-}
-
 /** Builds scanner metrics for selected inspection files. */
 export function metricsForFiles(
   root: string,
@@ -111,27 +103,12 @@ export function metricsForFiles(
     .flatMap((metrics) => metrics.functionSpans);
   return {
     longFunctions: {
-      python: functionItems(pythonSpans),
-      typescript: functionItems(typescriptSpans),
+      python: functionLengthSection(pythonSpans).items,
+      typescript: functionLengthSection(typescriptSpans).items,
     },
-    usageSignals: emptyUsageMetrics(),
     fileProfiles: scanned.map((metrics) => fileProfileRow(metrics)),
-    functionDefinitions: functionDefinitionRows(scanned),
     variableDefinitions: variableDefinitionRows(scanned),
   };
-}
-
-/** Flattens scanned function spans into inspection table rows. */
-export function functionDefinitionRows(scanned: FileMetrics[]): Row[] {
-  return scanned.flatMap((metrics) =>
-    metrics.functionSpans.map((span) => ({
-      name: span.name,
-      identifier: span.identifier,
-      file: metrics.relPath,
-      line: span.startLine,
-      lines: span.span,
-    })),
-  );
 }
 
 /** Flattens scanned variable definitions into inspection table rows. */
@@ -145,10 +122,4 @@ export function variableDefinitionRows(scanned: FileMetrics[]): Row[] {
       moduleLevel: variable.moduleLevel,
     })),
   );
-}
-
-/** Extracts printable function-length rows from scanned function spans. */
-function functionItems(functionSpans: FileMetrics["functionSpans"]): Row[] {
-  const section = functionLengthSection(functionSpans);
-  return Array.isArray(section.items) ? section.items : [];
 }

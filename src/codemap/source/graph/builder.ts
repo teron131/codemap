@@ -363,16 +363,3 @@ export function buildNodesAndEdges(
   addCallEdges(edges, seenEdges, structure, functionNodeIds);
   return [nodes, edges];
 }
-
-/** Builds a graph fragment for reanalyzed files only. */
-export function buildGraphFragment(
-  scan: { files?: ScanLikeEntry[] },
-  structure: { results?: StructureEntry[] },
-  importMap: Record<string, string[]>,
-  relPaths: Set<string>,
-): { nodes: GraphNode[]; edges: GraphEdge[] } {
-  const [nodes, edges] = buildNodesAndEdges(scan, structure, importMap, {
-    emitPaths: relPaths,
-  });
-  return { nodes, edges };
-}

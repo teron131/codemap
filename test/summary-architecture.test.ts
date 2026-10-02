@@ -7,7 +7,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import { isIgnorableFileComment } from "../src/codemap/source/docstrings/index.js";
 import {
   buildSourceContext,
+  filePreview,
   resolveSourceSymbol,
+  symbolDescription,
 } from "../src/codemap/summary/architecture/source-context.js";
 import { readmeSummaryFromText } from "../src/codemap/summary/index.js";
 
@@ -202,6 +204,47 @@ describe("README summary extraction", () => {
 });
 
 describe("summary source resolution", () => {
+  it("shares documentation within a summary and refreshes it for the next operation", () => {
+    workDir = path.join(
+      workspaceRoot,
+      "test",
+      ".work",
+      `summary-docstrings-${process.pid}-${Date.now()}`,
+    );
+    mkdirSync(path.join(workDir, "src"), { recursive: true });
+    const sources = [
+      [
+        "src/workflow.ts",
+        "/** Coordinates request workflows. */\nconst marker = true;\n/** Runs the original request. */\nexport function execute() { return marker; }\n",
+        "Runs the original request.",
+        "Runs the updated request.",
+      ],
+      [
+        "src/workflow.py",
+        '"""Coordinates request workflows."""\ndef execute():\n    """Runs the original request."""\n    return True\n',
+        "Runs the original request.",
+        "Runs the updated request.",
+      ],
+    ] as const;
+    for (const [file, text] of sources) {
+      writeFileSync(path.join(workDir, file), text);
+    }
+    const source = buildSourceContext(workDir);
+    for (const [file, text, original, updated] of sources) {
+      expect(filePreview(source, file)).toBe("Coordinates request workflows.");
+      const symbol =
+        source.symbolsByName.get("execute")?.find((candidate) => candidate.file === file) ?? null;
+      expect(symbolDescription(source, symbol)).toBe(original);
+      writeFileSync(path.join(workDir, file), text.replace(original, updated));
+      expect(symbolDescription(source, symbol)).toBe(original);
+      const refreshed = buildSourceContext(workDir);
+      const refreshedSymbol =
+        refreshed.symbolsByName.get("execute")?.find((candidate) => candidate.file === file) ??
+        null;
+      expect(symbolDescription(refreshed, refreshedSymbol)).toBe(updated);
+    }
+  });
+
   it("uses backend qualification to distinguish the same export name across files", () => {
     workDir = path.join(
       workspaceRoot,

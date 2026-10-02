@@ -31,6 +31,21 @@ export function relatedEdges(
   return edges;
 }
 
+/** Names a relationship from the inspected endpoint while preserving directional import, call, and containment labels. */
+export function edgeRelationshipLabel(edge: GraphEdge, nodeId: string): string {
+  const outgoing = edge.source === nodeId;
+  if (edge.type === "imports") {
+    return outgoing ? "imports" : "imported by";
+  }
+  if (edge.type === "calls") {
+    return outgoing ? "calls" : "called by";
+  }
+  if (edge.type === "contains") {
+    return outgoing ? "contains" : "in";
+  }
+  return outgoing ? String(edge.type) : `${String(edge.type)} by`;
+}
+
 /** Builds the graph payload directly from the current project tree. */
 export function currentTreeGraph(
   root: string,

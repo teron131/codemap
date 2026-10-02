@@ -6,7 +6,6 @@ import {
   loadRule,
   matchConfigFromRule,
   resolveProjectFile,
-  ruleMatches,
   type SyntaxMatch,
   SyntaxSearch,
 } from "../ast-grep/index.js";
@@ -41,7 +40,10 @@ export function searchRuleMatches(
 ): SyntaxMatch[] | null {
   const rulePath = resolveProjectFile(root, ruleFile);
   const rule = loadRule(rulePath);
-  return ruleMatches(root, String(rule.language ?? ""), matchConfigFromRule(rule), paths);
+  return new SyntaxSearch(root, paths).matches(
+    String(rule.language ?? ""),
+    matchConfigFromRule(rule),
+  );
 }
 
 /** Resolves CLI target paths while keeping them inside the project root. */

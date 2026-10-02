@@ -39,28 +39,6 @@ export function astGrepRoot(source: string, language: string): SgNode | null {
   }
 }
 
-/** Finds syntax matches for a simple ast-grep pattern. */
-export function syntaxMatches(
-  root: string,
-  lang: string,
-  pattern: string,
-  paths: string[],
-  { limit = null }: { limit?: number | null } = {},
-): SyntaxMatch[] | null {
-  return ruleMatches(root, lang, { rule: { pattern } }, paths, { limit });
-}
-
-/** Finds ast-grep rule matches across resolved target files. */
-export function ruleMatches(
-  root: string,
-  lang: string,
-  matchConfig: NapiConfig,
-  paths: string[],
-  { limit = null }: { limit?: number | null } = {},
-): SyntaxMatch[] | null {
-  return new SyntaxSearch(root, paths).matches(lang, matchConfig, { limit });
-}
-
 /** Reuses one target inventory and one parse per language/file across a group of related rules. */
 export class SyntaxSearch {
   private files: string[] | undefined;

@@ -3,7 +3,12 @@
 import { statSync } from "node:fs";
 import path from "node:path";
 
-import { buildFilePreviews, docstringForSymbol } from "../../source/docstrings/index.js";
+import {
+  collectReports,
+  docstringPreview,
+  type FileReport,
+  symbolDocstring,
+} from "../../source/docstrings/index.js";
 import { TypeScriptResolver } from "../../source/extraction/typescript-imports.js";
 import {
   discoverFiles,
@@ -28,7 +33,7 @@ export type SourceContext = {
   filesByPath: Map<string, FileMetrics>;
   filePaths: Set<string>;
   symbolsByName: Map<string, SourceSymbol[]>;
-  previews: Map<string, string | null>;
+  reports: Map<string, FileReport | null>;
   resolver: TypeScriptResolver;
 };
 
@@ -101,21 +106,8 @@ export function buildSourceContext(root: string): SourceContext {
     filesByPath,
     filePaths,
     symbolsByName,
-    previews: new Map(),
+    reports: new Map(),
     resolver: new TypeScriptResolver(root, filePaths),
-  };
-}
-
-/** Provides a source context for architecture-only rendering tests. */
-export function emptySourceContext(): SourceContext {
-  return {
-    root: "",
-    files: [],
-    filesByPath: new Map(),
-    filePaths: new Set(),
-    symbolsByName: new Map(),
-    previews: new Map(),
-    resolver: new TypeScriptResolver(".", new Set()),
   };
 }
 
@@ -157,16 +149,17 @@ export function symbolDescription(
   if (symbol === null || !source.root) {
     return null;
   }
-  const filePath = path.join(source.root, symbol.file);
+  const report = fileReport(source, symbol.file);
+  if (report === null) {
+    return null;
+  }
   const docstring =
-    docstringForSymbol(filePath, {
-      displayPath: symbol.file,
+    symbolDocstring(report, {
       kind: "function",
       name: symbol.name,
       line: symbol.line,
     }) ??
-    docstringForSymbol(filePath, {
-      displayPath: symbol.file,
+    symbolDocstring(report, {
       kind: "class",
       name: symbol.name,
       line: symbol.line,
@@ -174,17 +167,23 @@ export function symbolDescription(
   return shortDescription(docstring) ?? filePreview(source, symbol.file);
 }
 
-/** Reads and caches one file-level docstring preview. */
+/** Projects the cached report through the established file-preview length and sentence policy. */
 export function filePreview(source: SourceContext, file: string): string | null {
-  if (source.previews.has(file)) {
-    return source.previews.get(file) ?? null;
+  const report = fileReport(source, file);
+  const preview = report === null ? null : docstringPreview(report.fileDocstring);
+  return preview === "none" ? null : shortDescription(preview);
+}
+
+/** Parses each file's documentation at most once within this summary, including failed or missing reports. */
+function fileReport(source: SourceContext, file: string): FileReport | null {
+  if (!source.root) {
+    return null;
   }
-  const preview = source.root
-    ? (buildFilePreviews(source.root, { focusFiles: [file], maxFiles: 1 })[0]?.preview ?? null)
-    : null;
-  const description = preview === "none" ? null : shortDescription(preview);
-  source.previews.set(file, description);
-  return description;
+  if (!source.reports.has(file)) {
+    const [, reports] = collectReports(source.root, { focusFiles: [file] });
+    source.reports.set(file, reports[0] ?? null);
+  }
+  return source.reports.get(file) ?? null;
 }
 
 /** Keeps descriptions to their first meaningful prose sentence. */

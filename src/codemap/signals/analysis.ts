@@ -12,7 +12,6 @@ import type {
   FileProfileRow,
   FunctionLengthSection,
   NameFrequencyRow,
-  SignalFocusEntry,
 } from "./schema.js";
 
 export const IDENTIFIER_RE = /\b[A-Za-z_][A-Za-z0-9_]*\b/g;
@@ -113,12 +112,12 @@ function fileSignalScore(
   return score;
 }
 
-/** Ranks files that look like useful starting points. */
-export function buildSignalFocusEntries(
+/** Ranks source paths for focused documentation collection without carrying discarded profile details. */
+export function rankSignalFocusFiles(
   fileProfileRows: DenseFileRow[],
   { entrypoints }: { entrypoints: Set<string> },
-): SignalFocusEntry[] {
-  const entries: SignalFocusEntry[] = [];
+): string[] {
+  const entries: Array<{ file: string; score: number }> = [];
   for (const row of fileProfileRows) {
     const filePath = String(row.file);
     const score = fileSignalScore(filePath, row, { entrypoints });
@@ -128,20 +127,10 @@ export function buildSignalFocusEntries(
     entries.push({
       score,
       file: filePath,
-      role: fileSignalRole(filePath, row, { entrypoints }),
-      defines: numberValue(row.defines),
-      imports_local: numberValue(row.imports_local),
-      exports: numberValue(row.exports),
-      reexports_local: numberValue(row.reexports_local),
-      samples: row.samples,
     });
   }
-  entries.sort(
-    (left, right) =>
-      -numberValue(left.score) - -numberValue(right.score) ||
-      compareText(String(left.file), String(right.file)),
-  );
-  return entries;
+  entries.sort((left, right) => right.score - left.score || compareText(left.file, right.file));
+  return entries.map((entry) => entry.file);
 }
 
 /** Counts usage rows by lexical-mention bin. */

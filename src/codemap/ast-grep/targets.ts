@@ -63,11 +63,6 @@ export function targetFiles(root: string, paths: string[], language?: string): s
   return files;
 }
 
-/** Infers syntax languages from target file suffixes. */
-export function targetLanguages(root: string, paths: string[]): string[] {
-  return languagesForFiles(targetFiles(root, paths));
-}
-
 /** Checks whether ast-grep should scan a filesystem path. */
 export function shouldScanAstGrepFile(filePath: string, root: string): boolean {
   let relParts: string[];

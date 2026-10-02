@@ -8,15 +8,13 @@ import { denseFileCounters } from "../signals/render.js";
 import { type ScanEntry, structureForFile } from "../source/extraction/index.js";
 import type { GraphPayload } from "../source/graph/index.js";
 import { type FileMetrics, scanFile } from "../source/scanner/index.js";
-import { compareText } from "../text-utils.js";
+import { compareText, uniqueStrings } from "../text-utils.js";
 import { importBoundaryRows, metricsForFiles } from "./graph.js";
 
 export type MetricRow = Record<string, unknown>;
 
 export type FileInspectMetrics = {
   longFunctions: MetricRow[];
-  lowUsageFunctions: MetricRow[];
-  lowUsageVariables: MetricRow[];
   fileProfiles: MetricRow[];
 };
 
@@ -43,8 +41,8 @@ export function renderLightweightFileInspection(
   const structure = structureForFile(root, scanEntry, {
     metricsByPath: { [relTarget]: metrics },
   });
-  const functionCount = structure?.functions.length ?? metrics.functionSpans.length;
-  const classCount = structure?.classes.length ?? 0;
+  const functionCount = structure.functions.length;
+  const classCount = structure.classes.length;
   const lines = [
     `# ${relTarget}`,
     "",
@@ -124,33 +122,24 @@ export function appendLikelyEntryContext(
   }
 }
 
-/** Flattens Python and TypeScript metric rows for one inspection profile. */
-function languageMetricItems(section: MetricRow): MetricRow[] {
-  return [...arrayRows(section.python), ...arrayRows(section.typescript)];
-}
-
 /** Finds scanner metrics for one inspection file path. */
 export function fileMetricsForPath(
   metrics: Record<string, unknown>,
   relPath: string,
 ): FileInspectMetrics {
-  const usageSignals = recordValue(metrics.usageSignals);
-  const longFunctions = languageMetricItems(recordValue(metrics.longFunctions));
-  const lowUsage = languageMetricItems(recordValue(usageSignals.lowUsageFunctions));
-  const lowUsageVariables = languageMetricItems(recordValue(usageSignals.lowUsageVariables));
-  const dense = arrayRows(metrics.fileProfiles).filter((item) => item.file === relPath);
+  const lengths = recordValue(metrics.longFunctions);
+  const longFunctions = [
+    ...arrayValue<MetricRow>(lengths.python),
+    ...arrayValue<MetricRow>(lengths.typescript),
+  ];
+  const dense = arrayValue<MetricRow>(metrics.fileProfiles).filter((item) => item.file === relPath);
   const identifierPrefix = `${relPath}::`;
   return {
-    longFunctions: matchingIdentifierItems(longFunctions, identifierPrefix),
-    lowUsageFunctions: matchingIdentifierItems(lowUsage, identifierPrefix),
-    lowUsageVariables: matchingIdentifierItems(lowUsageVariables, identifierPrefix),
+    longFunctions: longFunctions.filter((item) =>
+      String(item.identifier ?? "").startsWith(identifierPrefix),
+    ),
     fileProfiles: dense,
   };
-}
-
-/** Finds file profile rows that mention an identifier. */
-export function matchingIdentifierItems(items: MetricRow[], prefix: string): MetricRow[] {
-  return items.filter((item) => String(item.identifier ?? "").startsWith(prefix));
 }
 
 /** Appends file metrics and related profile sections for inspection. */
@@ -167,32 +156,7 @@ export function appendFileProfile(
     }
     appendLimitMarker(lines, fileMetrics.longFunctions.length, limit);
   }
-  appendMentionRows(lines, "## Low-Use Internal Functions In File", fileMetrics.lowUsageFunctions, {
-    limit,
-  });
-  appendMentionRows(lines, "## Low-Use Internal Variables In File", fileMetrics.lowUsageVariables, {
-    limit,
-  });
   appendFileProfileRow(lines, fileMetrics.fileProfiles);
-}
-
-/** Appends a limited lexical-mention table to an inspection profile. */
-export function appendMentionRows(
-  lines: string[],
-  title: string,
-  rows: MetricRow[],
-  { limit }: { limit: number },
-): void {
-  if (rows.length === 0) {
-    return;
-  }
-  lines.push("");
-  lines.push(title);
-  for (const item of rows.slice(0, limit)) {
-    const identifier = item.identifier || item.name;
-    lines.push(`- ${String(identifier)}: ${String(item.count ?? 0)} mentions`);
-  }
-  appendLimitMarker(lines, rows.length, limit);
 }
 
 /** Appends one file-profile row to inspection output. */
@@ -235,7 +199,9 @@ export function renderVariableProfile(
   metrics: Record<string, unknown>,
   { limit }: { limit: number },
 ): string | null {
-  const rows = definitionRows(metrics, "variableDefinitions", target);
+  const rows = arrayValue<MetricRow>(metrics.variableDefinitions).filter(
+    (item) => item.name === target || String(item.identifier ?? "").endsWith(`::${target}`),
+  );
   if (rows.length === 0) {
     return null;
   }
@@ -249,17 +215,6 @@ export function renderVariableProfile(
   return lines.join("\n").trim();
 }
 
-/** Selects metric definitions matching a short or qualified target name. */
-function definitionRows(
-  metrics: Record<string, unknown>,
-  key: "variableDefinitions",
-  target: string,
-): MetricRow[] {
-  return arrayRows(metrics[key]).filter(
-    (item) => item.name === target || String(item.identifier ?? "").endsWith(`::${target}`),
-  );
-}
-
 /** Appends file facts shared by definition-only fallback profiles. */
 function appendDefinitionFileProfiles(
   lines: string[],
@@ -267,7 +222,9 @@ function appendDefinitionFileProfiles(
   rows: MetricRow[],
 ): void {
   const rowFiles = new Set(rows.map((item) => item.file));
-  const fileRows = arrayRows(metrics.fileProfiles).filter((row) => rowFiles.has(row.file));
+  const fileRows = arrayValue<MetricRow>(metrics.fileProfiles).filter((row) =>
+    rowFiles.has(row.file),
+  );
   appendFileProfileRow(lines, fileRows);
 }
 
@@ -332,7 +289,7 @@ export function renderDirectoryProfile(
 
 /** Selects file-profile rows that belong to an inspected directory. */
 export function directoryFileRows(metrics: Record<string, unknown>, target: string): MetricRow[] {
-  const rows = arrayRows(metrics.fileProfiles);
+  const rows = arrayValue<MetricRow>(metrics.fileProfiles);
   if (target === "" || target === ".") {
     return rows;
   }
@@ -358,7 +315,7 @@ function appendFileImportSpecs(
   metrics: FileMetrics,
   { limit }: { limit: number },
 ): void {
-  const imports = uniqueTextRows([
+  const imports = uniqueStrings([
     ...metrics.pyImportTargets,
     ...metrics.typescriptImports.map((item) => item.target),
     ...metrics.typescriptReexportTargets.map((target) => `re-export ${target}`),
@@ -381,9 +338,6 @@ function appendFileContains(
   structure: ReturnType<typeof structureForFile>,
   { limit }: { limit: number },
 ): void {
-  if (structure === null) {
-    return;
-  }
   const contains = [
     ...structure.functions.map((item) => `${item.name} in ${relPath}:${item.startLine}`),
     ...structure.classes.map((item) => `${item.name} class in ${relPath}:${item.startLine}`),
@@ -406,30 +360,11 @@ function relativeTargetPath(root: string, target: string): string {
   return relative || ".";
 }
 
-/** Deduplicates text rows while keeping first-seen order. */
-function uniqueTextRows(rows: string[]): string[] {
-  const seen = new Set<string>();
-  const unique: string[] = [];
-  for (const row of rows) {
-    if (seen.has(row)) {
-      continue;
-    }
-    seen.add(row);
-    unique.push(row);
-  }
-  return unique;
-}
-
 /** Marks list sections that were shortened by the display limit. */
 function appendLimitMarker(lines: string[], total: number, shown: number): void {
   if (total > shown) {
     lines.push("- ...");
   }
-}
-
-/** Reads an array of record rows from JSON-like payload data. */
-function arrayRows(value: unknown): MetricRow[] {
-  return Array.isArray(value) ? (value as MetricRow[]) : [];
 }
 
 /** Capitalizes the first character without changing the remaining label. */

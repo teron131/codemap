@@ -1,7 +1,14 @@
 /** Checks meaningful Codebase Memory percentages and presentation filtering. */
 import { describe, expect, it } from "vitest";
 
-import { renderCodebaseMemoryArchitectureSummary } from "../src/codemap/summary/architecture/pipeline.js";
+import { recordValue, stringField } from "../src/codemap/json-utils.js";
+import { TypeScriptResolver } from "../src/codemap/source/extraction/typescript-imports.js";
+import {
+  hasRelationshipEvidence,
+  relationshipSummaries,
+} from "../src/codemap/summary/architecture/relationships.js";
+import type { SourceContext } from "../src/codemap/summary/architecture/source-context.js";
+import { renderSummaryText } from "../src/codemap/summary/index.js";
 
 describe("Codebase Memory architecture rendering", () => {
   it("omits raw inventory when architecture only has file-level nodes", () => {
@@ -106,3 +113,30 @@ describe("Codebase Memory architecture rendering", () => {
     expect(output).toContain("src — gamma · 40% · —");
   });
 });
+
+/** Renders architecture-only fixtures through the production projections and presentation. */
+function renderCodebaseMemoryArchitectureSummary(value: unknown): string {
+  const source: SourceContext = {
+    root: "",
+    files: [],
+    filesByPath: new Map(),
+    filePaths: new Set(),
+    symbolsByName: new Map(),
+    reports: new Map(),
+    resolver: new TypeScriptResolver(".", new Set()),
+  };
+  const architecture = recordValue(value);
+  const summary = relationshipSummaries(architecture, source);
+  return renderSummaryText({
+    project: stringField(architecture.project) ?? "project",
+    readme: [],
+    languages: [],
+    exportSurfaces: [],
+    structuralSignals: [],
+    structuralOutlines: [],
+    hotspots: summary.hotspots,
+    clusters: summary.clusters,
+    relationshipEvidenceAvailable: hasRelationshipEvidence(architecture),
+    relationshipEvidenceFailureReason: null,
+  });
+}

@@ -11,7 +11,6 @@ import {
 import {
   conceptPathMatches,
   definitionMatches,
-  type GraphMatchOptions,
   isImplementationSourceMatch,
   isImplementationSourcePath,
   pathMatches,
@@ -121,6 +120,7 @@ export async function commandSearch(
   const searchText = searchArgs.join(" ");
   const limit = searchLimit(options.limit);
   const root = resolveProjectRoot(options.projectRoot ?? rootOptions.projectRoot);
+  const outputOptions = { includeTests: Boolean(options.includeTests) };
   console.log(`Search: ${searchText}`);
   let fallbackPreflight: SourceFallbackSearch | undefined;
   if (options.semantic) {
@@ -174,16 +174,13 @@ export async function commandSearch(
   }
   if (
     options.semantic &&
-    printCodebaseMemorySemanticSearch(root, searchText, limit, backendOutputOptions(options))
+    printCodebaseMemorySemanticSearch(root, searchText, limit, outputOptions)
   ) {
     return 0;
   }
   if (
     options.graph &&
-    printCodebaseMemoryGraphSearch(root, searchText, limit, {
-      ...graphSearchOptions(options),
-      ...backendOutputOptions(options),
-    })
+    printCodebaseMemoryGraphSearch(root, searchText, limit, graphSearchOptions(options))
   ) {
     return 0;
   }
@@ -193,14 +190,11 @@ export async function commandSearch(
       "\nGraph fallback: Codebase Memory graph search returned no answer; used current-tree relationship graph.",
     );
     console.log(
-      renderGraphMatchLines(graph, searchText, limit, graphMatchOptions(options)).join("\n"),
+      renderGraphMatchLines(graph, searchText, limit, graphSearchOptions(options)).join("\n"),
     );
     return 0;
   }
-  if (
-    !options.semantic &&
-    printCodebaseMemorySearch(root, searchText, limit, backendOutputOptions(options))
-  ) {
+  if (!options.semantic && printCodebaseMemorySearch(root, searchText, limit, outputOptions)) {
     return 0;
   }
   const currentTree = currentTreeSourceSearch(root, searchText, limit, options, fallbackPreflight);
@@ -353,17 +347,10 @@ function printSourceFallbackMatches(
   }
 }
 
-/** Builds current-tree graph fallback filters without explicit undefined fields. */
-function graphMatchOptions(options: SearchOptions): GraphMatchOptions {
-  return {
-    ...(options.includeTests !== undefined ? { includeTests: options.includeTests } : {}),
-    ...graphSearchOptions(options),
-  };
-}
-
-/** Builds Codebase Memory graph search options without explicit undefined fields. */
+/** Projects the same graph filters and test-visibility choice for backend and current-tree search. */
 function graphSearchOptions(options: SearchOptions): CodebaseMemoryGraphSearchOptions {
   return {
+    ...(options.includeTests !== undefined ? { includeTests: options.includeTests } : {}),
     ...(options.label !== undefined ? { label: options.label } : {}),
     ...(options.namePattern !== undefined ? { namePattern: options.namePattern } : {}),
     ...(options.qnPattern !== undefined ? { qnPattern: options.qnPattern } : {}),
@@ -376,13 +363,6 @@ function graphSearchOptions(options: SearchOptions): CodebaseMemoryGraphSearchOp
       : {}),
     ...(options.offset !== undefined ? { offset: options.offset } : {}),
   };
-}
-
-/** Builds backend output options without explicit undefined fields. */
-function backendOutputOptions(options: SearchOptions): {
-  includeTests?: boolean;
-} {
-  return options.includeTests !== undefined ? { includeTests: options.includeTests } : {};
 }
 
 /** Parses the search result limit option. */
