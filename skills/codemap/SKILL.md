@@ -1,9 +1,11 @@
 ---
 name: codemap
-description: Navigate and scope Python and TypeScript/JavaScript repositories using Codebase Memory for graph and semantic evidence, rg for current-tree exact text, and ast-grep for syntax patterns. Use for repository orientation, path/name/concept discovery, graph or semantic search, call-site or structural matches, focused target inspection, source-metric ranking, or backend freshness and change-impact diagnostics.
+description: Navigate and scope Python and TypeScript code using Codebase Memory for graph and semantic evidence, rg for current-tree exact text, and ast-grep for syntax patterns. Use for repository orientation, path/name/concept discovery, graph or semantic search, call-site or structural matches, focused target inspection, source-metric ranking, or backend freshness and change-impact diagnostics.
 ---
 
 # Codemap
+
+Use this workflow only for Python and TypeScript code, including within mixed-language repositories; use `rg`, focused reads, and language-native tools for other languages.
 
 Route relationship and semantic questions to Codebase Memory, exact text to `rg`, and syntax patterns to ast-grep. Prefer compact readable output for agent work; use normalized JSON only on stable row surfaces such as `signals`, `search calls`, `search match`, and `search rule`. Every command applies one final conservative 10,000-token stdout ceiling; text reports truncation inline, while JSON remains valid for `jq` and reports truncation on stderr.
 
