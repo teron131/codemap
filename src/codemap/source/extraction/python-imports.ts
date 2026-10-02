@@ -87,7 +87,7 @@ export function pythonModuleIndex(filePaths: Set<string>): PythonModuleIndex {
 }
 
 /** Resolves Python module parts to source files in the project. */
-export function resolvePythonModule(
+function resolvePythonModule(
   parts: string[],
   filePaths: Set<string>,
   moduleIndex: PythonModuleIndex,

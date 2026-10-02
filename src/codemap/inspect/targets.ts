@@ -1,9 +1,9 @@
 /** Resolves inspection target strings to files, symbols, and emit paths. */
-import { existsSync, statSync } from "node:fs";
+import { statSync } from "node:fs";
 import path from "node:path";
 
-import { expandUser } from "../common.js";
-import type { ScanEntry, ScanPayload } from "../source/extraction/index.js";
+import { expandUser, isDirectory } from "../common.js";
+import type { ScanEntry } from "../source/extraction/index.js";
 import type { GraphNode } from "../source/graph/index.js";
 import { type FileMetrics, scanFile } from "../source/scanner/index.js";
 
@@ -40,14 +40,13 @@ export function normalizeTarget(root: string, target: string): string {
 }
 
 /** Selects scan entries that belong to an inspect target path. */
-export function targetFilePaths(
+function targetFilePaths(
   root: string,
   rawTarget: string,
-  scan: ScanPayload,
+  files: ScanEntry[],
   fileMetricsByPath: Record<string, FileMetrics | undefined>,
 ): Set<string> {
   const target = normalizeTarget(root, rawTarget);
-  const files = scan.files;
   const filesByPath = new Set(files.map((entry) => entry.path));
   if (isDirectory(path.join(root, target))) {
     return directoryFilePaths(target, filesByPath);
@@ -59,7 +58,7 @@ export function targetFilePaths(
 }
 
 /** Lists files under a directory inspection target. */
-export function directoryFilePaths(target: string, filesByPath: Set<string>): Set<string> {
+function directoryFilePaths(target: string, filesByPath: Set<string>): Set<string> {
   if (target === "" || target === ".") {
     return new Set(filesByPath);
   }
@@ -68,7 +67,7 @@ export function directoryFilePaths(target: string, filesByPath: Set<string>): Se
 }
 
 /** Finds symbol owners and retains newly scanned metrics for the same inspection operation. */
-export function symbolFilePaths(
+function symbolFilePaths(
   root: string,
   target: string,
   files: ScanEntry[],
@@ -99,7 +98,7 @@ export function symbolFilePaths(
 export function inspectEmitPaths(
   root: string,
   rawTarget: string,
-  scan: ScanPayload,
+  scan: ScanEntry[],
   importMap: Record<string, string[] | undefined>,
   fileMetricsByPath: Record<string, FileMetrics | undefined>,
 ): Set<string> | null {
@@ -127,7 +126,7 @@ export function inspectCandidates(graphNodes: GraphNode[], target: string): Grap
   const exact: GraphNode[] = [];
   const partial: GraphNode[] = [];
   for (const node of graphNodes) {
-    const values = [String(node.id ?? ""), String(node.filePath ?? ""), String(node.name ?? "")];
+    const values = [node.id, node.filePath, node.name];
     if (values.some((value) => value.toLowerCase() === lowered)) {
       exact.push(node);
     } else if (values.some((value) => value.toLowerCase().includes(lowered))) {
@@ -138,21 +137,10 @@ export function inspectCandidates(graphNodes: GraphNode[], target: string): Grap
 }
 
 /** Builds the human-readable label for a graph node candidate. */
-export function nodeLabel(node: Partial<GraphNode> | Record<string, unknown>): string {
-  const filePath = String(node.filePath ?? "");
+export function nodeLabel(node: GraphNode): string {
   if (node.type === "function" || node.type === "class") {
-    const lineRange = Array.isArray(node.lineRange) ? node.lineRange : [];
-    const suffix = lineRange.length > 0 ? `:${String(lineRange[0])}` : "";
-    return `${String(node.name ?? "")} in ${filePath}${suffix}`;
+    const suffix = node.lineRange?.length ? `:${String(node.lineRange[0])}` : "";
+    return `${node.name} in ${node.filePath}${suffix}`;
   }
-  return filePath || String(node.id ?? "");
-}
-
-/** Checks the directory condition used by source inspection targets. */
-function isDirectory(filePath: string): boolean {
-  try {
-    return existsSync(filePath) && statSync(filePath).isDirectory();
-  } catch {
-    return false;
-  }
+  return node.filePath || node.id;
 }

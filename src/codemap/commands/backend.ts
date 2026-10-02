@@ -16,28 +16,17 @@ import {
 import { resolveProjectRoot } from "../common.js";
 import { arrayValue, numberField, recordValue, stringField } from "../json-utils.js";
 import { uniqueStrings } from "../text-utils.js";
-import { addProjectRootArgument, parseIntegerOption } from "./options.js";
+import { addProjectRootArgument, parseIntegerOption, type ProjectRootOptions } from "./options.js";
 
-type BackendOptions = {
-  projectRoot?: string;
-};
-
-type BackendQueryOptions = BackendOptions & {
+type BackendQueryOptions = ProjectRootOptions & {
   maxRows?: number;
   json?: boolean;
 };
 
-type BackendChangesOptions = BackendOptions & {
-  scope?: string;
-  depth?: number;
-  baseBranch?: string;
-  since?: string;
-  json?: boolean;
-};
-
-type RootOptions = {
-  projectRoot?: string;
-};
+type BackendChangesOptions = ProjectRootOptions &
+  CodebaseMemoryChangeOptions & {
+    json?: boolean;
+  };
 
 /** Registers Codebase Memory backend commands. */
 export function addBackendParsers(program: Command): void {
@@ -48,33 +37,24 @@ export function addBackendParsers(program: Command): void {
   const backendProjects = backend
     .command("projects")
     .description("Index this root, then list Codebase Memory projects.")
-    .action((options: BackendOptions) => {
-      const exitCode = commandBackendProjects(options, program.opts<RootOptions>());
-      if (exitCode !== 0) {
-        process.exitCode = exitCode;
-      }
+    .action((options: ProjectRootOptions) => {
+      process.exitCode = commandBackendProjects(options, program.opts<ProjectRootOptions>());
     });
   addProjectRootArgument(backendProjects);
 
   const backendStatus = backend
     .command("status")
     .description("Index first, then print Codebase Memory backend status.")
-    .action((options: BackendOptions) => {
-      const exitCode = commandBackendStatus(options, program.opts<RootOptions>());
-      if (exitCode !== 0) {
-        process.exitCode = exitCode;
-      }
+    .action((options: ProjectRootOptions) => {
+      process.exitCode = commandBackendStatus(options, program.opts<ProjectRootOptions>());
     });
   addProjectRootArgument(backendStatus);
 
   const backendSchema = backend
     .command("schema")
     .description("Index first, then print Codebase Memory graph schema.")
-    .action((options: BackendOptions) => {
-      const exitCode = commandBackendSchema(options, program.opts<RootOptions>());
-      if (exitCode !== 0) {
-        process.exitCode = exitCode;
-      }
+    .action((options: ProjectRootOptions) => {
+      process.exitCode = commandBackendSchema(options, program.opts<ProjectRootOptions>());
     });
   addProjectRootArgument(backendSchema);
 
@@ -85,10 +65,7 @@ export function addBackendParsers(program: Command): void {
     .option("--max-rows <count>", "Maximum rows returned by Codebase Memory.", parseIntegerOption)
     .option("--json", "Print raw JSON output.")
     .action((query: string[], options: BackendQueryOptions) => {
-      const exitCode = commandBackendQuery(query, options, program.opts<RootOptions>());
-      if (exitCode !== 0) {
-        process.exitCode = exitCode;
-      }
+      process.exitCode = commandBackendQuery(query, options, program.opts<ProjectRootOptions>());
     });
   addProjectRootArgument(backendQuery);
 
@@ -101,10 +78,7 @@ export function addBackendParsers(program: Command): void {
     .option("--since <ref>", "Git ref or date to compare from.")
     .option("--json", "Print raw JSON output.")
     .action((options: BackendChangesOptions) => {
-      const exitCode = commandBackendChanges(options, program.opts<RootOptions>());
-      if (exitCode !== 0) {
-        process.exitCode = exitCode;
-      }
+      process.exitCode = commandBackendChanges(options, program.opts<ProjectRootOptions>());
     });
   addProjectRootArgument(backendChanges);
 }
@@ -114,19 +88,16 @@ export function addIndexParser(program: Command): void {
   const index = program
     .command("index")
     .description("Refresh Codebase Memory and print index timing.")
-    .action((options: BackendOptions) => {
-      const exitCode = commandIndex(options, program.opts<RootOptions>());
-      if (exitCode !== 0) {
-        process.exitCode = exitCode;
-      }
+    .action((options: ProjectRootOptions) => {
+      process.exitCode = commandIndex(options, program.opts<ProjectRootOptions>());
     });
   addProjectRootArgument(index);
 }
 
 /** Lists Codebase Memory projects after refreshing the current project root. */
 export function commandBackendProjects(
-  options: BackendOptions,
-  rootOptions: RootOptions = {},
+  options: ProjectRootOptions,
+  rootOptions: ProjectRootOptions = {},
 ): number {
   const root = resolveBackendRoot(options, rootOptions);
   const result = codebaseMemoryProjects(root);
@@ -140,8 +111,8 @@ export function commandBackendProjects(
 
 /** Prints Codebase Memory backend status for the project root. */
 export function commandBackendStatus(
-  options: BackendOptions,
-  rootOptions: RootOptions = {},
+  options: ProjectRootOptions,
+  rootOptions: ProjectRootOptions = {},
 ): number {
   const root = resolveBackendRoot(options, rootOptions);
   const result = codebaseMemoryStatus(root);
@@ -155,8 +126,8 @@ export function commandBackendStatus(
 
 /** Prints Codebase Memory graph schema for the project root. */
 export function commandBackendSchema(
-  options: BackendOptions,
-  rootOptions: RootOptions = {},
+  options: ProjectRootOptions,
+  rootOptions: ProjectRootOptions = {},
 ): number {
   const root = resolveBackendRoot(options, rootOptions);
   const result = codebaseMemorySchema(root);
@@ -172,7 +143,7 @@ export function commandBackendSchema(
 export function commandBackendQuery(
   query: string[],
   options: BackendQueryOptions,
-  rootOptions: RootOptions = {},
+  rootOptions: ProjectRootOptions = {},
 ): number {
   const queryText = query.join(" ").trim();
   if (queryText.length === 0) {
@@ -198,10 +169,10 @@ export function commandBackendQuery(
 /** Runs Codebase Memory changed-code impact analysis. */
 export function commandBackendChanges(
   options: BackendChangesOptions,
-  rootOptions: RootOptions = {},
+  rootOptions: ProjectRootOptions = {},
 ): number {
   const root = resolveBackendRoot(options, rootOptions);
-  const result = codebaseMemoryChanges(root, backendChangeOptions(options));
+  const result = codebaseMemoryChanges(root, options);
   if (result !== null) {
     console.log(options.json ? JSON.stringify(result) : renderBackendChanges(result));
     return 0;
@@ -211,7 +182,10 @@ export function commandBackendChanges(
 }
 
 /** Explicitly refreshes Codebase Memory and prints timing for diagnostics. */
-export function commandIndex(options: BackendOptions, rootOptions: RootOptions = {}): number {
+export function commandIndex(
+  options: ProjectRootOptions,
+  rootOptions: ProjectRootOptions = {},
+): number {
   const root = resolveBackendRoot(options, rootOptions);
   const result = codebaseMemoryIndex(root);
   if (result !== null) {
@@ -241,23 +215,13 @@ function mutatesGraph(query: string): boolean {
   return /\b(CREATE|MERGE|DELETE|DETACH|SET|REMOVE|DROP|LOAD\s+CSV)\b/i.test(query);
 }
 
-/** Builds Codebase Memory change options without explicit undefined fields. */
-function backendChangeOptions(options: BackendChangesOptions): CodebaseMemoryChangeOptions {
-  return {
-    ...(options.scope !== undefined ? { scope: options.scope } : {}),
-    ...(options.depth !== undefined ? { depth: options.depth } : {}),
-    ...(options.baseBranch !== undefined ? { baseBranch: options.baseBranch } : {}),
-    ...(options.since !== undefined ? { since: options.since } : {}),
-  };
-}
-
 /** Resolves command-local or global project-root options for backend commands. */
-function resolveBackendRoot(options: BackendOptions, rootOptions: RootOptions): string {
+function resolveBackendRoot(options: ProjectRootOptions, rootOptions: ProjectRootOptions): string {
   return resolveProjectRoot(options.projectRoot ?? rootOptions.projectRoot);
 }
 
 /** Renders backend status fields for the diagnostic command. */
-export function renderBackendStatus(result: CodebaseMemoryStatusResult): string {
+function renderBackendStatus(result: CodebaseMemoryStatusResult): string {
   const lines = [
     `CodebaseMemory index: ${result.projectName}`,
     `status: ${result.status}`,

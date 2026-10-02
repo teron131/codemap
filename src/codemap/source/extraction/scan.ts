@@ -16,15 +16,6 @@ export type ScanEntry = {
   sizeLines: number;
 };
 
-export type ScanPayload = {
-  files: ScanEntry[];
-  stats: {
-    filesScanned: number;
-    byCategory: Record<string, number>;
-    byLanguage: Record<string, number>;
-  };
-};
-
 export const LANGUAGE_BY_SUFFIX: Record<string, string> = {
   ...TYPESCRIPT_LANG_BY_SUFFIX,
   ".c": "c",
@@ -76,9 +67,8 @@ export const CONFIG_BASENAMES = new Set([
 ]);
 
 /** Scans project files into inventory rows. */
-export function runScan(root: string, filePaths: string[] = discoverFiles(root)): ScanPayload {
-  const files = filePaths.map((filePath) => scanEntry(root, filePath));
-  return scanInventory(files);
+export function runScan(root: string, filePaths: string[] = discoverFiles(root)): ScanEntry[] {
+  return filePaths.map((filePath) => scanEntry(root, filePath));
 }
 
 /** Builds one scan inventory entry from a project-relative path. */
@@ -94,7 +84,7 @@ export function scanEntry(root: string, filePath: string): ScanEntry {
 }
 
 /** Counts newline-delimited lines in source text. */
-export function countLines(filePath: string): number {
+function countLines(filePath: string): number {
   let text: string;
   try {
     text = readFileSync(filePath, "utf8");
@@ -142,28 +132,4 @@ export function categoryForPath(relPath: string): string {
     return "data";
   }
   return "code";
-}
-
-/** Summarizes the already eligible inventory without inventing another filtering stage. */
-function scanInventory(files: ScanEntry[]): ScanPayload {
-  const byCategory = countBy(files, (entry) => String(entry.fileCategory ?? "unknown"));
-  const byLanguage = countBy(files, (entry) => String(entry.language ?? "unknown"));
-  return {
-    files,
-    stats: {
-      filesScanned: files.length,
-      byCategory,
-      byLanguage,
-    },
-  };
-}
-
-/** Counts rows by a derived key. */
-function countBy<T>(items: T[], keyFor: (item: T) => string): Record<string, number> {
-  const counts: Record<string, number> = {};
-  for (const item of items) {
-    const key = keyFor(item);
-    counts[key] = (counts[key] ?? 0) + 1;
-  }
-  return counts;
 }

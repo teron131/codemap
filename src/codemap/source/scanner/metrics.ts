@@ -10,7 +10,6 @@ type ClassSpan = {
   name: string;
   span: number;
   startLine: number;
-  methods: string[];
 };
 
 export type VariableSignal = {

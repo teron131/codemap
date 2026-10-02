@@ -1,8 +1,13 @@
 /** Builds docstring signal reports and previews for supported source files. */
-import { existsSync, statSync } from "node:fs";
 import path from "node:path";
 
-import { discoverFiles, relativePath } from "../scanner/index.js";
+import { isDirectory, isFile } from "../../common.js";
+import {
+  discoverFiles,
+  PYTHON_SUFFIXES,
+  relativePath,
+  TYPESCRIPT_SUFFIXES,
+} from "../scanner/index.js";
 import {
   type ClassReport,
   DOCSTRING_SUFFIXES,
@@ -10,8 +15,6 @@ import {
   type FunctionReport,
   LIKELY_MAIN_FUNCTION_NAMES,
   LIKELY_MAIN_FUNCTION_PREFIXES,
-  PYTHON_SUFFIXES,
-  TYPESCRIPT_SUFFIXES,
 } from "./models.js";
 import { buildPythonFileReport } from "./python.js";
 import { buildTypescriptFileReport } from "./typescript.js";
@@ -84,18 +87,13 @@ export type DocstringSignals = {
 };
 
 /** Finds Python and TypeScript-family files supported by docstring reports. */
-export function collectSupportedFiles(targetPath: string): string[] {
+function collectSupportedFiles(targetPath: string): string[] {
   if (isFile(targetPath)) {
     return DOCSTRING_SUFFIXES.has(path.extname(targetPath)) ? [targetPath] : [];
   }
   return discoverFiles(targetPath).filter((filePath) =>
     DOCSTRING_SUFFIXES.has(path.extname(filePath)),
   );
-}
-
-/** Formats a path for docstring report display. */
-export function displayPath(filePath: string, { displayRoot }: { displayRoot: string }): string {
-  return relativePath(filePath, { displayRoot });
 }
 
 /** Builds a compact preview from one file docstring. */
@@ -120,7 +118,7 @@ export function docstringPreview(
 }
 
 /** Orders docstring focus paths before broad report files. */
-export function resolveFocusPathsInOrder(
+function resolveFocusPathsInOrder(
   focusFiles: string[],
   { moduleRoot }: { moduleRoot: string },
 ): string[] {
@@ -130,7 +128,7 @@ export function resolveFocusPathsInOrder(
 }
 
 /** Chooses docstring reports matching requested focus paths. */
-export function selectReports(
+function selectReports(
   reports: FileReport[],
   { focusFiles, moduleRoot }: { focusFiles: string[]; moduleRoot: string },
 ): FileReport[] {
@@ -145,7 +143,7 @@ export function selectReports(
 }
 
 /** Ranks functions for docstring signal selection. */
-export function functionPriority(report: FunctionReport): [number, number, number] {
+function functionPriority(report: FunctionReport): [number, number, number] {
   const loweredName = report.name.toLowerCase();
   const hasDocstring = report.docstring ? 0 : 1;
   const isDunder = loweredName.startsWith("__") && loweredName.endsWith("__") ? 1 : 0;
@@ -161,7 +159,7 @@ export function functionPriority(report: FunctionReport): [number, number, numbe
 }
 
 /** Selects functions that need useful docstrings most. */
-export function functionSignalCandidates(
+function functionSignalCandidates(
   report: FunctionReport,
   { ownerName = null }: { ownerName?: string | null } = {},
 ): Array<[string, FunctionReport]> {
@@ -178,7 +176,7 @@ export function functionSignalCandidates(
 }
 
 /** Collects functions that should appear in docstring signal output. */
-export function collectSignalFunctions(report: FileReport): Array<[string, FunctionReport]> {
+function collectSignalFunctions(report: FileReport): Array<[string, FunctionReport]> {
   const candidates: Array<[string, FunctionReport]> = [];
   for (const functionReport of report.functions) {
     candidates.push(...functionSignalCandidates(functionReport));
@@ -206,7 +204,7 @@ export function collectSignalFunctions(report: FileReport): Array<[string, Funct
 }
 
 /** Serializes a function docstring report for JSON output. */
-export function functionToDict(
+function functionToDict(
   report: FunctionReport,
   { qualifiedName = null }: { qualifiedName?: string | null } = {},
 ): FunctionPayload {
@@ -228,7 +226,7 @@ export function functionToDict(
 }
 
 /** Serializes a class docstring report for JSON output. */
-export function classToDict(
+function classToDict(
   report: ClassReport,
   { qualifiedName = null }: { qualifiedName?: string | null } = {},
 ): ClassPayload {
@@ -253,12 +251,12 @@ export function classToDict(
 }
 
 /** Counts function reports including nested functions. */
-export function countFunctions(functions: FunctionReport[]): number {
+function countFunctions(functions: FunctionReport[]): number {
   return functions.reduce((total, report) => total + 1 + countFunctions(report.nestedFunctions), 0);
 }
 
 /** Counts methods nested under class docstring reports. */
-export function countClassMethods(classes: ClassReport[]): number {
+function countClassMethods(classes: ClassReport[]): number {
   return classes.reduce(
     (total, classReport) =>
       total + countFunctions(classReport.methods) + countClassMethods(classReport.nestedClasses),
@@ -267,7 +265,7 @@ export function countClassMethods(classes: ClassReport[]): number {
 }
 
 /** Counts class reports including nested classes. */
-export function countClasses(classes: ClassReport[]): number {
+function countClasses(classes: ClassReport[]): number {
   return classes.reduce(
     (total, classReport) => total + 1 + countClasses(classReport.nestedClasses),
     0,
@@ -275,7 +273,7 @@ export function countClasses(classes: ClassReport[]): number {
 }
 
 /** Filters requested docstring focus paths to supported source files. */
-export function supportedFocusPaths(paths: string[]): string[] {
+function supportedFocusPaths(paths: string[]): string[] {
   return paths.filter(
     (filePath) => isFile(filePath) && DOCSTRING_SUFFIXES.has(path.extname(filePath)),
   );
@@ -294,7 +292,7 @@ export function collectReports(
 
   const reports: FileReport[] = [];
   for (const filePath of supportedFiles) {
-    const shownPath = displayPath(filePath, { displayRoot: moduleRoot });
+    const shownPath = relativePath(filePath, { displayRoot: moduleRoot });
     if (PYTHON_SUFFIXES.has(path.extname(filePath))) {
       reports.push(buildPythonFileReport(filePath, { displayPath: shownPath }));
     } else {
@@ -465,14 +463,4 @@ export function buildDocstringSignals(
     })),
     likely_main_function_docstrings: functionItems,
   };
-}
-
-/** Checks whether a path exists and is a file. */
-function isFile(filePath: string): boolean {
-  return existsSync(filePath) && statSync(filePath).isFile();
-}
-
-/** Checks whether a path exists and is a directory. */
-function isDirectory(filePath: string): boolean {
-  return existsSync(filePath) && statSync(filePath).isDirectory();
 }

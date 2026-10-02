@@ -1,34 +1,50 @@
 /** Builds current-tree graph and scanner evidence used by inspection profiles. */
 import path from "node:path";
 
-import { fileProfileRow, functionLengthSection } from "../signals/index.js";
-import { runImportMap, runScan, type ScanEntry } from "../source/extraction/index.js";
-import { buildCurrentTreeGraph, type GraphNode, type GraphPayload } from "../source/graph/index.js";
 import {
-  type FileMetrics,
-  PY_SUFFIXES,
-  scanFile,
-  TYPESCRIPT_SUFFIXES,
-} from "../source/scanner/index.js";
+  type DenseFileRow,
+  fileProfileRow,
+  type FunctionLengthItem,
+  functionLengthSection,
+} from "../signals/index.js";
+import { runImportMap, type ScanEntry } from "../source/extraction/index.js";
+import { buildCurrentTreeGraph, type GraphNode, type GraphPayload } from "../source/graph/index.js";
+import { type FileMetrics, scanFile } from "../source/scanner/index.js";
+import { uniqueStrings } from "../text-utils.js";
 import { inspectEmitPaths } from "./targets.js";
 
-type Row = Record<string, unknown>;
+export type VariableDefinitionRow = {
+  name: string;
+  identifier: string;
+  file: string;
+  line: number;
+  moduleLevel: boolean;
+};
+
+/** Scanner rows for the files one inspection emits, ranked once and filtered per rendered file. */
+export type InspectMetrics = {
+  functionLengths: FunctionLengthItem[];
+  fileProfiles: DenseFileRow[];
+  variableDefinitions: VariableDefinitionRow[];
+};
 
 /** Builds graph evidence for current-tree inspection. */
 export function currentTreeInspectGraph(
   root: string,
   rawTarget: string,
-  existingScan: ReturnType<typeof runScan> | null = null,
-): [GraphPayload, Record<string, unknown>] {
-  const scan = existingScan ?? runScan(root);
-  const importResult = runImportMap(root, scan.files);
-  const importMap = importResult.importMap;
+  scan: ScanEntry[],
+): [GraphPayload, InspectMetrics] {
+  const importResult = runImportMap(root, scan);
   const fileMetricsByPath = importResult.fileMetrics;
-  const emitPaths = inspectEmitPaths(root, rawTarget, scan, importMap, fileMetricsByPath);
-  let structureFiles = scan.files;
-  if (emitPaths !== null) {
-    structureFiles = structureFiles.filter((item) => emitPaths.has(item.path));
-  }
+  const emitPaths = inspectEmitPaths(
+    root,
+    rawTarget,
+    scan,
+    importResult.importMap,
+    fileMetricsByPath,
+  );
+  const structureFiles =
+    emitPaths === null ? scan : scan.filter((item) => emitPaths.has(item.path));
   const graph = buildCurrentTreeGraph(root, scan, importResult, { emitPaths });
   return [graph, metricsForFiles(root, structureFiles, fileMetricsByPath)];
 }
@@ -41,39 +57,20 @@ export function importBoundaryRows(
 ): [string[], string[]] {
   const outgoing: string[] = [];
   const incoming: string[] = [];
-  const nodesById = Object.fromEntries(
-    (graph.nodes ?? []).map((node) => [String(node.id), node]),
-  ) as Record<string, GraphNode | undefined>;
-  for (const edge of graph.edges ?? []) {
+  const nodesById = new Map<string, GraphNode>(graph.nodes.map((node) => [node.id, node]));
+  for (const edge of graph.edges) {
     if (edge.type !== "imports") {
       continue;
     }
-    const sourceFile = String(nodesById[String(edge.source)]?.filePath ?? "");
-    const targetFile = String(nodesById[String(edge.target)]?.filePath ?? "");
+    const sourceFile = nodesById.get(edge.source)?.filePath ?? "";
+    const targetFile = nodesById.get(edge.target)?.filePath ?? "";
     if (filePaths.has(sourceFile) && targetFile && !filePaths.has(targetFile)) {
       outgoing.push(`${sourceFile} -> ${targetFile}`);
     } else if (filePaths.has(targetFile) && sourceFile && !filePaths.has(sourceFile)) {
       incoming.push(`${sourceFile} -> ${targetFile}`);
     }
   }
-  return [uniqueRows(incoming, limit), uniqueRows(outgoing, limit)];
-}
-
-/** Deduplicates inspection rows while keeping their first-seen order. */
-export function uniqueRows(rows: string[], limit: number): string[] {
-  const seen = new Set<string>();
-  const unique: string[] = [];
-  for (const row of rows) {
-    if (seen.has(row)) {
-      continue;
-    }
-    seen.add(row);
-    unique.push(row);
-    if (unique.length >= limit) {
-      break;
-    }
-  }
-  return unique;
+  return [uniqueStrings(incoming).slice(0, limit), uniqueStrings(outgoing).slice(0, limit)];
 }
 
 /** Builds scanner metrics for selected inspection files. */
@@ -81,45 +78,27 @@ export function metricsForFiles(
   root: string,
   files: ScanEntry[],
   fileMetricsByPath: Record<string, FileMetrics | undefined>,
-): Record<string, unknown> {
-  const scanned: FileMetrics[] = [];
-  for (const item of files) {
-    const relPath = item.path;
-    let metrics = fileMetricsByPath[relPath];
-    if (metrics === undefined) {
-      metrics = scanFile(path.join(root, relPath), { displayRoot: root });
+): InspectMetrics {
+  const scanned = files.map((item) => {
+    const metrics =
+      fileMetricsByPath[item.path] ?? scanFile(path.join(root, item.path), { displayRoot: root });
+    if (item.sizeLines > 0 && metrics.lines === 0) {
+      metrics.lines = item.sizeLines;
     }
-    const sizeLines = item.sizeLines;
-    if (sizeLines > 0 && metrics.lines === 0) {
-      metrics.lines = sizeLines;
-    }
-    scanned.push(metrics);
-  }
-  const pythonSpans = scanned
-    .filter((metrics) => PY_SUFFIXES.has(metrics.suffix))
-    .flatMap((metrics) => metrics.functionSpans);
-  const typescriptSpans = scanned
-    .filter((metrics) => TYPESCRIPT_SUFFIXES.has(metrics.suffix))
-    .flatMap((metrics) => metrics.functionSpans);
+    return metrics;
+  });
   return {
-    longFunctions: {
-      python: functionLengthSection(pythonSpans).items,
-      typescript: functionLengthSection(typescriptSpans).items,
-    },
+    functionLengths: functionLengthSection(scanned.flatMap((metrics) => metrics.functionSpans))
+      .items,
     fileProfiles: scanned.map((metrics) => fileProfileRow(metrics)),
-    variableDefinitions: variableDefinitionRows(scanned),
+    variableDefinitions: scanned.flatMap((metrics) =>
+      metrics.variableSignals.map((variable) => ({
+        name: variable.name,
+        identifier: variable.identifier,
+        file: metrics.relPath,
+        line: variable.startLine,
+        moduleLevel: variable.moduleLevel,
+      })),
+    ),
   };
-}
-
-/** Flattens scanned variable definitions into inspection table rows. */
-export function variableDefinitionRows(scanned: FileMetrics[]): Row[] {
-  return scanned.flatMap((metrics) =>
-    metrics.variableSignals.map((variable) => ({
-      name: variable.name,
-      identifier: variable.identifier,
-      file: metrics.relPath,
-      line: variable.startLine,
-      moduleLevel: variable.moduleLevel,
-    })),
-  );
 }

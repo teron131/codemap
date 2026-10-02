@@ -8,7 +8,7 @@ import path from "node:path";
 import {
   IGNORED_DIR_NAMES,
   KEPT_HIDDEN_DIR_NAMES,
-  PY_SUFFIXES,
+  PYTHON_SUFFIXES,
   ROOT_IGNORED_DIR_NAMES,
   TYPESCRIPT_SUFFIXES,
 } from "./constants.js";
@@ -65,7 +65,7 @@ export function isSupportedSourcePath(filePath: string): boolean {
   const directories = parts.slice(0, -1);
   const suffix = path.extname(parts.at(-1) ?? "").toLowerCase();
   return (
-    (PY_SUFFIXES.has(suffix) || TYPESCRIPT_SUFFIXES.has(suffix)) &&
+    (PYTHON_SUFFIXES.has(suffix) || TYPESCRIPT_SUFFIXES.has(suffix)) &&
     !directories.some(
       (directory, index) =>
         IGNORED_DIR_NAMES.has(directory) ||

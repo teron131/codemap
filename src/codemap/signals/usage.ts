@@ -1,7 +1,7 @@
 /** Builds usage-signal tables from scanned source metrics. */
 import path from "node:path";
 
-import { type FileMetrics, PY_SUFFIXES, TYPESCRIPT_SUFFIXES } from "../source/scanner/index.js";
+import { type FileMetrics, PYTHON_SUFFIXES, TYPESCRIPT_SUFFIXES } from "../source/scanner/index.js";
 import {
   countIdentifierOccurrences,
   functionUsageRows,
@@ -21,7 +21,7 @@ type UsageLanguageRows = {
 };
 
 /** Collects metric names for files matching a language suffix set. */
-export function metricNames(
+function metricNames(
   scannedFiles: FileMetrics[],
   suffixes: Set<string>,
   attrName: "functionNames" | "variableNames",
@@ -37,7 +37,7 @@ export function metricNames(
 
 /** Builds usage bins and measured definition tables. */
 export function buildUsageSection(allFiles: string[], scannedFiles: FileMetrics[]): Row {
-  const python = buildLanguageUsageRows(allFiles, scannedFiles, PY_SUFFIXES);
+  const python = buildLanguageUsageRows(allFiles, scannedFiles, PYTHON_SUFFIXES);
   const typescript = buildLanguageUsageRows(allFiles, scannedFiles, TYPESCRIPT_SUFFIXES);
   return {
     bins: {

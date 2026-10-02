@@ -46,22 +46,7 @@ describe("inspection profile rendering", () => {
   it("shows source line counts in directory profiles", () => {
     const output = renderDirectoryProfile(
       workDir,
-      {
-        stats: {
-          files: 0,
-          nodes: 0,
-          edges: 0,
-          nodeTypes: {},
-          edgeTypes: {},
-          languages: {},
-          categories: {},
-        },
-        nodes: [],
-        edges: [],
-        evidence: {
-          importMap: {},
-        },
-      },
+      { nodes: [], edges: [] },
       {
         fileProfiles: [
           {

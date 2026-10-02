@@ -32,8 +32,8 @@ function graphMatches(
   graph: GraphPayload,
   searchText: string,
   limit: number,
-  options: GraphMatchOptions = {},
-  index: GraphSearchIndex = buildGraphSearchIndex(graph),
+  options: GraphMatchOptions,
+  index: GraphSearchIndex,
 ): GraphNode[] {
   const loweredSearch = searchText.toLowerCase();
   const cleanedSearch = [...searchText]
@@ -41,8 +41,8 @@ function graphMatches(
     .join("");
   const terms = cleanedSearch.split(/\s+/).filter((term) => term.length > 1);
   const scored: Array<[number, GraphNode]> = [];
-  for (const node of graph.nodes ?? []) {
-    const nodeId = String(node.id ?? "");
+  for (const node of graph.nodes) {
+    const nodeId = node.id;
     const related = index.edgesByNode.get(nodeId) ?? [];
     if (!graphNodeMatchesFilters(node, related, options)) {
       continue;
@@ -95,7 +95,7 @@ export function renderGraphMatchLines(
   for (const node of matches) {
     const label = graphNodeLabel(node);
     lines.push(`  - ${label}: ${graphNodeSummary(node, label)}`);
-    const hops = (index.edgesByNode.get(String(node.id)) ?? []).slice(0, 5);
+    const hops = (index.edgesByNode.get(node.id) ?? []).slice(0, 5);
     for (const edge of hops) {
       lines.push(`      ${graphEdgeLabel(edge, node, index.nodesById)}`);
     }
@@ -173,8 +173,8 @@ function graphEdgeLabel(
 /** Indexes graph relationships and nodes once for filtered search and rendering. */
 function buildGraphSearchIndex(graph: GraphPayload): GraphSearchIndex {
   const edgesByNode = new Map<string, GraphEdge[]>();
-  for (const edge of graph.edges ?? []) {
-    for (const nodeId of new Set([String(edge.source), String(edge.target)])) {
+  for (const edge of graph.edges) {
+    for (const nodeId of new Set([edge.source, edge.target])) {
       const related = edgesByNode.get(nodeId);
       if (related === undefined) {
         edgesByNode.set(nodeId, [edge]);
@@ -185,7 +185,7 @@ function buildGraphSearchIndex(graph: GraphPayload): GraphSearchIndex {
   }
   return {
     edgesByNode,
-    nodesById: new Map((graph.nodes ?? []).map((node) => [String(node.id), node])),
+    nodesById: new Map(graph.nodes.map((node) => [node.id, node])),
   };
 }
 

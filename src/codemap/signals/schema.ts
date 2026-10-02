@@ -15,6 +15,13 @@ export const SIGNAL_SECTION_CHOICES = [
   "docstrings",
 ] as const;
 
+export type SignalSection = (typeof SIGNAL_SECTION_CHOICES)[number];
+
+/** Narrows CLI text to one accepted signal section. */
+export function isSignalSection(value: string): value is SignalSection {
+  return (SIGNAL_SECTION_CHOICES as readonly string[]).includes(value);
+}
+
 export type SignalRow = Record<string, unknown>;
 
 export type SignalLanguage = "python" | "typescript";

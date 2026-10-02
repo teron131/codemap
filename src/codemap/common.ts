@@ -1,11 +1,9 @@
 /** Provides shared path and project-root helpers. */
 import { spawnSync } from "node:child_process";
-import { existsSync, statSync } from "node:fs";
+import { statSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
-export const REPO_ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 export const DETAILED_ANALYSIS_FILE_LIMIT = 5_000;
 
 /** Resolves and validates the project root path. */
@@ -14,7 +12,7 @@ export function resolveProjectRoot(raw: string | null | undefined): string {
   if (!path.isAbsolute(root)) {
     root = path.resolve(process.cwd(), root);
   }
-  if (!existsSync(root) || !statSync(root).isDirectory()) {
+  if (!isDirectory(root)) {
     throw new Error(`Project root is not a directory: ${root}`);
   }
   return root;
@@ -41,4 +39,22 @@ export function expandUser(raw: string): string {
     return path.join(homedir(), raw.slice(2));
   }
   return raw;
+}
+
+/** Checks whether a path exists and is a regular file. */
+export function isFile(filePath: string): boolean {
+  try {
+    return statSync(filePath).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/** Checks whether a path exists and is a directory. */
+export function isDirectory(filePath: string): boolean {
+  try {
+    return statSync(filePath).isDirectory();
+  } catch {
+    return false;
+  }
 }

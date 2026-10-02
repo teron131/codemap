@@ -29,6 +29,7 @@ export type SourceSymbol = {
 
 export type SourceContext = {
   root: string;
+  discoveredFiles: string[];
   files: FileMetrics[];
   filesByPath: Map<string, FileMetrics>;
   filePaths: Set<string>;
@@ -73,9 +74,10 @@ function languageName(suffix: string): string | null {
   return null;
 }
 
-/** Scans supported production source once for exports and symbol descriptions. */
+/** Discovers the tree once and scans supported production source for exports and symbol descriptions. */
 export function buildSourceContext(root: string): SourceContext {
-  const sourcePaths = discoverFiles(root).filter((filePath) => {
+  const discoveredFiles = discoverFiles(root);
+  const sourcePaths = discoveredFiles.filter((filePath) => {
     const relative = path.relative(root, filePath).split(path.sep).join("/");
     return isSupportedSourcePath(relative) && !isGeneratedPath(relative) && !isTestPath(relative);
   });
@@ -102,6 +104,7 @@ export function buildSourceContext(root: string): SourceContext {
   }
   return {
     root,
+    discoveredFiles,
     files,
     filesByPath,
     filePaths,

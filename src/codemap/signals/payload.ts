@@ -4,13 +4,13 @@ import { describeNumbers } from "../math-utils.js";
 import {
   isGeneratedPath,
   isTestPath,
-  PY_SUFFIXES,
+  PYTHON_SUFFIXES,
   TYPESCRIPT_SUFFIXES,
 } from "../source/scanner/index.js";
 import { compareText } from "../text-utils.js";
 import type { FunctionLengthSection, LanguageRows, SignalRow } from "./schema.js";
 
-const STRUCTURAL_SUFFIXES = new Set([...PY_SUFFIXES, ...TYPESCRIPT_SUFFIXES]);
+const STRUCTURAL_SUFFIXES = new Set([...PYTHON_SUFFIXES, ...TYPESCRIPT_SUFFIXES]);
 
 type SignalExport = {
   sections?: Record<string, unknown>;

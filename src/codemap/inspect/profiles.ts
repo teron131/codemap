@@ -1,35 +1,21 @@
 /** Renders file, directory, symbol, and variable inspection profiles. */
-import { existsSync, statSync } from "node:fs";
 import path from "node:path";
 
-import { DETAILED_ANALYSIS_FILE_LIMIT } from "../common.js";
-import { arrayValue, numberValue, recordValue } from "../json-utils.js";
+import { DETAILED_ANALYSIS_FILE_LIMIT, isDirectory } from "../common.js";
+import type { DenseFileRow } from "../signals/index.js";
 import { denseFileCounters } from "../signals/render.js";
 import { type ScanEntry, structureForFile } from "../source/extraction/index.js";
-import type { GraphPayload } from "../source/graph/index.js";
+import type { GraphNode, GraphPayload, LikelyEntry } from "../source/graph/index.js";
 import { type FileMetrics, scanFile } from "../source/scanner/index.js";
 import { compareText, uniqueStrings } from "../text-utils.js";
-import { importBoundaryRows, metricsForFiles } from "./graph.js";
-
-export type MetricRow = Record<string, unknown>;
-
-export type FileInspectMetrics = {
-  longFunctions: MetricRow[];
-  fileProfiles: MetricRow[];
-};
-
-export type LikelyEntryContext = {
-  role?: unknown;
-  reason?: unknown;
-  description?: unknown;
-};
+import { importBoundaryRows, type InspectMetrics, metricsForFiles } from "./graph.js";
 
 /** Renders one file directly from scanner evidence when full graphing is too broad. */
 export function renderLightweightFileInspection(
   root: string,
   target: string,
   files: ScanEntry[],
-  { limit, likelyEntries }: { limit: number; likelyEntries: Record<string, LikelyEntryContext> },
+  { limit, likelyEntries }: { limit: number; likelyEntries: Map<string, LikelyEntry> },
 ): string | null {
   const relTarget = relativeTargetPath(root, target);
   const scanEntry = files.find((entry) => entry.path === relTarget);
@@ -49,15 +35,23 @@ export function renderLightweightFileInspection(
     `${relTarget}: ${scanEntry.fileCategory} file in ${scanEntry.language}; ${scanEntry.sizeLines} lines; ${functionCount} functions, ${classCount} classes.`,
     `Fallback: detailed graph skipped above ${DETAILED_ANALYSIS_FILE_LIMIT} files; incoming imports not computed.`,
   ];
-  appendLikelyEntryContext(lines, likelyEntries[relTarget]);
-  appendFileImportSpecs(lines, metrics, { limit });
-  appendFileContains(lines, relTarget, structure, { limit });
-  const fileMetrics = metricsForFiles(root, [scanEntry], {
-    [relTarget]: metrics,
-  });
-  appendFileProfile(lines, fileMetricsForPath(fileMetrics, relTarget), {
+  appendLikelyEntryContext(lines, likelyEntries.get(relTarget));
+  appendListSection(lines, "Imports From File", fileImportSpecs(metrics), limit);
+  appendListSection(
+    lines,
+    "Contains",
+    [
+      ...structure.functions.map((item) => `${item.name} in ${relTarget}:${item.startLine}`),
+      ...structure.classes.map((item) => `${item.name} class in ${relTarget}:${item.startLine}`),
+    ],
     limit,
-  });
+  );
+  appendFileProfile(
+    lines,
+    metricsForFiles(root, [scanEntry], { [relTarget]: metrics }),
+    relTarget,
+    { limit },
+  );
   return lines.join("\n").trim();
 }
 
@@ -78,279 +72,185 @@ export function renderLightweightDirectoryInspection(
     `Directory profile: ${rows.length} scanned files.`,
     `Fallback: detailed graph skipped above ${DETAILED_ANALYSIS_FILE_LIMIT} files.`,
   ];
-  const denseRows = rows
-    .slice()
-    .sort((left, right) => right.sizeLines - left.sizeLines || compareText(left.path, right.path))
-    .slice(0, limit);
-  if (denseRows.length > 0) {
-    lines.push("");
-    lines.push("## Largest Files");
-    for (const item of denseRows) {
-      lines.push(`- ${item.path}: ${item.sizeLines} lines, ${item.language}, ${item.fileCategory}`);
-    }
-    if (rows.length > denseRows.length) {
-      lines.push("- ...");
-    }
-  }
+  appendListSection(
+    lines,
+    "Largest Files",
+    rows
+      .toSorted(
+        (left, right) => right.sizeLines - left.sizeLines || compareText(left.path, right.path),
+      )
+      .map(
+        (item) => `${item.path}: ${item.sizeLines} lines, ${item.language}, ${item.fileCategory}`,
+      ),
+    limit,
+  );
   return lines.join("\n").trim();
 }
 
-/** Appends likely-entry navigation context for inspected files. */
-export function appendLikelyEntryContext(
+/** Appends one titled bullet section, marking rows beyond the display limit. */
+export function appendListSection(
   lines: string[],
-  context: LikelyEntryContext | undefined,
+  title: string,
+  rows: string[],
+  limit: number,
 ): void {
-  if (context === undefined) {
+  if (rows.length === 0) {
     return;
   }
-  const role = String(context.role ?? "").trim();
-  const reason = String(context.reason ?? "").trim();
-  const description = String(context.description ?? "").trim();
-  if (!role && !reason && !description) {
+  lines.push("");
+  lines.push(`## ${title}`);
+  for (const row of rows.slice(0, limit)) {
+    lines.push(`- ${row}`);
+  }
+  if (rows.length > limit) {
+    lines.push("- ...");
+  }
+}
+
+/** Appends likely-entry navigation context for inspected files. */
+export function appendLikelyEntryContext(lines: string[], entry: LikelyEntry | undefined): void {
+  if (entry === undefined) {
     return;
   }
   lines.push("");
   lines.push("## Navigation Context");
-  if (role) {
-    lines.push(`- role: ${role}`);
-  }
-  if (reason) {
-    lines.push(`- why: ${reason}`);
-  }
-  if (description) {
-    lines.push(`- evidence: ${description}`);
-  }
+  lines.push(`- role: ${entry.role}`);
+  lines.push(`- why: ${entry.reason}`);
+  lines.push(`- evidence: ${entry.description}`);
 }
 
-/** Finds scanner metrics for one inspection file path. */
-export function fileMetricsForPath(
-  metrics: Record<string, unknown>,
-  relPath: string,
-): FileInspectMetrics {
-  const lengths = recordValue(metrics.longFunctions);
-  const longFunctions = [
-    ...arrayValue<MetricRow>(lengths.python),
-    ...arrayValue<MetricRow>(lengths.typescript),
-  ];
-  const dense = arrayValue<MetricRow>(metrics.fileProfiles).filter((item) => item.file === relPath);
-  const identifierPrefix = `${relPath}::`;
-  return {
-    longFunctions: longFunctions.filter((item) =>
-      String(item.identifier ?? "").startsWith(identifierPrefix),
-    ),
-    fileProfiles: dense,
-  };
-}
-
-/** Appends file metrics and related profile sections for inspection. */
+/** Appends one file's measured functions and file-profile counters. */
 export function appendFileProfile(
   lines: string[],
-  fileMetrics: FileInspectMetrics,
+  metrics: InspectMetrics,
+  relPath: string,
   { limit }: { limit: number },
 ): void {
-  if (fileMetrics.longFunctions.length > 0) {
-    lines.push("");
-    lines.push("## Functions In File");
-    for (const item of fileMetrics.longFunctions.slice(0, limit)) {
-      lines.push(`- ${String(item.identifier)}: ${String(item.count)} lines`);
-    }
-    appendLimitMarker(lines, fileMetrics.longFunctions.length, limit);
-  }
-  appendFileProfileRow(lines, fileMetrics.fileProfiles);
+  const identifierPrefix = `${relPath}::`;
+  appendListSection(
+    lines,
+    "Functions In File",
+    metrics.functionLengths
+      .filter((item) => item.identifier.startsWith(identifierPrefix))
+      .map((item) => `${item.identifier}: ${item.count} lines`),
+    limit,
+  );
+  appendFileProfileRow(
+    lines,
+    metrics.fileProfiles.filter((item) => item.file === relPath),
+  );
 }
 
 /** Appends one file-profile row to inspection output. */
-export function appendFileProfileRow(lines: string[], rows: MetricRow[]): void {
-  if (rows.length === 0) {
+export function appendFileProfileRow(lines: string[], rows: DenseFileRow[]): void {
+  const profile = rows[0];
+  if (profile === undefined) {
     return;
   }
-  const profile = rows[0] ?? {};
-  const samples = arrayValue(profile.samples)
-    .slice(0, 6)
-    .map((sample) => String(sample))
-    .join(", ");
+  const samples = (profile.samples ?? []).slice(0, 6).join(", ");
   lines.push("");
   lines.push("## File Profile");
-  lines.push(`- ${denseFileCounters(profile, { includeProfileDetails: true })}`);
+  lines.push(`- ${denseFileCounters(profile)}`);
   if (samples) {
     lines.push(`- samples: ${samples}`);
   }
 }
 
-/** Appends file, line, and child summaries for a symbol node. */
-export function appendSymbolProfile(lines: string[], node: MetricRow): void {
-  const nodeType = capitalize(String(node.type ?? "symbol"));
-  if (!["Function", "Class"].includes(nodeType)) {
+/** Appends file and line-range facts for a function or class node. */
+export function appendSymbolProfile(lines: string[], node: GraphNode): void {
+  if (node.type !== "function" && node.type !== "class") {
     return;
   }
-  const lineRange = Array.isArray(node.lineRange) ? node.lineRange : [];
-  const parts = [`file: ${String(node.filePath)}`];
+  const lineRange = node.lineRange ?? [];
+  const parts = [`file: ${node.filePath}`];
   if (lineRange.length > 0) {
     parts.push(`lines: ${String(lineRange[0])}-${String(lineRange.at(-1))}`);
   }
   lines.push("");
-  lines.push(`## ${nodeType} Profile`);
+  lines.push(`## ${node.type === "function" ? "Function" : "Class"} Profile`);
   lines.push(`- ${parts.join(", ")}`);
 }
 
 /** Renders definitions and owning files for a requested variable symbol. */
 export function renderVariableProfile(
   target: string,
-  metrics: Record<string, unknown>,
+  metrics: InspectMetrics,
   { limit }: { limit: number },
 ): string | null {
-  const rows = arrayValue<MetricRow>(metrics.variableDefinitions).filter(
-    (item) => item.name === target || String(item.identifier ?? "").endsWith(`::${target}`),
+  const rows = metrics.variableDefinitions.filter(
+    (item) => item.name === target || item.identifier.endsWith(`::${target}`),
   );
   if (rows.length === 0) {
     return null;
   }
-  const lines = [`# ${target}`, "", "Variable profile.", "", "## Definitions"];
-  for (const item of rows.slice(0, limit)) {
-    const scope = item.moduleLevel ? "module" : "local";
-    lines.push(`- ${String(item.identifier)}: line ${String(item.line)}, ${scope}`);
-  }
-  appendLimitMarker(lines, rows.length, limit);
-  appendDefinitionFileProfiles(lines, metrics, rows);
-  return lines.join("\n").trim();
-}
-
-/** Appends file facts shared by definition-only fallback profiles. */
-function appendDefinitionFileProfiles(
-  lines: string[],
-  metrics: Record<string, unknown>,
-  rows: MetricRow[],
-): void {
-  const rowFiles = new Set(rows.map((item) => item.file));
-  const fileRows = arrayValue<MetricRow>(metrics.fileProfiles).filter((row) =>
-    rowFiles.has(row.file),
+  const lines = [`# ${target}`, "", "Variable profile."];
+  appendListSection(
+    lines,
+    "Definitions",
+    rows.map(
+      (item) => `${item.identifier}: line ${item.line}, ${item.moduleLevel ? "module" : "local"}`,
+    ),
+    limit,
   );
-  appendFileProfileRow(lines, fileRows);
+  const rowFiles = new Set(rows.map((item) => item.file));
+  appendFileProfileRow(
+    lines,
+    metrics.fileProfiles.filter((row) => rowFiles.has(row.file)),
+  );
+  return lines.join("\n").trim();
 }
 
 /** Renders file, import, export, and contained-node summaries for a directory. */
 export function renderDirectoryProfile(
   root: string,
   graph: GraphPayload,
-  metrics: Record<string, unknown>,
+  metrics: Pick<InspectMetrics, "fileProfiles">,
   target: string,
   { limit }: { limit: number },
 ): string | null {
-  const targetPath = path.join(root, target);
-  if (!isDirectory(targetPath)) {
+  if (!isDirectory(path.join(root, target))) {
     return null;
   }
-  const rows = directoryFileRows(metrics, target);
+  const prefix = `${target.replace(/\/+$/, "")}/`;
+  const rows =
+    target === "" || target === "."
+      ? metrics.fileProfiles
+      : metrics.fileProfiles.filter((item) => item.file.startsWith(prefix));
   const title = target === "" || target === "." ? "." : target.replace(/\/+$/, "");
-  const totalDefines = rows.reduce((sum, item) => sum + numberValue(item.defines), 0);
-  const totalImports = rows.reduce((sum, item) => sum + numberValue(item.imports_local), 0);
+  const totalDefines = rows.reduce((sum, item) => sum + (item.defines ?? 0), 0);
+  const totalImports = rows.reduce((sum, item) => sum + (item.imports_local ?? 0), 0);
   const lines = [
     `# ${title}/`,
     "",
     `Directory profile: ${rows.length} scanned files; defines ${totalDefines}; local imports ${totalImports}.`,
   ];
-  const denseRows = rows
-    .slice()
-    .sort(
-      (left, right) =>
-        numberValue(right.total) - numberValue(left.total) ||
-        compareText(String(left.file ?? ""), String(right.file ?? "")),
-    );
-  if (denseRows.length > 0) {
-    lines.push("");
-    lines.push("## Dense Files");
-    for (const item of denseRows.slice(0, limit)) {
-      lines.push(
-        `- ${String(item.file)}: ${denseFileCounters(item, { includeProfileDetails: true })}`,
-      );
-    }
-    appendLimitMarker(lines, denseRows.length, limit);
-  }
-  const [incoming, outgoing] = importBoundaryRows(
-    graph,
-    new Set(rows.map((item) => String(item.file))),
-    { limit },
+  appendListSection(
+    lines,
+    "Dense Files",
+    rows
+      .toSorted(
+        (left, right) =>
+          (right.total ?? 0) - (left.total ?? 0) || compareText(left.file, right.file),
+      )
+      .map((item) => `${item.file}: ${denseFileCounters(item)}`),
+    limit,
   );
-  appendBoundaryRows(lines, "Incoming Imports", incoming);
-  appendBoundaryRows(lines, "Outgoing Imports", outgoing);
-  if (rows.length > 0) {
-    lines.push("");
-    lines.push("## Files");
-    for (const item of rows
-      .slice()
-      .sort((left, right) => compareText(String(left.file ?? ""), String(right.file ?? "")))
-      .slice(0, limit)) {
-      lines.push(`- ${String(item.file)}`);
-    }
-    appendLimitMarker(lines, rows.length, limit);
-  }
+  const [incoming, outgoing] = importBoundaryRows(graph, new Set(rows.map((item) => item.file)), {
+    limit,
+  });
+  appendListSection(lines, "Incoming Imports", incoming, limit);
+  appendListSection(lines, "Outgoing Imports", outgoing, limit);
+  appendListSection(lines, "Files", rows.map((item) => item.file).toSorted(compareText), limit);
   return lines.join("\n").trim();
 }
 
-/** Selects file-profile rows that belong to an inspected directory. */
-export function directoryFileRows(metrics: Record<string, unknown>, target: string): MetricRow[] {
-  const rows = arrayValue<MetricRow>(metrics.fileProfiles);
-  if (target === "" || target === ".") {
-    return rows;
-  }
-  const prefix = `${target.replace(/\/+$/, "")}/`;
-  return rows.filter((item) => String(item.file ?? "").startsWith(prefix));
-}
-
-/** Appends import or export boundary rows to a profile section. */
-export function appendBoundaryRows(lines: string[], title: string, rows: string[]): void {
-  if (rows.length === 0) {
-    return;
-  }
-  lines.push("");
-  lines.push(`## ${title}`);
-  for (const row of rows) {
-    lines.push(`- ${row}`);
-  }
-}
-
-/** Appends raw imports seen in one lightweight file inspection. */
-function appendFileImportSpecs(
-  lines: string[],
-  metrics: FileMetrics,
-  { limit }: { limit: number },
-): void {
-  const imports = uniqueStrings([
+/** Lists raw imports seen in one lightweight file inspection. */
+function fileImportSpecs(metrics: FileMetrics): string[] {
+  return uniqueStrings([
     ...metrics.pyImportTargets,
     ...metrics.typescriptImports.map((item) => item.target),
     ...metrics.typescriptReexportTargets.map((target) => `re-export ${target}`),
   ]);
-  if (imports.length === 0) {
-    return;
-  }
-  lines.push("");
-  lines.push("## Imports From File");
-  for (const item of imports.slice(0, limit)) {
-    lines.push(`- ${item}`);
-  }
-  appendLimitMarker(lines, imports.length, limit);
-}
-
-/** Appends file-local functions and classes to one lightweight profile. */
-function appendFileContains(
-  lines: string[],
-  relPath: string,
-  structure: ReturnType<typeof structureForFile>,
-  { limit }: { limit: number },
-): void {
-  const contains = [
-    ...structure.functions.map((item) => `${item.name} in ${relPath}:${item.startLine}`),
-    ...structure.classes.map((item) => `${item.name} class in ${relPath}:${item.startLine}`),
-  ];
-  if (contains.length === 0) {
-    return;
-  }
-  lines.push("");
-  lines.push("## Contains");
-  for (const item of contains.slice(0, limit)) {
-    lines.push(`- ${item}`);
-  }
-  appendLimitMarker(lines, contains.length, limit);
 }
 
 /** Formats an inspected path relative to the display root. */
@@ -358,25 +258,4 @@ function relativeTargetPath(root: string, target: string): string {
   const resolved = path.resolve(root, target);
   const relative = path.relative(root, resolved).split(path.sep).join("/");
   return relative || ".";
-}
-
-/** Marks list sections that were shortened by the display limit. */
-function appendLimitMarker(lines: string[], total: number, shown: number): void {
-  if (total > shown) {
-    lines.push("- ...");
-  }
-}
-
-/** Capitalizes the first character without changing the remaining label. */
-function capitalize(value: string): string {
-  return value ? `${value[0]?.toUpperCase() ?? ""}${value.slice(1)}` : value;
-}
-
-/** Checks the directory condition used by source inspection profiles. */
-function isDirectory(filePath: string): boolean {
-  try {
-    return existsSync(filePath) && statSync(filePath).isDirectory();
-  } catch {
-    return false;
-  }
 }

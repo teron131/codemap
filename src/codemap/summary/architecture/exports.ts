@@ -33,6 +33,12 @@ type ExportCapabilityCandidate = {
   external: boolean;
 };
 
+/**
+ * Selects the public surfaces the summary presents and resolves their directly exposed modules.
+ *
+ * Structural signal targets focus the selection; without them, sampled package roots stand in, and the repository root is the last resort.
+ * Each focus contributes at most its entry, most-imported, and broadest surface, so wide workspaces stay bounded without enumerating every barrel.
+ */
 export function publicExportSurfaces(
   source: SourceContext,
   structural: StructuralSummary,

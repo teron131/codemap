@@ -118,6 +118,7 @@ describe("Codebase Memory architecture rendering", () => {
 function renderCodebaseMemoryArchitectureSummary(value: unknown): string {
   const source: SourceContext = {
     root: "",
+    discoveredFiles: [],
     files: [],
     filesByPath: new Map(),
     filePaths: new Set(),

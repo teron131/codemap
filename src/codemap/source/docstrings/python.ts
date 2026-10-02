@@ -59,20 +59,22 @@ export function buildPythonFileReport(
   return report;
 }
 
-/** Keeps declaration ownership tied to syntax parents, including decorated and conditionally defined members. */
+/**
+ * Keeps declaration ownership tied to syntax parents, including decorated and conditionally defined members.
+ *
+ * Native matches arrive in source preorder, so the innermost open definition range is each definition's owner.
+ */
 function collectDefinitions(root: SgNode): Definition[] {
-  const definitions: Definition[] = root
-    .findAll({ rule: { any: [{ kind: "function_definition" }, { kind: "class_definition" }] } })
-    .map((node) => ({ node, children: [] }));
-  const byId = new Map(definitions.map((definition) => [definition.node.id(), definition]));
   const topLevel: Definition[] = [];
-  for (const definition of definitions) {
-    const owner = definition.node.ancestors().find((ancestor) => byId.has(ancestor.id()));
-    if (owner === undefined) {
-      topLevel.push(definition);
-    } else {
-      byId.get(owner.id())!.children.push(definition);
-    }
+  const open: Array<{ definition: Definition; endIndex: number }> = [];
+  for (const node of root.findAll({
+    rule: { any: [{ kind: "function_definition" }, { kind: "class_definition" }] },
+  })) {
+    const definition: Definition = { node, children: [] };
+    const range = node.range();
+    while (open.length && range.start.index >= open.at(-1)!.endIndex) open.pop();
+    (open.at(-1)?.definition.children ?? topLevel).push(definition);
+    open.push({ definition, endIndex: range.end.index });
   }
   return topLevel;
 }

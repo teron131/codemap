@@ -21,7 +21,6 @@ type DefinitionScope = {
   endIndex: number;
   bodyStart: number;
   bodyEnd: number;
-  methods: string[];
 };
 
 /** Scans supplied or current source without retaining native trees between files or commands. */
@@ -69,7 +68,6 @@ export function scanPythonFile(
       if (!name) continue;
       const span = range.end.line - range.start.line + 1;
       const startLine = range.start.line + 1;
-      const methods: string[] = [];
       if (kind === "function_definition") {
         metrics.functionNames.push(name);
         metrics.functionSpans.push({
@@ -79,16 +77,9 @@ export function scanPythonFile(
           startLine,
         });
         if (scopes.length === 0) metrics.defines += 1;
-        const owner = scopes.at(-1);
-        if (owner?.kind === "class") owner.methods.push(name);
       } else {
         metrics.defines += 1;
-        metrics.classSpans.push({
-          name,
-          span,
-          startLine,
-          methods,
-        });
+        metrics.classSpans.push({ name, span, startLine });
         const bases =
           node
             .field("superclasses")
@@ -107,7 +98,6 @@ export function scanPythonFile(
         endIndex: range.end.index,
         bodyStart: body?.start.index ?? range.end.index,
         bodyEnd: body?.end.index ?? range.end.index,
-        methods,
       });
       const decorated = node.parent();
       if (decorated?.kind() === "decorated_definition") {

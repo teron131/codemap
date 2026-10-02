@@ -13,7 +13,7 @@ import {
   discoverFiles,
   isGeneratedPath,
   isTestPath,
-  PY_SUFFIXES,
+  PYTHON_SUFFIXES,
   relativePath,
   TYPESCRIPT_SUFFIXES,
 } from "../source/scanner/index.js";
@@ -23,35 +23,18 @@ import { compactSourceMatchText, ripgrepDefinitionMatches, ripgrepMatches } from
 const IDENTIFIER_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 const SOURCE_CANDIDATE_LIMIT = 1_000;
 
+const SCRIPT_SYMBOL_KINDS = [
+  "function_declaration",
+  "method_definition",
+  "class_declaration",
+  "lexical_declaration",
+  "variable_declaration",
+];
 const SYMBOL_KINDS_BY_LANGUAGE: Record<string, string[]> = {
-  typescript: [
-    "function_declaration",
-    "method_definition",
-    "class_declaration",
-    "lexical_declaration",
-    "variable_declaration",
-  ],
-  tsx: [
-    "function_declaration",
-    "method_definition",
-    "class_declaration",
-    "lexical_declaration",
-    "variable_declaration",
-  ],
-  javascript: [
-    "function_declaration",
-    "method_definition",
-    "class_declaration",
-    "lexical_declaration",
-    "variable_declaration",
-  ],
-  jsx: [
-    "function_declaration",
-    "method_definition",
-    "class_declaration",
-    "lexical_declaration",
-    "variable_declaration",
-  ],
+  typescript: SCRIPT_SYMBOL_KINDS,
+  tsx: SCRIPT_SYMBOL_KINDS,
+  javascript: SCRIPT_SYMBOL_KINDS,
+  jsx: SCRIPT_SYMBOL_KINDS,
   python: ["function_definition", "class_definition", "assignment"],
 };
 
@@ -72,7 +55,9 @@ export function isImplementationSourceMatch(match: SourceMatch): boolean {
 /** Checks whether a path belongs to supported, non-generated implementation source. */
 export function isImplementationSourcePath(filePath: string): boolean {
   const suffix = path.extname(filePath).toLowerCase();
-  return (PY_SUFFIXES.has(suffix) || TYPESCRIPT_SUFFIXES.has(suffix)) && !isGeneratedPath(filePath);
+  return (
+    (PYTHON_SUFFIXES.has(suffix) || TYPESCRIPT_SUFFIXES.has(suffix)) && !isGeneratedPath(filePath)
+  );
 }
 
 export const SEARCH_STOP_WORDS = new Set([
@@ -154,42 +139,28 @@ function isCallableDefinition(match: SourceMatch, symbol: string): boolean {
   return new RegExp(`^${modifiers}${declaration}`).test(match.text);
 }
 
-/** Searches source text and symbols across target files. */
+/**
+ * Searches exact source text across target files.
+ *
+ * Symbol definitions are not repeated here: every caller runs `definitionMatches` first and reaches text search only after it found no definition.
+ */
 export function sourceMatches(
   root: string,
   searchText: string,
   {
     includeTests = false,
     limit,
-    textOnly = false,
   }: {
     includeTests?: boolean;
     limit: number;
-    textOnly?: boolean;
   },
 ): SourceMatch[] {
   const matches: SourceMatch[] = [];
   const seen = new Set<string>();
-  const candidateLimit = includeTests ? limit : Math.max(limit, SOURCE_CANDIDATE_LIMIT);
-  if (!textOnly && IDENTIFIER_RE.test(searchText)) {
-    for (const sourceMatch of astGrepSymbolMatches(root, [searchText], {
-      limit: candidateLimit,
-    })[0] ?? []) {
-      if (!includeTests && isTestPath(sourceMatch.filePath)) {
-        continue;
-      }
-      appendMatch(matches, seen, sourceMatch, { limit });
-      if (matches.length >= limit) {
-        return matches;
-      }
-    }
-  }
   const textMatches = rankSourceMatches(
     ripgrepMatches(root, searchText, {
       includeTests,
-      limit: includeTests
-        ? limit - matches.length
-        : Math.max(limit - matches.length, SOURCE_CANDIDATE_LIMIT),
+      limit: includeTests ? limit : Math.max(limit, SOURCE_CANDIDATE_LIMIT),
     }),
     searchText,
   );

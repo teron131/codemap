@@ -230,8 +230,7 @@ function buildCurrentTreeSignalPayload(
   }
   const files = discoverFiles(root);
   if (files.length > DETAILED_ANALYSIS_FILE_LIMIT) {
-    const scan = runScan(root, files);
-    const payload = buildLightweightSignalPayload(scan.files, {
+    const payload = buildLightweightSignalPayload(runScan(root, files), {
       includeTests: Boolean(options.includeTests),
       root,
     });

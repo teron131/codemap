@@ -69,7 +69,9 @@ export function buildTypescriptFileReport(
       "public_field_definition",
     );
   else kinds.push("field_definition");
-  const declarations: Declaration[] = [];
+  const topLevel: Declaration[] = [];
+  // Native matches arrive in source preorder, so open declaration ranges identify each owner without ancestor walks.
+  const open: Array<{ declaration: Declaration; endIndex: number }> = [];
   for (const node of root.findAll({ rule: { any: kinds.map((kind) => ({ kind })) } })) {
     const name = (node.field("name") ?? node.field("property"))?.text();
     if (!name) continue;
@@ -97,21 +99,18 @@ export function buildTypescriptFileReport(
           : null;
       if (signature === null && (field || !comment?.block)) continue;
     }
-    declarations.push({
+    const declaration: Declaration = {
       node,
       signature,
       name,
       kind: kind.includes("class_declaration") ? "class" : "function",
       docstring: comment?.text ?? null,
       children: [],
-    });
-  }
-  const byId = new Map(declarations.map((declaration) => [declaration.node.id(), declaration]));
-  const topLevel: Declaration[] = [];
-  for (const declaration of declarations) {
-    const owner = declaration.node.ancestors().find((ancestor) => byId.has(ancestor.id()));
-    if (owner) byId.get(owner.id())!.children.push(declaration);
-    else topLevel.push(declaration);
+    };
+    const range = node.range();
+    while (open.length && range.start.index >= open.at(-1)!.endIndex) open.pop();
+    (open.at(-1)?.declaration.children ?? topLevel).push(declaration);
+    open.push({ declaration, endIndex: range.end.index });
   }
   for (const declaration of topLevel) {
     if (declaration.kind === "class") report.classes.push(classReport(declaration));

@@ -2,25 +2,25 @@
 import path from "node:path";
 
 import { DETAILED_ANALYSIS_FILE_LIMIT } from "../common.js";
-import { recordValue } from "../json-utils.js";
 import { docstringForSymbol } from "../source/docstrings/index.js";
 import { runScan } from "../source/extraction/index.js";
 import {
-  currentTreeSummaryGraph,
+  buildLikelyEntries,
+  buildPathRankedLikelyEntries,
   edgeRelationshipLabel,
   type GraphEdge,
   type GraphNode,
   type GraphPayload,
+  inventoryFileNodes,
+  type LikelyEntry,
   relatedEdges,
 } from "../source/graph/index.js";
-import { buildLikelyEntries, buildPathRankedLikelyEntries } from "../source/graph/index.js";
-import { currentTreeInspectGraph } from "./graph.js";
+import { currentTreeInspectGraph, type InspectMetrics } from "./graph.js";
 import {
   appendFileProfile,
   appendLikelyEntryContext,
+  appendListSection,
   appendSymbolProfile,
-  fileMetricsForPath,
-  type LikelyEntryContext,
   renderDirectoryProfile,
   renderLightweightDirectoryInspection,
   renderLightweightFileInspection,
@@ -34,182 +34,102 @@ export function renderCurrentTreeInspection(
   target: string,
   { limit }: { limit: number },
 ): string | null {
+  const scan = runScan(root);
   const pathTargetKind = inspectPathTargetKind(root, target);
-  let pathTargetScan: ReturnType<typeof runScan> | null = null;
-  if (pathTargetKind !== null) {
-    const scan = runScan(root);
-    pathTargetScan = scan;
-    if (scan.files.length > DETAILED_ANALYSIS_FILE_LIMIT) {
-      const likelyEntries = likelyEntryContextByFile(currentTreeSummaryGraph(root, scan));
-      const inspection =
-        pathTargetKind === "directory"
-          ? renderLightweightDirectoryInspection(root, target, scan.files, {
-              limit,
-            })
-          : renderLightweightFileInspection(root, target, scan.files, {
-              limit,
-              likelyEntries,
-            });
-      if (inspection !== null) {
-        return inspection;
-      }
+  if (pathTargetKind !== null && scan.length > DETAILED_ANALYSIS_FILE_LIMIT) {
+    const inspection =
+      pathTargetKind === "directory"
+        ? renderLightweightDirectoryInspection(root, target, scan, { limit })
+        : renderLightweightFileInspection(root, target, scan, {
+            limit,
+            likelyEntries: likelyEntriesByFile(
+              buildPathRankedLikelyEntries(inventoryFileNodes(scan)),
+            ),
+          });
+    if (inspection !== null) {
+      return inspection;
     }
   }
-  const [graph, metrics] = currentTreeInspectGraph(root, target, pathTargetScan);
+  const [graph, metrics] = currentTreeInspectGraph(root, target, scan);
   return renderInspection(root, graph, metrics, target, {
     limit,
-    likelyEntries: likelyEntryContextByFile(graph),
+    likelyEntries: likelyEntriesByFile(buildLikelyEntries(graph.nodes, graph.edges)),
   });
 }
 
-/** Builds likely-entry context keyed by source file path from graph evidence. */
-function likelyEntryContextByFile(graph: GraphPayload): Record<string, LikelyEntryContext> {
-  const importMapEvidence = recordValue(graph.evidence.importMap);
-  const entries =
-    importMapEvidence.mode === "lightweight-summary"
-      ? buildPathRankedLikelyEntries(graph.nodes)
-      : buildLikelyEntries(graph.nodes, graph.edges);
-  const byFile: Record<string, LikelyEntryContext> = {};
-  for (const entry of entries) {
-    if (entry === null || typeof entry !== "object") {
-      continue;
-    }
-    const row = entry as Record<string, unknown>;
-    const filePath = String(row.title ?? "");
-    if (!filePath) {
-      continue;
-    }
-    byFile[filePath] = {
-      role: row.role,
-      reason: row.reason,
-      description: row.description,
-    };
-  }
-  return byFile;
+/** Keys likely-entry rows by their source file path. */
+function likelyEntriesByFile(entries: LikelyEntry[]): Map<string, LikelyEntry> {
+  return new Map(entries.map((entry) => [entry.title, entry]));
 }
 
 /** Renders the opposite endpoint and direction for a graph edge. */
-export function edgeEndpoint(
-  edge: GraphEdge,
-  nodeId: string,
-  nodesById: Record<string, GraphNode | undefined>,
-): string {
-  const otherId = String(edge.source === nodeId ? edge.target : edge.source);
-  const other = nodesById[otherId];
+function edgeEndpoint(edge: GraphEdge, nodeId: string, nodesById: Map<string, GraphNode>): string {
+  const otherId = edge.source === nodeId ? edge.target : edge.source;
+  const other = nodesById.get(otherId);
   const label = other ? nodeLabel(other) : otherId;
   return `${edgeRelationshipLabel(edge, nodeId)}: ${label}`;
 }
 
-/** Appends incoming or outgoing graph edges to inspection text. */
-export function appendEdgeSection(
-  lines: string[],
-  title: string,
-  edges: GraphEdge[],
-  nodeId: string,
-  nodesById: Record<string, GraphNode | undefined>,
-  { limit }: { limit: number },
-): void {
-  if (edges.length === 0) {
-    return;
-  }
-  lines.push("");
-  lines.push(title);
-  for (const edge of edges.slice(0, limit)) {
-    lines.push(`- ${edgeEndpoint(edge, nodeId, nodesById)}`);
-  }
-  appendLimitMarker(lines, edges.length, limit);
-}
-
-/** Appends contained child nodes to inspection text. */
-export function appendContainsSection(
-  lines: string[],
-  contains: GraphEdge[],
-  nodesById: Record<string, GraphNode | undefined>,
-  { limit }: { limit: number },
-): void {
-  if (contains.length === 0) {
-    return;
-  }
-  lines.push("");
-  lines.push("## Contains");
-  for (const edge of contains.slice(0, limit)) {
-    const child = nodesById[String(edge.target)] ?? {};
-    lines.push(`- ${nodeLabel(child)}`);
-  }
-  appendLimitMarker(lines, contains.length, limit);
-}
-
-/** Appends class definitions contained directly by an inspected file node. */
-function appendClassesInFileSection(
-  lines: string[],
-  contains: GraphEdge[],
-  nodesById: Record<string, GraphNode | undefined>,
-  { limit }: { limit: number },
-): void {
-  const classes = contains
-    .map((edge) => nodesById[String(edge.target)])
-    .filter((node): node is GraphNode => node?.type === "class");
-  if (classes.length === 0) {
-    return;
-  }
-  lines.push("");
-  lines.push("## Classes In File");
-  for (const item of classes.slice(0, limit)) {
-    lines.push(`- ${nodeLabel(item)}`);
-  }
-  appendLimitMarker(lines, classes.length, limit);
-}
-
 /** Appends related import and symbol sections to inspection output. */
-export function appendRelatedSections(
+function appendRelatedSections(
   lines: string[],
   graph: GraphPayload,
-  nodeId: string,
-  nodesById: Record<string, GraphNode | undefined>,
+  node: GraphNode,
+  nodesById: Map<string, GraphNode>,
   { limit }: { limit: number },
 ): void {
-  const node = nodesById[nodeId];
   const importEdges: GraphEdge[] = [];
-  const containsEdges: GraphEdge[] = [];
+  const containedNodes: GraphNode[] = [];
   const callEdges: GraphEdge[] = [];
-  for (const edge of relatedEdges(graph, nodeId)) {
+  for (const edge of relatedEdges(graph, node.id)) {
     if (edge.type === "imports") {
       importEdges.push(edge);
-    } else if (edge.type === "contains" && edge.source === nodeId) {
-      containsEdges.push(edge);
+    } else if (edge.type === "contains" && edge.source === node.id) {
+      const child = nodesById.get(edge.target);
+      if (child !== undefined) {
+        containedNodes.push(child);
+      }
     } else if (edge.type === "calls") {
       callEdges.push(edge);
     }
   }
-  appendEdgeSection(lines, "## Imports", importEdges, nodeId, nodesById, {
+  appendListSection(
+    lines,
+    "Imports",
+    importEdges.map((edge) => edgeEndpoint(edge, node.id, nodesById)),
     limit,
-  });
-  if (node?.type === "file") {
-    appendClassesInFileSection(lines, containsEdges, nodesById, { limit });
-    appendContainsSection(
+  );
+  if (node.type === "file") {
+    appendListSection(
       lines,
-      containsEdges.filter((edge) => nodesById[String(edge.target)]?.type !== "class"),
-      nodesById,
-      { limit },
+      "Classes In File",
+      containedNodes.filter((child) => child.type === "class").map(nodeLabel),
+      limit,
+    );
+    appendListSection(
+      lines,
+      "Contains",
+      containedNodes.filter((child) => child.type !== "class").map(nodeLabel),
+      limit,
     );
   } else {
-    appendContainsSection(lines, containsEdges, nodesById, { limit });
+    appendListSection(lines, "Contains", containedNodes.map(nodeLabel), limit);
   }
-  appendEdgeSection(lines, "## Calls", callEdges, nodeId, nodesById, {
+  appendListSection(
+    lines,
+    "Calls",
+    callEdges.map((edge) => edgeEndpoint(edge, node.id, nodesById)),
     limit,
-  });
+  );
 }
 
 /** Renders an inspection profile with related graph context. */
-export function renderInspection(
+function renderInspection(
   root: string,
   graph: GraphPayload,
-  metrics: Record<string, unknown>,
+  metrics: InspectMetrics,
   rawTarget: string,
-  {
-    limit,
-    likelyEntries = {},
-  }: { limit: number; likelyEntries?: Record<string, LikelyEntryContext> },
+  { limit, likelyEntries }: { limit: number; likelyEntries: Map<string, LikelyEntry> },
 ): string | null {
   const target = normalizeTarget(root, rawTarget);
   const directoryProfile = renderDirectoryProfile(root, graph, metrics, target, {
@@ -219,40 +139,25 @@ export function renderInspection(
     return directoryProfile;
   }
 
-  const candidates = inspectCandidates(graph.nodes ?? [], target);
-  if (candidates.length === 0) {
-    return renderVariableProfile(target, metrics, { limit });
-  }
-
+  const candidates = inspectCandidates(graph.nodes, target);
   const node = candidates[0];
   if (node === undefined) {
-    return null;
+    return renderVariableProfile(target, metrics, { limit });
   }
-  const nodeId = String(node.id);
-  const nodesById = Object.fromEntries(
-    (graph.nodes ?? []).map((item) => [String(item.id), item]),
-  ) as Record<string, GraphNode | undefined>;
-  const relPath = String(node.filePath ?? "");
-  const lines = [`# ${nodeLabel(node)}`, "", String(node.summary ?? "").trim()];
+  const nodesById = new Map(graph.nodes.map((item) => [item.id, item]));
+  const relPath = node.filePath;
+  const lines = [`# ${nodeLabel(node)}`, "", node.summary.trim()];
 
-  appendLikelyEntryContext(lines, likelyEntries[relPath]);
+  appendLikelyEntryContext(lines, likelyEntries.get(relPath));
   appendSymbolProfile(lines, node);
   appendDocstringSection(lines, root, node);
-  appendRelatedSections(lines, graph, nodeId, nodesById, { limit });
+  appendRelatedSections(lines, graph, node, nodesById, { limit });
   if (relPath) {
-    appendFileProfile(lines, fileMetricsForPath(metrics, relPath), { limit });
+    appendFileProfile(lines, metrics, relPath, { limit });
   }
 
-  if (
-    candidates.length > 1 &&
-    ["function", "class", "variable"].includes(String(node.type ?? ""))
-  ) {
-    lines.push("");
-    lines.push("## Other Matches");
-    for (const item of candidates.slice(1, limit)) {
-      lines.push(`- ${nodeLabel(item)}`);
-    }
-    appendLimitMarker(lines, candidates.length - 1, limit - 1);
+  if (["function", "class", "variable"].includes(node.type)) {
+    appendListSection(lines, "Other Matches", candidates.slice(1).map(nodeLabel), limit - 1);
   }
   return lines.join("\n").trim();
 }
@@ -272,15 +177,14 @@ function appendDocstringSection(lines: string[], root: string, node: GraphNode):
 
 /** Finds a docstring report entry matching one inspected graph node. */
 function docstringForNode(root: string, node: GraphNode): string | null {
-  const relPath = String(node.filePath ?? "");
-  const nodeType = String(node.type ?? "");
-  if (!relPath || (nodeType !== "class" && nodeType !== "function")) {
+  const relPath = node.filePath;
+  if (!relPath || (node.type !== "class" && node.type !== "function")) {
     return null;
   }
   return docstringForSymbol(path.join(root, relPath), {
     displayPath: relPath,
-    kind: nodeType,
-    name: String(node.name ?? ""),
+    kind: node.type,
+    name: node.name,
     line: Number(node.lineRange?.[0] ?? 0),
   });
 }
@@ -316,11 +220,4 @@ function compactDocstringLines(docstring: string): string[] {
     shown.push(openFence);
   }
   return shown;
-}
-
-/** Marks list sections that were shortened by the display limit. */
-function appendLimitMarker(lines: string[], total: number, shown: number): void {
-  if (total > shown) {
-    lines.push("- ...");
-  }
 }

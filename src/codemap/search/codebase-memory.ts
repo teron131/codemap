@@ -24,18 +24,16 @@ export type CodebaseMemoryGraphSearchOptions = CodebaseMemoryRenderOptions & {
   offset?: number;
 };
 
-type CodebaseMemoryGraphRenderOptions = CodebaseMemoryRenderOptions &
-  Pick<
-    CodebaseMemoryGraphSearchOptions,
-    | "excludeEntryPoints"
-    | "filePattern"
-    | "label"
-    | "maxDegree"
-    | "minDegree"
-    | "namePattern"
-    | "qnPattern"
-    | "relationship"
-  >;
+type SearchRowSelection = {
+  allRows: unknown[];
+  testFilteredRows: unknown[];
+  visibleRows: unknown[];
+};
+
+type SemanticSearchResult = {
+  rows: unknown[];
+  hasMore: boolean;
+};
 
 const MIN_SEMANTIC_SCORE = 0.5;
 const BACKEND_SEARCH_CANDIDATE_LIMIT = 100;
@@ -63,7 +61,7 @@ function codebaseMemoryGraphSearch(
   root: string,
   searchText: string,
   limit: number,
-  options: CodebaseMemoryGraphSearchOptions = {},
+  options: CodebaseMemoryGraphSearchOptions,
 ): unknown | null {
   return withFreshCodebaseMemoryProject(root, (project) => {
     const result = callCodebaseMemoryTool("search_graph", {
@@ -84,12 +82,12 @@ function codebaseMemoryGraphSearch(
   });
 }
 
-/** Reads backend semantic graph search results when available. */
+/** Reads backend semantic graph rows whose score clears the useful-signal floor. */
 function codebaseMemorySemanticSearch(
   root: string,
   searchText: string,
   limit: number,
-): unknown | null {
+): SemanticSearchResult | null {
   return withFreshCodebaseMemoryProject(root, (project) => {
     const result = callCodebaseMemoryTool("search_graph", {
       project: project.name,
@@ -101,8 +99,12 @@ function codebaseMemorySemanticSearch(
     if (!result.ok) {
       return null;
     }
-    const payload = semanticSearchPayload(result.value);
-    return hasSearchAnswer(payload, ["semantic_results"]) ? payload : null;
+    const record = recordValue(result.value);
+    const rows = arrayValue(record.semantic_results).filter((item) => {
+      const score = numberField(recordValue(item).score);
+      return score !== null && score >= MIN_SEMANTIC_SCORE;
+    });
+    return rows.length > 0 ? { rows, hasMore: record.semantic_has_more === true } : null;
   });
 }
 
@@ -129,20 +131,6 @@ function graphSearchArgs(options: CodebaseMemoryGraphSearchOptions): Record<stri
   };
 }
 
-/** Keeps only semantic rows whose score clears the useful-signal floor. */
-function semanticSearchPayload(value: unknown): Record<string, unknown> {
-  const record = recordValue(value);
-  const semanticResults = arrayValue(record.semantic_results).filter((item) => {
-    const score = numberField(recordValue(item).score);
-    return score !== null && score >= MIN_SEMANTIC_SCORE;
-  });
-  return {
-    search_mode: "semantic",
-    semantic_results: semanticResults,
-    has_more: typeof record.semantic_has_more === "boolean" ? record.semantic_has_more : false,
-  };
-}
-
 /** Splits user search text into a bounded semantic keyword array. */
 function semanticTerms(searchText: string): string[] {
   const terms = searchText
@@ -164,11 +152,20 @@ export function printCodebaseMemorySearch(
   if (result === null) {
     return false;
   }
-  if (searchRowSelection(recordValue(result).results, options).visibleRows.length === 0) {
+  const record = recordValue(result);
+  const selection = searchRowSelection(record.results, options);
+  if (selection.visibleRows.length === 0) {
     return false;
   }
+  const shown = selection.visibleRows.slice(0, limit);
+  const lines = [`results: ${shown.length}`, ...hiddenTestLines(selection)];
+  const grepTotal = numberField(record.total_grep_matches);
+  if (grepTotal !== null) {
+    lines.push(`grep matches: ${grepTotal}`);
+  }
+  appendSearchRows(lines, shown, selection.visibleRows.length > shown.length);
   console.log("\nCodebaseMemory code matches:");
-  console.log(renderCodebaseMemoryCodeSearch(result, { limit, ...options }));
+  console.log(lines.join("\n"));
   return true;
 }
 
@@ -179,27 +176,35 @@ export function printCodebaseMemoryGraphSearch(
   limit: number,
   options: CodebaseMemoryGraphSearchOptions = {},
 ): boolean {
-  const { includeTests = false, ...backendOptions } = options;
+  const { includeTests = false, ...filters } = options;
   const result = codebaseMemoryGraphSearch(
     root,
     searchText,
     backendFetchLimit(limit, { includeTests }),
-    backendOptions,
+    filters,
   );
   if (result === null) {
     return false;
   }
-  if (!hasVisibleGraphSearchRows(result, { includeTests, ...backendOptions })) {
+  const record = recordValue(result);
+  const selection = searchRowSelection(record.results, { includeTests });
+  const filteredRows = selection.visibleRows.filter((row) => graphSearchRowMatches(row, filters));
+  if (filteredRows.length === 0) {
     return false;
   }
+  const shown = filteredRows.slice(0, limit);
+  const lines = [
+    `mode: ${stringField(record.search_mode) ?? "graph"}`,
+    `results: ${shown.length}`,
+    ...hiddenTestLines(selection),
+  ];
+  const hiddenFilterRows = selection.testFilteredRows.length - filteredRows.length;
+  if (hiddenFilterRows > 0) {
+    lines.push(`hidden filtered: ${hiddenFilterRows}`);
+  }
+  appendSearchRows(lines, shown, Boolean(record.has_more) || filteredRows.length > shown.length);
   console.log("\nCodebaseMemory graph matches:");
-  console.log(
-    renderCodebaseMemoryGraphSearch(result, {
-      limit,
-      includeTests,
-      ...backendOptions,
-    }),
-  );
+  console.log(lines.join("\n"));
   return true;
 }
 
@@ -214,114 +219,44 @@ export function printCodebaseMemorySemanticSearch(
   if (result === null) {
     return false;
   }
-  if (searchRowSelection(recordValue(result).semantic_results, options).visibleRows.length === 0) {
+  const selection = searchRowSelection(result.rows, options);
+  if (selection.visibleRows.length === 0) {
     return false;
   }
+  const shown = selection.visibleRows.slice(0, limit);
+  const lines = [
+    "mode: semantic",
+    `semantic results: ${shown.length}`,
+    ...hiddenTestLines(selection),
+  ];
+  appendSearchRows(lines, shown, result.hasMore || selection.visibleRows.length > shown.length);
   console.log("\nCodebaseMemory semantic matches:");
-  console.log(renderCodebaseMemorySemanticSearch(result, { limit, ...options }));
+  console.log(lines.join("\n"));
   return true;
 }
 
-/** Renders compact CodebaseMemory search_code rows. */
-function renderCodebaseMemoryCodeSearch(
-  value: unknown,
-  {
-    includeTests = false,
-    limit,
-  }: CodebaseMemoryRenderOptions & {
-    limit: number;
-  },
-): string {
-  const record = recordValue(value);
-  const {
-    allRows,
-    testFilteredRows,
-    visibleRows: filteredRows,
-  } = searchRowSelection(record.results, { includeTests });
-  const rows = filteredRows.slice(0, limit);
-  const hiddenRows = includeTests ? 0 : allRows.length - testFilteredRows.length;
-  const visibleRows = filteredRows.length;
-  const grepTotal = numberField(record.total_grep_matches);
-  const lines = [`results: ${rows.length}`];
-  if (hiddenRows > 0) {
-    lines.push(`hidden tests: ${hiddenRows} (use --include-tests)`);
-  }
-  if (grepTotal !== null) {
-    lines.push(`grep matches: ${grepTotal}`);
-  }
-  if (rows.length === 0) {
+/** Reports rows removed by default test suppression. */
+function hiddenTestLines(selection: SearchRowSelection): string[] {
+  const hiddenRows = selection.allRows.length - selection.testFilteredRows.length;
+  return hiddenRows > 0 ? [`hidden tests: ${hiddenRows} (use --include-tests)`] : [];
+}
+
+/** Appends shown backend rows, or an explicit empty marker, plus a continuation marker. */
+function appendSearchRows(lines: string[], shown: unknown[], hasMore: boolean): void {
+  if (shown.length === 0) {
     lines.push("  none");
-    return lines.join("\n");
+    return;
   }
-  for (const item of rows) {
+  for (const item of shown) {
     lines.push(...renderSearchRow(item));
   }
-  if (visibleRows > rows.length) {
+  if (hasMore) {
     lines.push("- ...");
   }
-  return lines.join("\n");
-}
-
-/** Renders compact CodebaseMemory search_graph rows. */
-function renderCodebaseMemoryGraphSearch(
-  value: unknown,
-  options: CodebaseMemoryGraphRenderOptions & { limit: number },
-): string {
-  const { includeTests = false, limit } = options;
-  const record = recordValue(value);
-  const { allRows, testFilteredRows, filteredRows } = graphSearchRows(value, options);
-  const rows = filteredRows.slice(0, limit);
-  const hiddenTestRows = includeTests ? 0 : allRows.length - testFilteredRows.length;
-  const hiddenFilterRows = testFilteredRows.length - filteredRows.length;
-  const lines = [`mode: ${stringField(record.search_mode) ?? "graph"}`, `results: ${rows.length}`];
-  if (hiddenTestRows > 0) {
-    lines.push(`hidden tests: ${hiddenTestRows} (use --include-tests)`);
-  }
-  if (hiddenFilterRows > 0) {
-    lines.push(`hidden filtered: ${hiddenFilterRows}`);
-  }
-  if (rows.length === 0) {
-    lines.push("  none");
-    return lines.join("\n");
-  }
-  for (const item of rows) {
-    lines.push(...renderSearchRow(item));
-  }
-  if (record.has_more) {
-    lines.push("- ...");
-  } else if (filteredRows.length > rows.length) {
-    lines.push("- ...");
-  }
-  return lines.join("\n");
-}
-
-/** Returns whether graph search has rows visible after CLI-side filters. */
-function hasVisibleGraphSearchRows(
-  value: unknown,
-  options: CodebaseMemoryGraphRenderOptions,
-): boolean {
-  return graphSearchRows(value, options).filteredRows.length > 0;
-}
-
-/** Applies test and graph filters to backend graph search rows. */
-function graphSearchRows(
-  value: unknown,
-  options: CodebaseMemoryGraphRenderOptions,
-): {
-  allRows: unknown[];
-  testFilteredRows: unknown[];
-  filteredRows: unknown[];
-} {
-  const { allRows, testFilteredRows, visibleRows } = searchRowSelection(
-    recordValue(value).results,
-    options,
-  );
-  const filteredRows = visibleRows.filter((row) => graphSearchRowMatches(row, options));
-  return { allRows, testFilteredRows, filteredRows };
 }
 
 /** Checks output-side graph filters when the backend returns broader rows. */
-function graphSearchRowMatches(value: unknown, options: CodebaseMemoryGraphRenderOptions): boolean {
+function graphSearchRowMatches(value: unknown, options: CodebaseMemoryGraphSearchOptions): boolean {
   const row = recordValue(value);
   const nested = recordValue(row.node);
   const label = stringField(row.label) ?? stringField(nested.label);
@@ -332,8 +267,8 @@ function graphSearchRowMatches(value: unknown, options: CodebaseMemoryGraphRende
   const degree = graphSearchRowDegree(row, nested);
   return (
     matchesTextFilter(label, options.label, { exact: true }) &&
-    matchesTextFilter(name, options.namePattern, { exact: false }) &&
-    matchesTextFilter(qualifiedName, options.qnPattern, { exact: false }) &&
+    matchesTextFilter(name, options.namePattern) &&
+    matchesTextFilter(qualifiedName, options.qnPattern) &&
     matchesGlobFilter(filePath, options.filePattern) &&
     graphSearchRowMatchesRelationship(row, nested, options.relationship) &&
     (options.minDegree === undefined || degree >= options.minDegree) &&
@@ -441,11 +376,7 @@ function graphSearchRowIsEntryPoint(
 function searchRowSelection(
   value: unknown,
   options: CodebaseMemoryRenderOptions,
-): {
-  allRows: unknown[];
-  testFilteredRows: unknown[];
-  visibleRows: unknown[];
-} {
+): SearchRowSelection {
   const allRows = arrayValue(value);
   const testFilteredRows = allRows.filter(
     (item) => options.includeTests === true || !testLikeSearchRow(item),
@@ -529,47 +460,6 @@ function backendFetchLimit(
   { includeTests = false }: CodebaseMemoryRenderOptions,
 ): number {
   return includeTests ? limit : Math.max(limit, BACKEND_SEARCH_CANDIDATE_LIMIT);
-}
-
-/** Renders CodebaseMemory semantic graph search rows. */
-function renderCodebaseMemorySemanticSearch(
-  value: unknown,
-  {
-    includeTests = false,
-    limit,
-  }: CodebaseMemoryRenderOptions & {
-    limit: number;
-  },
-): string {
-  const record = recordValue(value);
-  const {
-    allRows,
-    testFilteredRows,
-    visibleRows: filteredRows,
-  } = searchRowSelection(record.semantic_results, { includeTests });
-  const rows = filteredRows.slice(0, limit);
-  const hiddenRows = includeTests ? 0 : allRows.length - testFilteredRows.length;
-  const visibleRows = filteredRows.length;
-  const lines = [
-    `mode: ${stringField(record.search_mode) ?? "semantic"}`,
-    `semantic results: ${rows.length}`,
-  ];
-  if (hiddenRows > 0) {
-    lines.push(`hidden tests: ${hiddenRows} (use --include-tests)`);
-  }
-  if (rows.length === 0) {
-    lines.push("  none");
-    return lines.join("\n");
-  }
-  for (const item of rows) {
-    lines.push(...renderSearchRow(item));
-  }
-  if (record.has_more) {
-    lines.push("- ...");
-  } else if (visibleRows > rows.length) {
-    lines.push("- ...");
-  }
-  return lines.join("\n");
 }
 
 /** Formats backend confidence scores without noisy floating-point tails. */
