@@ -18,7 +18,6 @@ export type ScanEntry = {
 
 export type ScanPayload = {
   files: ScanEntry[];
-  filteredByTool: number;
   stats: {
     filesScanned: number;
     byCategory: Record<string, number>;
@@ -151,7 +150,6 @@ function scanInventory(files: ScanEntry[]): ScanPayload {
   const byLanguage = countBy(files, (entry) => String(entry.language ?? "unknown"));
   return {
     files,
-    filteredByTool: 0,
     stats: {
       filesScanned: files.length,
       byCategory,

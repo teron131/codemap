@@ -326,6 +326,14 @@ export function docstringForSymbol(
   const report = PYTHON_SUFFIXES.has(suffix)
     ? buildPythonFileReport(filePath, { displayPath })
     : buildTypescriptFileReport(filePath, { displayPath });
+  return symbolDocstring(report, { kind, name, line });
+}
+
+/** Matches a symbol against an existing report so one operation can reuse its file parse. */
+export function symbolDocstring(
+  report: FileReport,
+  { kind, name, line = 0 }: { kind: SymbolDocstringKind; name: string; line?: number },
+): string | null {
   const functionDocstring =
     kind === "function" ? matchingFunctionDocstring(report.functions, name, line) : null;
   return functionDocstring ?? matchingClassDocstring(report.classes, name, line, kind);
@@ -399,20 +407,6 @@ export function buildDocstringsData(targetPath: string): DocstringsData {
       classes: report.classes.map((classReport) => classToDict(classReport)),
     })),
   };
-}
-
-/** Builds docstring preview text keyed by display file path. */
-export function buildFilePreviews(
-  targetPath: string,
-  { focusFiles, maxFiles = 0 }: { focusFiles: string[]; maxFiles?: number },
-): FilePreview[] {
-  const [moduleRoot, reports] = collectReports(targetPath, { focusFiles });
-  const focusedReports = selectReports(reports, { focusFiles, moduleRoot });
-  const shownReports = maxFiles <= 0 ? focusedReports : focusedReports.slice(0, maxFiles);
-  return shownReports.map((report) => ({
-    file: report.displayPath,
-    preview: docstringPreview(report.fileDocstring),
-  }));
 }
 
 /** Builds docstring coverage summaries for selected source files. */

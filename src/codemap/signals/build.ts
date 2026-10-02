@@ -18,9 +18,9 @@ import {
 } from "../source/scanner/index.js";
 import { compareText } from "../text-utils.js";
 import {
-  buildSignalFocusEntries,
   fileProfileRow,
   functionLengthSection,
+  rankSignalFocusFiles,
   topHubs,
   topInheritanceHubs,
 } from "./analysis.js";
@@ -94,25 +94,6 @@ function buildFunctionLengthsSection(scannedFiles: FileMetrics[]): Row {
   };
 }
 
-/** Finds README-like files that explain signal focus entries. */
-function signalFocusDocFilesFor(
-  targetPath: string,
-  displayRoot: string,
-  signalFocusEntries: ReturnType<typeof buildSignalFocusEntries>,
-): string[] {
-  if (isFile(targetPath) && DOCSTRING_SUFFIXES.has(path.extname(targetPath))) {
-    return [relativePath(targetPath, { displayRoot })];
-  }
-  const docFiles: string[] = [];
-  for (const entry of signalFocusEntries) {
-    const filePath = String(entry.file);
-    if (DOCSTRING_SUFFIXES.has(path.extname(filePath))) {
-      docFiles.push(filePath);
-    }
-  }
-  return docFiles;
-}
-
 /** Builds the compact docstring signal section for signal focus files. */
 function buildDocstringSignalSection(targetPath: string, signalFocusDocFiles: string[]): Row {
   const signalFocus = signalFocusDocFiles.slice(0, 3);
@@ -165,13 +146,13 @@ export function buildSignalExport(
     );
   }
   if (selected.has("docstring-signals")) {
-    const signalFocusEntries = buildSignalFocusEntries(fileProfileRows, {
-      entrypoints,
-    });
-    sections.docstring_signals = buildDocstringSignalSection(
-      targetPath,
-      signalFocusDocFilesFor(targetPath, displayRoot, signalFocusEntries),
-    );
+    const focusFiles =
+      isFile(targetPath) && DOCSTRING_SUFFIXES.has(path.extname(targetPath))
+        ? [relativePath(targetPath, { displayRoot })]
+        : rankSignalFocusFiles(fileProfileRows, { entrypoints }).filter((filePath) =>
+            DOCSTRING_SUFFIXES.has(path.extname(filePath)),
+          );
+    sections.docstring_signals = buildDocstringSignalSection(targetPath, focusFiles);
   }
   if (selected.has("file-profiles")) {
     sections.file_profiles = fileProfileRows;

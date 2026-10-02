@@ -7,6 +7,7 @@ import { docstringForSymbol } from "../source/docstrings/index.js";
 import { runScan } from "../source/extraction/index.js";
 import {
   currentTreeSummaryGraph,
+  edgeRelationshipLabel,
   type GraphEdge,
   type GraphNode,
   type GraphPayload,
@@ -97,21 +98,6 @@ export function edgeEndpoint(
   const other = nodesById[otherId];
   const label = other ? nodeLabel(other) : otherId;
   return `${edgeRelationshipLabel(edge, nodeId)}: ${label}`;
-}
-
-/** Names a graph edge direction in CLI-friendly language. */
-function edgeRelationshipLabel(edge: GraphEdge, nodeId: string): string {
-  const outgoing = edge.source === nodeId;
-  if (edge.type === "imports") {
-    return outgoing ? "imports" : "imported by";
-  }
-  if (edge.type === "calls") {
-    return outgoing ? "calls" : "called by";
-  }
-  if (edge.type === "contains") {
-    return outgoing ? "contains" : "in";
-  }
-  return outgoing ? String(edge.type) : `${String(edge.type)} by`;
 }
 
 /** Appends incoming or outgoing graph edges to inspection text. */
@@ -268,10 +254,7 @@ export function renderInspection(
     }
     appendLimitMarker(lines, candidates.length - 1, limit - 1);
   }
-  return lines
-    .filter((line) => line !== undefined && line !== null)
-    .join("\n")
-    .trim();
+  return lines.join("\n").trim();
 }
 
 /** Appends the target symbol's source docstring or declaration comment. */

@@ -1,5 +1,10 @@
 /** Searches derived graph relationship context for matching text. */
-import type { GraphEdge, GraphNode, GraphPayload } from "../source/graph/index.js";
+import {
+  edgeRelationshipLabel,
+  type GraphEdge,
+  type GraphNode,
+  type GraphPayload,
+} from "../source/graph/index.js";
 import { isTestPath } from "../source/scanner/index.js";
 import { compareText } from "../text-utils.js";
 import { matchesGlobFilter, matchesTextFilter } from "./filters.js";
@@ -163,21 +168,6 @@ function graphEdgeLabel(
   const otherNode = nodesById.get(otherId);
   const otherLabel = otherNode ? graphNodeLabel(otherNode) : otherId;
   return `${edgeRelationshipLabel(edge, nodeId)}: ${otherLabel}`;
-}
-
-/** Names a graph edge direction in CLI-friendly language. */
-function edgeRelationshipLabel(edge: GraphEdge, nodeId: string): string {
-  const outgoing = edge.source === nodeId;
-  if (edge.type === "imports") {
-    return outgoing ? "imports" : "imported by";
-  }
-  if (edge.type === "calls") {
-    return outgoing ? "calls" : "called by";
-  }
-  if (edge.type === "contains") {
-    return outgoing ? "contains" : "in";
-  }
-  return outgoing ? String(edge.type) : `${String(edge.type)} by`;
 }
 
 /** Indexes graph relationships and nodes once for filtered search and rendering. */

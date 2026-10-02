@@ -15,6 +15,7 @@ import {
 } from "../codebase-memory/index.js";
 import { resolveProjectRoot } from "../common.js";
 import { arrayValue, numberField, recordValue, stringField } from "../json-utils.js";
+import { uniqueStrings } from "../text-utils.js";
 import { addProjectRootArgument, parseIntegerOption } from "./options.js";
 
 type BackendOptions = {
@@ -361,7 +362,7 @@ function renderQueryRows(value: unknown): string {
   const rows =
     arrayValue(record.rows).length > 0 ? arrayValue(record.rows) : arrayValue(record.results);
   const total = numberField(record.total) ?? rows.length;
-  const renderedRows = uniqueRenderedRows(rows.map((row) => rowValueText(row)));
+  const renderedRows = uniqueStrings(rows.map((row) => rowValueText(row)));
   const hiddenDuplicates = rows.length - renderedRows.length;
   const lines = [
     `CodebaseMemory query rows: ${total}${hiddenDuplicates > 0 ? ` (hidden duplicates: ${hiddenDuplicates})` : ""}`,
@@ -373,20 +374,6 @@ function renderQueryRows(value: unknown): string {
     lines.push("  none");
   }
   return lines.join("\n");
-}
-
-/** Deduplicates rendered backend query rows while keeping their first order. */
-function uniqueRenderedRows(rows: string[]): string[] {
-  const seen = new Set<string>();
-  const unique: string[] = [];
-  for (const row of rows) {
-    if (seen.has(row)) {
-      continue;
-    }
-    seen.add(row);
-    unique.push(row);
-  }
-  return unique;
 }
 
 /** Renders one backend query row without noisy scalar JSON. */
