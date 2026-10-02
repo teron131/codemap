@@ -190,7 +190,7 @@ export function sourceMatches(
       limit: includeTests
         ? limit - matches.length
         : Math.max(limit - matches.length, SOURCE_CANDIDATE_LIMIT),
-    }).matches,
+    }),
     searchText,
   );
   for (const sourceMatch of textMatches) {

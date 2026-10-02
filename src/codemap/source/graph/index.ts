@@ -4,6 +4,7 @@ export {
   buildCurrentTreeGraph,
   currentTreeGraph,
   currentTreeSummaryGraph,
+  edgeRelationshipLabel,
   relatedEdges,
 } from "./canonical.js";
 export { buildLikelyEntries, buildPathRankedLikelyEntries } from "./likely-entries.js";

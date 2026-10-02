@@ -77,8 +77,10 @@ export function buildSignalPayload(
   return {
     stats,
     top: {
-      functionMetrics: compactFunctionMetricRows(languageRows(recordValue(functions.byLength))),
-      functionsByMentions: compactFunctionMentionRows(functionRows),
+      functionMetrics: compactFunctionRows(
+        rankFunctionRowsByLength(languageRows(recordValue(functions.byLength))),
+      ),
+      functionsByMentions: compactFunctionRows(rankDefinitionRowsByMentions(functionRows)),
       variablesByNameLength: compactVariableNameLengthRows(variableRows),
     },
     ...payload,
@@ -187,21 +189,9 @@ function rowFile(row: Row): string {
   return identifier.split("::", 1)[0] ?? "";
 }
 
-/** Compacts locally ranked function metrics for backend fallback. */
-function compactFunctionMetricRows(rows: Row[]): Row[] {
-  return rankFunctionRowsByLength(rows).map((row) => ({
-    name: String(row.name ?? ""),
-    path: String(row.file ?? ""),
-    ...(Number(row.line ?? 0) > 0 ? { line: Number(row.line) } : {}),
-    lines: Number(row.lines ?? 0),
-    mentions: Number(row.count ?? 0),
-    ...(row.exported === true ? { exported: true } : {}),
-  }));
-}
-
-/** Compacts functions already ranked by mentions and then length. */
-function compactFunctionMentionRows(rows: Row[]): Row[] {
-  return rankDefinitionRowsByMentions(rows).map((row) => ({
+/** Projects either function ranking to the same location and measurement contract. */
+function compactFunctionRows(rows: Row[]): Row[] {
+  return rows.map((row) => ({
     name: String(row.name ?? ""),
     path: String(row.file ?? ""),
     ...(Number(row.line ?? 0) > 0 ? { line: Number(row.line) } : {}),
@@ -292,18 +282,10 @@ export function selectPayloadSection(
       ...recordValue(payload.top),
     };
   }
-  const key = payloadKeyForSection(section);
+  const key = section === "docstring-signals" ? "docstring_signals" : section;
   const coverage = recordValue(payload.coverage);
   return {
     ...(Object.keys(coverage).length === 0 ? {} : { coverage }),
     [key]: payload[key] ?? {},
   };
-}
-
-/** Maps CLI section names to payload field names. */
-function payloadKeyForSection(section: string): string {
-  if (section === "docstring-signals") {
-    return "docstring_signals";
-  }
-  return section;
 }

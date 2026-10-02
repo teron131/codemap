@@ -79,15 +79,3 @@ export type FileCountRow = SignalRow & {
   file: unknown;
   count: number;
 };
-
-export type SignalFocusEntry = SignalRow & {
-  score: number;
-  file: string;
-  role: string;
-  defines: number;
-  imports_local: number;
-  exports: number;
-  reexports_local: number;
-  samples?: unknown;
-  doc_preview?: unknown;
-};
