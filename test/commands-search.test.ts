@@ -909,6 +909,74 @@ describe("search command handler", () => {
     expect(output).not.toContain("matche,");
   });
 
+  it("orders equally ranked partial candidates by where their terms meet", async () => {
+    const filler = Array.from({ length: 30 }, (_, index) => `const filler${index} = ${index};`);
+    const sources = {
+      "a-scattered.ts": ["// retry", ...filler, "// backoff", ...filler, "// budget"],
+      "b-loose.ts": ["// retry with backoff", ...filler, "// budget"],
+      "c-scattered.ts": ["// budget", ...filler, "// retry", ...filler, "// backoff"],
+      "z-owner.ts": [
+        "// Retry helpers for transient failures.",
+        ...filler,
+        "export function backoff(attempt: number) {",
+        "  return attempt * 2;",
+        "}",
+        "export function run(task: () => void, budget: number) {",
+        "  return retry(task, backoff, budget);",
+        "}",
+      ],
+    };
+    for (const [file, lines] of Object.entries(sources)) {
+      writeFileSync(path.join(workDir, "src", file), `${lines.join("\n")}\n`, "utf8");
+    }
+
+    await expect(
+      commandSearch(["retry", "backoff", "budget"], {
+        projectRoot: workDir,
+        limit: "10",
+      }),
+    ).resolves.toBe(0);
+
+    const output = logLines().join("\n");
+    expect(output).toContain("No whole-query source match; partial candidates:");
+    expect(output.indexOf("src/z-owner.ts")).toBeLessThan(output.indexOf("src/b-loose.ts"));
+    expect(output.indexOf("src/b-loose.ts")).toBeLessThan(output.indexOf("src/a-scattered.ts"));
+    expect(output.indexOf("src/a-scattered.ts")).toBeLessThan(output.indexOf("src/c-scattered.ts"));
+    expect(output).toContain("36:10 return retry(task, backoff, budget);");
+    expect(output).not.toContain("Retry helpers for transient failures.");
+  });
+
+  it.each([1, 4])("retains earlier co-occurrence among %i complete candidates", async (count) => {
+    writeFileSync(
+      path.join(workDir, "src", "z-owner.ts"),
+      [
+        "const retryBackoff = true;",
+        "const retry = true;",
+        "const backoff = true;",
+        "const budget = 1;",
+      ].join("\n"),
+    );
+    for (let index = 1; index < count; index += 1) {
+      writeFileSync(
+        path.join(workDir, "src", `a-loose-${index}.ts`),
+        ["const retryBackoff = true;", "", "", "", "const budget = 1;"].join("\n"),
+      );
+    }
+
+    await expect(
+      commandSearch(["retry", "backoff", "budget"], { projectRoot: workDir }),
+    ).resolves.toBe(0);
+
+    const output = logLines().join("\n");
+    expect(output).toContain("1:7 const retryBackoff = true;");
+    if (count === 1) {
+      expect(output).toContain("Current-tree source candidates:");
+    } else {
+      expect(output).toContain("No whole-query source match; partial candidates:");
+      expect(output.indexOf("src/z-owner.ts")).toBeLessThan(output.indexOf("src/a-loose-1.ts"));
+    }
+  });
+
   it("preserves fallback evidence when a phrase has one meaningful term", async () => {
     writeFileSync(
       path.join(workDir, "src", "fallback-policy.ts"),

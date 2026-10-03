@@ -153,7 +153,10 @@ function renderInspection(
   appendDocstringSection(lines, root, node);
   appendRelatedSections(lines, graph, node, nodesById, { limit });
   if (relPath) {
-    appendFileProfile(lines, metrics, relPath, { limit });
+    appendFileProfile(lines, metrics, relPath, {
+      limit,
+      includeFunctions: node.type !== "function",
+    });
   }
 
   if (["function", "class", "variable"].includes(node.type)) {

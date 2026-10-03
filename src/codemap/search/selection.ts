@@ -20,13 +20,21 @@ type FallbackCandidate = {
   filePath: string;
   matchedTerms: string[];
   sourceMatchedTerms: string[];
+  pathRank: number;
 };
 
 type FallbackAnchor = Pick<SourceMatch, "column" | "line" | "text">;
 
-type FallbackCandidateInspection = {
+/** Read evidence for one candidate; `span` counts lines in its narrowest cohesive window and is infinite without one. */
+type InspectedFallbackCandidate = {
+  candidate: FallbackCandidate;
   anchors: FallbackAnchor[];
-  cohesive: boolean;
+  span: number;
+};
+
+type PartialCandidateRanking = {
+  candidates: InspectedFallbackCandidate[];
+  bounded: boolean;
 };
 
 type FallbackLineWindow = {
@@ -34,10 +42,11 @@ type FallbackLineWindow = {
   startIndex: number;
 };
 
-type SourceFallbackCandidate = Omit<FallbackCandidate, "sourceMatchedTerms"> & {
+type SourceFallbackCandidate = Pick<FallbackCandidate, "filePath" | "matchedTerms"> & {
   anchors: FallbackAnchor[];
 };
 
+/** One current-tree fallback answer; a `truncated` scan status covers both a cut ripgrep collection and a partial ranking cut by its file bound. */
 export type SourceFallbackSearch = {
   candidates: SourceFallbackCandidate[];
   fullCoverage: boolean;
@@ -59,6 +68,7 @@ type FallbackTermCollection = RipgrepFileCollection & {
 const FALLBACK_TERM_LIMIT = 8;
 const FALLBACK_ANCHORS_PER_CANDIDATE = 2;
 const FALLBACK_COHESION_LINE_LIMIT = 50;
+const FALLBACK_RANKED_FILE_LIMIT = 1_000;
 const FAST_PATH_CANDIDATE_LIMIT = 3;
 const MULTI_TERM_CANDIDATE_LIMIT = 8;
 const SINGLE_TERM_CANDIDATE_LIMIT = 2;
@@ -142,30 +152,61 @@ export function sourceFallbackMatches(
     scannedTerms.length === 1
       ? Math.min(limit, SINGLE_TERM_CANDIDATE_LIMIT)
       : Math.min(limit, MULTI_TERM_CANDIDATE_LIMIT);
-  const inspectedFastPathCandidates = inspectFallbackCandidates(
-    root,
-    fastPathCandidates,
-    scannedTerms,
-    true,
-  );
-  const cohesiveCandidates = inspectedFastPathCandidates.filter((candidate) => candidate.cohesive);
+  const cohesiveCandidates = inspectFallbackCandidates(root, fastPathCandidates, scannedTerms)
+    .filter((inspected) => inspected.span <= FALLBACK_COHESION_LINE_LIMIT)
+    .sort(compareInspectedCandidates);
   const fullCoverage = cohesiveCandidates.length > 0;
-  const selectedCandidates = fullCoverage
-    ? cohesiveCandidates.slice(0, Math.min(limit, FAST_PATH_CANDIDATE_LIMIT))
-    : inspectFallbackCandidates(
-        root,
-        strongestCandidates.slice(0, candidateLimit),
-        scannedTerms,
-        false,
-      );
+  const selection = fullCoverage
+    ? {
+        candidates: cohesiveCandidates.slice(0, Math.min(limit, FAST_PATH_CANDIDATE_LIMIT)),
+        bounded: false,
+      }
+    : rankPartialCandidates(root, strongestCandidates, scannedTerms, candidateLimit);
   return {
-    candidates: selectedCandidates.map(({ candidate }) => candidate),
+    candidates: selection.candidates.map(({ anchors, candidate }) => ({
+      anchors,
+      filePath: candidate.filePath,
+      matchedTerms: candidate.matchedTerms,
+    })),
     fullCoverage,
     hasPathSupplementedCoverage,
     queryTerms: queryTerms.map((term) => term.label),
-    scanStatus,
+    scanStatus: selection.bounded && scanStatus === "complete" ? "truncated" : scanStatus,
     totalCandidates: fullCoverage ? completeSourceCandidates.length : strongestCandidates.length,
   };
+}
+
+/**
+ * Orders the strongest partial tier by local term co-occurrence without reading the whole tier.
+ *
+ * Coverage, path rank, and source-term count still lead, so only the leading candidate groups that can reach the display need their files read; within a group, a narrower cohesive window replaces alphabetical order. Groups whose content holds fewer than two query terms have no window and are read only for display anchors. A group cut by the file bound marks the ranking as a prefix.
+ */
+function rankPartialCandidates(
+  root: string,
+  candidates: FallbackCandidate[],
+  terms: FallbackQueryTerm[],
+  limit: number,
+): PartialCandidateRanking {
+  const inspected: InspectedFallbackCandidate[] = [];
+  let bounded = false;
+  let groupStart = 0;
+  while (groupStart < candidates.length && inspected.length < limit && !bounded) {
+    const first = candidates[groupStart]!;
+    let groupEnd = groupStart + 1;
+    while (
+      groupEnd < candidates.length &&
+      compareFallbackEvidence(first, candidates[groupEnd]!) === 0
+    ) {
+      groupEnd += 1;
+    }
+    const group = candidates.slice(groupStart, groupEnd);
+    const rankable = first.sourceMatchedTerms.length >= 2;
+    const readLimit = (rankable ? FALLBACK_RANKED_FILE_LIMIT : limit) - inspected.length;
+    bounded = rankable && group.length > readLimit;
+    inspected.push(...inspectFallbackCandidates(root, group.slice(0, readLimit), terms));
+    groupStart = groupEnd;
+  }
+  return { candidates: inspected.sort(compareInspectedCandidates).slice(0, limit), bounded };
 }
 
 /** Collects the files containing each query term from one bounded ripgrep lane. */
@@ -195,7 +236,7 @@ function collectFallbackFiles(
   });
 }
 
-/** Composes and ranks file candidates from per-term path collections. */
+/** Composes and ranks file candidates from per-term path collections without reading their content. */
 function fallbackCandidates(
   terms: FallbackQueryTerm[],
   collections: FallbackTermCollection[],
@@ -217,68 +258,53 @@ function fallbackCandidates(
       const matchedTerms = terms
         .filter((term) => matchedLabels.has(term.label) || fallbackTermMatchesPath(filePath, term))
         .map((term) => term.label);
-      return { filePath, matchedTerms, sourceMatchedTerms };
+      return {
+        filePath,
+        matchedTerms,
+        sourceMatchedTerms,
+        pathRank: sourcePathRank(filePath, searchText),
+      };
     })
-    .sort((left, right) => compareFallbackCandidates(left, right, searchText));
+    .sort(
+      (left, right) =>
+        compareFallbackEvidence(left, right) || compareText(left.filePath, right.filePath),
+    );
 }
 
-/** Adds concrete anchors and optional cohesion evidence to ranked fallback candidates. */
+/** Reads each candidate once for its narrowest cohesive window and the display anchors inside it. */
 function inspectFallbackCandidates(
   root: string,
   candidates: FallbackCandidate[],
   terms: FallbackQueryTerm[],
-  requireCohesion: boolean,
-): Array<{ candidate: SourceFallbackCandidate; cohesive: boolean }> {
+): InspectedFallbackCandidate[] {
   return candidates.map((candidate) => {
-    const inspection = inspectFallbackCandidate(
-      root,
-      candidate.filePath,
-      terms,
-      new Set(candidate.sourceMatchedTerms),
-      requireCohesion,
-    );
+    let source: string;
+    try {
+      source = readFileSync(path.resolve(root, candidate.filePath), "utf8");
+    } catch {
+      return { candidate, anchors: [], span: Number.POSITIVE_INFINITY };
+    }
+    const lines = source.split(/\r?\n/);
+    const matchedLabels = new Set(candidate.sourceMatchedTerms);
+    const window = fallbackCohesionWindow(lines, terms, matchedLabels);
     return {
-      candidate: {
-        anchors: inspection.anchors,
-        filePath: candidate.filePath,
-        matchedTerms: candidate.matchedTerms,
-      },
-      cohesive: inspection.cohesive,
+      candidate,
+      anchors: fallbackAnchors(lines, terms, matchedLabels, window ?? undefined),
+      span: window === null ? Number.POSITIVE_INFINITY : window.endIndex - window.startIndex + 1,
     };
   });
 }
 
-/** Reads one candidate once to find display anchors and bounded term cohesion. */
-function inspectFallbackCandidate(
-  root: string,
-  filePath: string,
-  terms: FallbackQueryTerm[],
-  matchedLabels: Set<string>,
-  requireCohesion: boolean,
-): FallbackCandidateInspection {
-  let source: string;
-  try {
-    source = readFileSync(path.resolve(root, filePath), "utf8");
-  } catch {
-    return { anchors: [], cohesive: false };
-  }
-  const lines = source.split(/\r?\n/);
-  const cohesionWindow = requireCohesion
-    ? fallbackCohesionWindow(lines, terms, matchedLabels)
-    : null;
-  return {
-    anchors: fallbackAnchors(lines, terms, matchedLabels, cohesionWindow ?? undefined),
-    cohesive: cohesionWindow !== null,
-  };
-}
-
-/** Finds the narrowest bounded source window with complete and locally dense term evidence. */
+/** Finds the narrowest source window holding every matched term where at least two terms share a line. */
 function fallbackCohesionWindow(
   lines: string[],
   terms: FallbackQueryTerm[],
   matchedLabels: Set<string>,
 ): FallbackLineWindow | null {
   const matchedTerms = terms.filter((term) => matchedLabels.has(term.label));
+  if (matchedTerms.length < 2) {
+    return null;
+  }
   const lastSeenLines = new Array<number>(matchedTerms.length).fill(-1);
   let latestDenseLine = -1;
   let narrowestWindow: FallbackLineWindow | null = null;
@@ -294,12 +320,9 @@ function fallbackCohesionWindow(
     if (lineTermCount >= 2) {
       latestDenseLine = lineIndex;
     }
-    const startIndex = Math.min(...lastSeenLines);
-    if (
-      startIndex < 0 ||
-      lineIndex - startIndex + 1 > FALLBACK_COHESION_LINE_LIMIT ||
-      latestDenseLine < startIndex
-    ) {
+    // Repeated singleton mentions must not discard the dense line that makes this window cohesive.
+    const startIndex = Math.min(...lastSeenLines, latestDenseLine);
+    if (startIndex < 0) {
       continue;
     }
     const window = { endIndex: lineIndex, startIndex };
@@ -374,20 +397,24 @@ function fallbackTermMatchesPath(filePath: string, term: FallbackQueryTerm): boo
   return term.variants.some((variant) => lowerPath.includes(variant));
 }
 
-/** Ranks broader term coverage before ordinary source usefulness. */
-function compareFallbackCandidates(
-  left: FallbackCandidate,
-  right: FallbackCandidate,
-  searchText: string,
-): number {
-  const coverageDifference = right.matchedTerms.length - left.matchedTerms.length;
-  if (coverageDifference !== 0) {
-    return coverageDifference;
-  }
+/** Ranks broader term coverage before ordinary source usefulness and content-backed coverage. */
+function compareFallbackEvidence(left: FallbackCandidate, right: FallbackCandidate): number {
   return (
-    sourcePathRank(left.filePath, searchText) - sourcePathRank(right.filePath, searchText) ||
-    right.sourceMatchedTerms.length - left.sourceMatchedTerms.length ||
-    compareText(left.filePath, right.filePath)
+    right.matchedTerms.length - left.matchedTerms.length ||
+    left.pathRank - right.pathRank ||
+    right.sourceMatchedTerms.length - left.sourceMatchedTerms.length
+  );
+}
+
+/** Breaks evidence ties by the narrower cohesive window, then by path. */
+function compareInspectedCandidates(
+  left: InspectedFallbackCandidate,
+  right: InspectedFallbackCandidate,
+): number {
+  return (
+    compareFallbackEvidence(left.candidate, right.candidate) ||
+    (left.span === right.span ? 0 : left.span < right.span ? -1 : 1) ||
+    compareText(left.candidate.filePath, right.candidate.filePath)
   );
 }
 
