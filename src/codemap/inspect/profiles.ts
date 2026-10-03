@@ -119,22 +119,24 @@ export function appendLikelyEntryContext(lines: string[], entry: LikelyEntry | u
   lines.push(`- evidence: ${entry.description}`);
 }
 
-/** Appends one file's measured functions and file-profile counters. */
+/** Appends one file's file-profile counters, preceded by its measured functions unless the caller omits that inventory. */
 export function appendFileProfile(
   lines: string[],
   metrics: InspectMetrics,
   relPath: string,
-  { limit }: { limit: number },
+  { limit, includeFunctions = true }: { limit: number; includeFunctions?: boolean },
 ): void {
-  const identifierPrefix = `${relPath}::`;
-  appendListSection(
-    lines,
-    "Functions In File",
-    metrics.functionLengths
-      .filter((item) => item.identifier.startsWith(identifierPrefix))
-      .map((item) => `${item.identifier}: ${item.count} lines`),
-    limit,
-  );
+  if (includeFunctions) {
+    const identifierPrefix = `${relPath}::`;
+    appendListSection(
+      lines,
+      "Functions In File",
+      metrics.functionLengths
+        .filter((item) => item.identifier.startsWith(identifierPrefix))
+        .map((item) => `${item.identifier}: ${item.count} lines`),
+      limit,
+    );
+  }
   appendFileProfileRow(
     lines,
     metrics.fileProfiles.filter((item) => item.file === relPath),

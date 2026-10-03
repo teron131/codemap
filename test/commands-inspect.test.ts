@@ -54,6 +54,8 @@ describe("inspect command handler", () => {
     expect(output).toContain("Runs the public app workflow.");
     expect(output).toContain("## Calls");
     expect(output).toContain("calls: helper in src/app.ts:7");
+    expect(output).toContain("## File Profile");
+    expect(output).not.toContain("## Functions In File");
   });
 
   it("inspects TypeScript methods by their bare name", () => {
@@ -169,7 +171,7 @@ describe("inspect command handler", () => {
       expect(commandInspect("handle_function_call", { local: true, projectRoot: workDir })).toBe(0);
       const output = logLines().join("\n");
       expect(output).toContain("file: src/app.py, lines: 4-11");
-      expect(output).toContain("src/app.py::handle_function_call: 8 lines");
+      expect(output).not.toContain("## Functions In File");
       expect(output).toContain("## Docstring");
       expect(output).toContain("Executes one tool.");
       expect(output).toContain("calls: helper in src/app.py:1");
@@ -217,6 +219,7 @@ describe("inspect command handler", () => {
     expect(output).toContain("- role: entry file");
     expect(output).toContain("- why: conventional app, main, or index filename");
     expect(output).toContain("## Contains");
+    expect(output).toContain("## Functions In File");
     expect(output).not.toContain("## Other Matches");
   });
 
