@@ -1,4 +1,4 @@
-/** Owns Codebase Memory search filtering, fallback eligibility, and CLI rendering. */
+/** Codebase Memory code, graph, and semantic search lanes. Each printer returns false without printing when the backend has no usable answer, so the caller can fall back. */
 
 import {
   callCodebaseMemoryTool,
@@ -39,7 +39,6 @@ const MIN_SEMANTIC_SCORE = 0.5;
 const BACKEND_SEARCH_CANDIDATE_LIMIT = 100;
 const JSON_FORMAT = { format: "json" } as const;
 
-/** Reads graph-augmented backend source search results when available. */
 function codebaseMemorySearch(root: string, searchText: string, limit: number): unknown | null {
   return withFreshCodebaseMemoryProject(root, (project) => {
     const result = callCodebaseMemoryTool("search_code", {
@@ -56,7 +55,6 @@ function codebaseMemorySearch(root: string, searchText: string, limit: number): 
   });
 }
 
-/** Reads backend graph search results when available. */
 function codebaseMemoryGraphSearch(
   root: string,
   searchText: string,
@@ -82,7 +80,6 @@ function codebaseMemoryGraphSearch(
   });
 }
 
-/** Reads backend semantic graph rows whose score clears the useful-signal floor. */
 function codebaseMemorySemanticSearch(
   root: string,
   searchText: string,
@@ -108,13 +105,11 @@ function codebaseMemorySemanticSearch(
   });
 }
 
-/** Checks common backend search payload fields for no-answer responses. */
 function hasSearchAnswer(value: unknown, arrayKeys: string[]): boolean {
   const record = recordValue(value);
   return arrayKeys.some((key) => arrayValue(record[key]).length > 0);
 }
 
-/** Converts search filters into Codebase Memory search_graph arguments. */
 function graphSearchArgs(options: CodebaseMemoryGraphSearchOptions): Record<string, unknown> {
   return {
     ...(options.label !== undefined ? { label: options.label } : {}),
@@ -131,7 +126,6 @@ function graphSearchArgs(options: CodebaseMemoryGraphSearchOptions): Record<stri
   };
 }
 
-/** Splits user search text into a bounded semantic keyword array. */
 function semanticTerms(searchText: string): string[] {
   const terms = searchText
     .split(/\s+/)
@@ -141,7 +135,6 @@ function semanticTerms(searchText: string): string[] {
   return terms.length > 0 ? terms : [searchText];
 }
 
-/** Prints graph-augmented CodebaseMemory source search results when available. */
 export function printCodebaseMemorySearch(
   root: string,
   searchText: string,
@@ -169,7 +162,6 @@ export function printCodebaseMemorySearch(
   return true;
 }
 
-/** Prints CodebaseMemory graph search results for relationship-oriented search when available. */
 export function printCodebaseMemoryGraphSearch(
   root: string,
   searchText: string,
@@ -208,7 +200,6 @@ export function printCodebaseMemoryGraphSearch(
   return true;
 }
 
-/** Prints CodebaseMemory semantic graph matches for semantic search when available. */
 export function printCodebaseMemorySemanticSearch(
   root: string,
   searchText: string,
@@ -235,13 +226,11 @@ export function printCodebaseMemorySemanticSearch(
   return true;
 }
 
-/** Reports rows removed by default test suppression. */
 function hiddenTestLines(selection: SearchRowSelection): string[] {
   const hiddenRows = selection.allRows.length - selection.testFilteredRows.length;
   return hiddenRows > 0 ? [`hidden tests: ${hiddenRows} (use --include-tests)`] : [];
 }
 
-/** Appends shown backend rows, or an explicit empty marker, plus a continuation marker. */
 function appendSearchRows(lines: string[], shown: unknown[], hasMore: boolean): void {
   if (shown.length === 0) {
     lines.push("  none");
@@ -291,7 +280,6 @@ function graphSearchRowDegree(
   );
 }
 
-/** Reads in/out graph degree fields when the backend exposes them separately. */
 function sumDegreeFields(row: Record<string, unknown>): number | null {
   const inDegree = numberField(row.in_degree);
   const outDegree = numberField(row.out_degree);
@@ -301,7 +289,6 @@ function sumDegreeFields(row: Record<string, unknown>): number | null {
   return (inDegree ?? 0) + (outDegree ?? 0);
 }
 
-/** Checks backend graph rows against a requested relationship type. */
 function graphSearchRowMatchesRelationship(
   row: Record<string, unknown>,
   nested: Record<string, unknown>,
@@ -313,7 +300,6 @@ function graphSearchRowMatchesRelationship(
   return graphSearchRelationshipRows(row, nested).some((candidate) => candidate === relationship);
 }
 
-/** Extracts relationship labels from node, edge, and nested backend payload shapes. */
 function graphSearchRelationshipRows(
   row: Record<string, unknown>,
   nested: Record<string, unknown>,
@@ -340,7 +326,6 @@ function graphSearchRelationshipRows(
   );
 }
 
-/** Reads relationship names from one backend edge-like value. */
 function relationshipNames(value: unknown): string[] {
   if (typeof value === "string") {
     return [value];
@@ -354,7 +339,6 @@ function relationshipNames(value: unknown): string[] {
   ].filter((item): item is string => item !== null);
 }
 
-/** Detects entrypoint-tagged backend rows for output-side filtering. */
 function graphSearchRowIsEntryPoint(
   row: Record<string, unknown>,
   nested: Record<string, unknown>,
@@ -372,7 +356,6 @@ function graphSearchRowIsEntryPoint(
   return textFields.some((item) => item.toLowerCase().startsWith("entry"));
 }
 
-/** Selects policy-visible, renderable backend search rows. */
 function searchRowSelection(
   value: unknown,
   options: CodebaseMemoryRenderOptions,
@@ -385,7 +368,6 @@ function searchRowSelection(
   return { allRows, testFilteredRows, visibleRows };
 }
 
-/** Reads the display identity shared by backend search row shapes. */
 function searchRowName(value: unknown): string | null {
   const row = recordValue(value);
   const nested = recordValue(row.node);
@@ -398,7 +380,6 @@ function searchRowName(value: unknown): string | null {
   );
 }
 
-/** Renders one backend search row without internal graph identifiers. */
 function renderSearchRow(value: unknown): string[] {
   const row = recordValue(value);
   const nested = recordValue(row.node);
@@ -433,7 +414,7 @@ function renderSearchRow(value: unknown): string[] {
   return [line];
 }
 
-/** Detects likely test rows in common Codebase Memory search payload shapes. */
+/** Tests every name and path field together because row shapes vary: `tests/test_cli.py` and `src/app.spec.ts` count, while `src/latest.ts` does not. */
 function testLikeSearchRow(value: unknown): boolean {
   const row = recordValue(value);
   const nested = recordValue(row.node);
@@ -449,8 +430,12 @@ function testLikeSearchRow(value: unknown): boolean {
   ]
     .filter((item) => item !== null)
     .join(" ");
-  return /(^|[./_-])(__tests__|tests|specs|e2e|test-support|test_support)([./_-]|$)|(^|[./_-])test_[^/]*|[._-](test|spec|suite)\.[cm]?[jt]sx?$|[._-]test-support[._-]|(^|[._-])test[A-Z_]/i.test(
-    text,
+  return (
+    /(^|[./_-])(__tests__|tests|specs|e2e|test-support|test_support)([./_-]|$)|(^|[./_-])test_[^/]*|[._-](test|spec|suite)\.[cm]?[jt]sx?$|[._-]test-support[._-]/i.test(
+      text,
+    ) ||
+    // Case-sensitive so camelCase `testParser` counts while words like `testament` do not.
+    /(^|[._-])[Tt]est[A-Z_]/.test(text)
   );
 }
 
@@ -462,7 +447,7 @@ function backendFetchLimit(
   return includeTests ? limit : Math.max(limit, BACKEND_SEARCH_CANDIDATE_LIMIT);
 }
 
-/** Formats backend confidence scores without noisy floating-point tails. */
+/** Trims three decimals of trailing zeros: `0.5` → `0.5`, `0.123456` → `0.123`, `1` → `1`. */
 function formatScore(value: number): string {
   return value.toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
 }
@@ -473,7 +458,7 @@ function nonNegativeNumberField(value: unknown): number | null {
   return parsed !== null && parsed >= 0 ? parsed : null;
 }
 
-/** Reads score-like rank fields without treating ordinal ranks as confidence scores. */
+/** Positive integer ranks are list positions rather than scores and are dropped; fractional ranks pass. */
 function nonNegativeNonOrdinalRank(value: unknown): number | null {
   const parsed = nonNegativeNumberField(value);
   return parsed !== null && (!Number.isInteger(parsed) || parsed <= 0) ? parsed : null;

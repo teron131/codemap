@@ -79,7 +79,6 @@ function collectDefinitions(root: SgNode): Definition[] {
   return topLevel;
 }
 
-/** Projects a function's complete signature and immediate nested functions into the established report shape. */
 function buildFunctionReport({ node, children }: Definition): FunctionReport {
   const parameters = node.field("parameters")?.namedChildren() ?? [];
   return {
@@ -162,7 +161,7 @@ function bodyDocstring(body: SgNode | null): string | null {
   return cleanDocstring(parts.join(""));
 }
 
-/** Preserves the existing report's indentation normalization for extracted documentation text. */
+/** Trims blank edge lines and the indentation shared by every non-blank line: `"\n    a\n      b\n"` → `"a\n  b"`. */
 function cleanDocstring(value: string): string {
   const lines = value.replace(/\r\n/g, "\n").split("\n");
   while (lines.length > 0 && !(lines[0] ?? "").trim()) {

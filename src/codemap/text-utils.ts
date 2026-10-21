@@ -1,12 +1,6 @@
-/**
- * Provides shared text ordering, escaping, and deduplication primitives.
- *
- * Rendered output is compared across runs, so ordering must stay stable and locale-independent: `compareText` uses plain code-unit comparison rather than `localeCompare`, which varies by ICU data.
- *
- * `escapeRegExp` escapes every regular-expression metacharacter and is therefore wrong for glob compilation, where `*` and `[...]` must survive to be translated; see the scanner's own glob-literal escaper for that case.
- */
+/** Deterministic text ordering and small string-collection helpers shared by every renderer. */
 
-/** Sorts text values with stable lexical ordering. */
+/** Compares UTF-16 code units rather than using `localeCompare`, whose ICU-dependent order would let rendered output differ between machines. */
 export function compareText(left: string, right: string): number {
   if (left < right) {
     return -1;
@@ -17,12 +11,10 @@ export function compareText(left: string, right: string): number {
   return 0;
 }
 
-/** Escapes text for literal use inside regular expressions. */
 export function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-/** Removes duplicate values while preserving first-seen order. */
 export function uniqueStrings(values: string[]): string[] {
   const seen = new Set<string>();
   const unique: string[] = [];
@@ -36,7 +28,7 @@ export function uniqueStrings(values: string[]): string[] {
   return unique;
 }
 
-/** Samples the sorted first, middle, and last extent of a wide text collection. */
+/** Keeps the first, middle, and last of already sorted values, as in `[a, b, c, d, e]` → `[a, c, e]`; three or fewer pass through. */
 export function extentSamples(values: string[]): string[] {
   if (values.length <= 3) {
     return values;

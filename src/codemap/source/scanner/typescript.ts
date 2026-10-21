@@ -1,4 +1,4 @@
-/** Scans TypeScript-family source with ast-grep for imports and definitions. */
+/** Extracts TypeScript-family measurements, imports, exports, declarations, and call sites from one syntax tree. Files above 256 KiB get only their top-level imports and exports. */
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
@@ -47,12 +47,10 @@ type FunctionScope = {
   caller: string | null;
 };
 
-/** Finds a direct ast-grep child node by kind. */
 function directChild(node: SgNode, ...kinds: string[]): SgNode | null {
   return node.children().find((child) => kinds.includes(String(child.kind()))) ?? null;
 }
 
-/** Finds a descendant ast-grep node by kind. */
 function descendant(node: SgNode | null, ...kinds: string[]): SgNode | null {
   if (node === null) {
     return null;
@@ -69,7 +67,7 @@ function descendant(node: SgNode | null, ...kinds: string[]): SgNode | null {
   return null;
 }
 
-/** Reads string text from an ast-grep node. */
+/** Strips matching quotes, as in `'./a.js'` → `./a.js`. */
 function stringValue(node: SgNode | null): string {
   if (node === null) {
     return "";
@@ -82,18 +80,15 @@ function stringValue(node: SgNode | null): string {
   return fragment?.text() ?? text;
 }
 
-/** Builds a function span from an ast-grep node range. */
 function spanFor(node: SgNode): number {
   const nodeRange = node.range();
   return Math.max(1, nodeRange.end.line - nodeRange.start.line + 1);
 }
 
-/** Finds the one-based start line for an ast-grep node. */
 function startLineFor(node: SgNode): number {
   return node.range().start.line + 1;
 }
 
-/** Records TypeScript import specifiers on file metrics. */
 function addTypescriptImport(
   metrics: FileMetrics,
   target: string,
@@ -110,7 +105,6 @@ function addTypescriptImport(
   }
 }
 
-/** Records TypeScript re-export specifiers and their public name bindings. */
 function addTypescriptReexport(
   metrics: FileMetrics,
   target: string,
@@ -128,7 +122,7 @@ function addTypescriptReexport(
   }
 }
 
-/** Extracts named, aliased, namespace, or star re-export bindings. */
+/** Null when the statement names no bindings, as with `export * from`. */
 function typescriptReexportBindings(node: SgNode): TypeScriptReexportBinding[] | null {
   const clause = directChild(node, "export_clause");
   if (clause !== null) {
@@ -158,14 +152,12 @@ function declaratorName(declarator: SgNode): string | null {
   return name?.kind() === "identifier" ? name.text() : null;
 }
 
-/** Records a TypeScript exported symbol on file metrics. */
 function addExportedName(metrics: FileMetrics, name: string): void {
   if (name && !metrics.exportedNames.includes(name)) {
     metrics.exportedNames.push(name);
   }
 }
 
-/** Records a TypeScript function-like definition span on file metrics. */
 function addTypescriptFunction(
   metrics: FileMetrics,
   relPath: string,
@@ -186,7 +178,6 @@ function addTypescriptFunction(
   addSample(metrics.samples, name);
 }
 
-/** Checks whether a TypeScript declaration is module-level state. */
 function isTypescriptModuleLevelVariable(node: SgNode): boolean {
   let parent = node.parent();
   while (parent !== null) {
@@ -202,7 +193,6 @@ function isTypescriptModuleLevelVariable(node: SgNode): boolean {
   return false;
 }
 
-/** Collects declaration and re-export names from one export syntax node. */
 function collectTypescriptExportNames(
   metrics: FileMetrics,
   node: SgNode,
@@ -242,7 +232,6 @@ function collectTypescriptExportNames(
   }
 }
 
-/** Records one export statement without duplicating binding extraction across scan modes. */
 function collectTypescriptExport(metrics: FileMetrics, node: SgNode): void {
   const bindings = typescriptReexportBindings(node);
   metrics.exports += 1;
@@ -250,7 +239,6 @@ function collectTypescriptExport(metrics: FileMetrics, node: SgNode): void {
   collectTypescriptExportNames(metrics, node, bindings);
 }
 
-/** Scans TypeScript-family source with ast-grep syntax nodes. */
 function scanTypescriptWithAstGrep({
   source,
   filePath,
@@ -385,12 +373,10 @@ function scanTypescriptSurfaceWithAstGrep({
   }
 }
 
-/** Parses one TypeScript-family source while treating native parser failures as no AST data. */
 function parseTypescriptRoot(filePath: string, source: string): SgNode | null {
   return astGrepRoot(source, TYPESCRIPT_LANG_BY_SUFFIX[path.extname(filePath)] ?? "typescript");
 }
 
-/** Scans one TypeScript-family file into source metrics. */
 export function scanTypescriptFile(
   filePath: string,
   { relPath, source: existingSource }: { relPath: string; source?: string | undefined },

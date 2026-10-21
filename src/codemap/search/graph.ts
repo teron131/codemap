@@ -1,4 +1,4 @@
-/** Searches derived graph relationship context for matching text. */
+/** Current-tree fallback for `search --graph`, scoring local graph nodes under the backend lane's filters. */
 import {
   edgeRelationshipLabel,
   type GraphEdge,
@@ -27,7 +27,7 @@ type GraphSearchIndex = {
   nodesById: Map<string, GraphNode>;
 };
 
-/** Finds graph nodes and relationships matching search text. */
+/** A whole-query substring outranks term matches, and terms count more in a node's own fields than in its first 20 edges. */
 function graphMatches(
   graph: GraphPayload,
   searchText: string,
@@ -78,7 +78,6 @@ function graphMatches(
   return scored.slice(offset, offset + limit).map(([, node]) => node);
 }
 
-/** Renders graph match lines output for search graph. */
 export function renderGraphMatchLines(
   graph: GraphPayload,
   searchText: string,
@@ -103,7 +102,6 @@ export function renderGraphMatchLines(
   return lines;
 }
 
-/** Checks whether a local graph node satisfies CLI graph filters. */
 function graphNodeMatchesFilters(
   node: GraphNode,
   related: GraphEdge[],
@@ -134,19 +132,17 @@ function graphNodeMatchesLabel(node: GraphNode, label: string | undefined): bool
   return normalizedLabel === type;
 }
 
-/** Builds a simple qualified-name surrogate for local graph fallback filtering. */
+/** Local stand-in for backend qualified names, such as `src/app.ts:run`, so `--qn-pattern` still filters. */
 function graphNodeQualifiedName(node: GraphNode): string {
   return [node.filePath, node.name].filter(Boolean).join(":");
 }
 
-/** Formats one graph node summary without repeating the already printed label. */
 function graphNodeSummary(node: GraphNode, label: string): string {
   const summary = String(node.summary ?? "");
   const duplicatePrefix = `${label}: `;
   return summary.startsWith(duplicatePrefix) ? summary.slice(duplicatePrefix.length) : summary;
 }
 
-/** Formats one graph node without exposing internal node ids. */
 function graphNodeLabel(node: GraphNode): string {
   const name = String(node.name ?? "");
   const filePath = String(node.filePath ?? "");
@@ -157,7 +153,6 @@ function graphNodeLabel(node: GraphNode): string {
   return filePath || name || String(node.id ?? "");
 }
 
-/** Formats one related graph edge from the matched node's point of view. */
 function graphEdgeLabel(
   edge: GraphEdge,
   node: GraphNode,
@@ -170,7 +165,6 @@ function graphEdgeLabel(
   return `${edgeRelationshipLabel(edge, nodeId)}: ${otherLabel}`;
 }
 
-/** Indexes graph relationships and nodes once for filtered search and rendering. */
 function buildGraphSearchIndex(graph: GraphPayload): GraphSearchIndex {
   const edgesByNode = new Map<string, GraphEdge[]>();
   for (const edge of graph.edges) {
@@ -189,7 +183,6 @@ function buildGraphSearchIndex(graph: GraphPayload): GraphSearchIndex {
   };
 }
 
-/** Formats graph edge fields as searchable relationship text. */
 function graphEdgeText(edge: GraphEdge): string {
   return `${String(edge.source ?? "")} ${String(edge.type ?? "")} ${String(edge.target ?? "")}`;
 }

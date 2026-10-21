@@ -1,4 +1,4 @@
-/** Builds full signal exports from scanned files and selected sections. */
+/** Computes only the requested detailed signal sections from one scan of the discovered files. A `docstrings`-only request skips source scanning. */
 import path from "node:path";
 
 import { isDirectory, isFile } from "../common.js";
@@ -37,7 +37,6 @@ export type SignalExportSection =
   | "docstring-signals"
   | "docstrings";
 
-/** Summarizes import, entrypoint, AGENTS, and source relationship counts. */
 function buildRelationshipsSection(
   displayFiles: string[],
   scannedFiles: FileMetrics[],
@@ -63,7 +62,6 @@ function buildRelationshipsSection(
   };
 }
 
-/** Builds the empty docstring signal payload shape. */
 function buildEmptyDocstringSignals(): Row {
   return {
     files_considered: 0,
@@ -75,7 +73,6 @@ function buildEmptyDocstringSignals(): Row {
   };
 }
 
-/** Collects function spans for files matching a language suffix set. */
 function functionSpans(scannedFiles: FileMetrics[], suffixes: Set<string>): FunctionSpan[] {
   const spans: FunctionSpan[] = [];
   for (const metrics of scannedFiles) {
@@ -86,7 +83,6 @@ function functionSpans(scannedFiles: FileMetrics[], suffixes: Set<string>): Func
   return spans;
 }
 
-/** Separates TypeScript and Python function-length hotspots. */
 function buildFunctionLengthsSection(scannedFiles: FileMetrics[]): Row {
   return {
     typescript: functionLengthSection(functionSpans(scannedFiles, TYPESCRIPT_SUFFIXES)),
@@ -94,7 +90,6 @@ function buildFunctionLengthsSection(scannedFiles: FileMetrics[]): Row {
   };
 }
 
-/** Builds the compact docstring signal section for signal focus files. */
 function buildDocstringSignalSection(targetPath: string, signalFocusDocFiles: string[]): Row {
   const signalFocus = signalFocusDocFiles.slice(0, 3);
   if (signalFocus.length === 0) {
@@ -107,7 +102,6 @@ function buildDocstringSignalSection(targetPath: string, signalFocusDocFiles: st
   });
 }
 
-/** Builds the selected signal sections for a target path. */
 export function buildSignalExport(
   targetPath: string,
   {
@@ -169,7 +163,6 @@ export function buildSignalExport(
   return { sections };
 }
 
-/** Totals line counts from rows that expose a numeric length field. */
 function sumLengths(
   scannedFiles: FileMetrics[],
   key:

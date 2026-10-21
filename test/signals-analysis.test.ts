@@ -1,4 +1,4 @@
-/** Checks signal analysis row shaping. */
+/** Checks signal row helpers: mention bins, duplicate function-span collapse, and file-profile line counts. */
 import { describe, expect, it } from "vitest";
 
 import {

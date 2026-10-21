@@ -1,4 +1,4 @@
-/** Checks inspection profile rendering helpers. */
+/** Checks that file and directory inspection profiles report source line counts. */
 import { mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
 

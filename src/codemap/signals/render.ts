@@ -1,11 +1,10 @@
-/** Renders signal payload sections as readable text output. */
+/** Text rendering for `signals`, one Markdown section per payload section. Ranking headings state their sort criteria without judging the rows. */
 import { arrayValue, numberValue, recordValue } from "../json-utils.js";
 import { languageRows, rankDefinitionRowsByMentions, rankFunctionRowsByLength } from "./payload.js";
 import type { SignalRow, SignalSection } from "./schema.js";
 
 type Row = SignalRow;
 
-/** Renders selected signal payload sections as text. */
 export function renderSignalText(payload: Record<string, unknown>, section: SignalSection): string {
   const lines = [SIGNAL_TITLES[section], ""];
   if (payload.freshness === "partial") {
@@ -87,7 +86,6 @@ const SIGNAL_TITLES: Record<SignalSection, string> = {
   docstrings: "# Docstrings",
 };
 
-/** Appends top ranked metric sections to text output. */
 function appendTop(lines: string[], top: Record<string, unknown>): void {
   const functionMetrics = arrayValue<Row>(top.functionMetrics);
   const functionsByMentions = arrayValue<Row>(top.functionsByMentions);
@@ -122,7 +120,6 @@ function appendTop(lines: string[], top: Record<string, unknown>): void {
   lines.push("");
 }
 
-/** Describes the metric order represented by backend, local, or mixed rows. */
 function functionMetricRankingTitle(rows: Row[]): string {
   const backendRows = rows.filter((row) => "cognitive" in row || "cyclomatic" in row).length;
   if (backendRows === 0) {
@@ -136,7 +133,6 @@ function functionMetricRankingTitle(rows: Row[]): string {
   return "Function Metrics (backend complexity, then local length fallback)";
 }
 
-/** Appends one compact evidence group with one line per source target. */
 function appendCompactSignalRows(
   lines: string[],
   title: string,
@@ -153,7 +149,6 @@ function appendCompactSignalRows(
   lines.push("");
 }
 
-/** Formats backend complexity and loop evidence without advice text. */
 function functionMetricFacts(row: Row): string[] {
   const facts: string[] = [];
   if ("cognitive" in row) {
@@ -173,17 +168,14 @@ function functionMetricFacts(row: Row): string[] {
   return facts;
 }
 
-/** Formats function size and lexical mention evidence. */
 function functionMentionFacts(row: Row): string[] {
   return [`lines=${numberValue(row.lines)}`, `mentions=${numberValue(row.mentions)}`];
 }
 
-/** Formats identifier length and lexical mention evidence. */
 function variableNameLengthFacts(row: Row): string[] {
   return [`characters=${numberValue(row.characters)}`, `mentions=${numberValue(row.mentions)}`];
 }
 
-/** Formats a compact path, line, and symbol location. */
 function signalLocation(row: Row): string {
   const path = String(row.path ?? "unknown");
   const line = Number(row.line ?? 0);
@@ -191,7 +183,6 @@ function signalLocation(row: Row): string {
   return `${path}${line > 0 ? `:${line}` : ""} ${name}`;
 }
 
-/** Appends one positive numeric fact when the backend reported it. */
 function appendPositiveFact(facts: string[], row: Row, key: string, label: string): void {
   const value = numberValue(row[key]);
   if (value > 0) {
@@ -199,7 +190,6 @@ function appendPositiveFact(facts: string[], row: Row, key: string, label: strin
   }
 }
 
-/** Appends relationship and entrypoint summaries to text output. */
 function appendRelationships(lines: string[], relationships: Record<string, unknown>): void {
   const counts = recordValue(relationships.counts);
   lines.push("## Relationships");
@@ -227,7 +217,6 @@ function appendRelationships(lines: string[], relationships: Record<string, unkn
   lines.push("");
 }
 
-/** Appends usage-bin summaries to text output. */
 function appendUsageBins(lines: string[], usage: Record<string, unknown>): void {
   lines.push("## Usage Bins");
   const binsByMetric = recordValue(usage.bins);
@@ -243,7 +232,6 @@ function appendUsageBins(lines: string[], usage: Record<string, unknown>): void 
   lines.push("");
 }
 
-/** Appends function rankings to text output. */
 function appendFunctionSignals(lines: string[], payload: Record<string, unknown>): void {
   const lengthRows = rankFunctionRowsByLength(languageRows(recordValue(payload.byLength)));
   appendDefinitionRows(
@@ -262,7 +250,6 @@ function appendFunctionSignals(lines: string[], payload: Record<string, unknown>
   lines.push("");
 }
 
-/** Appends variable rankings to text output. */
 function appendVariableSignals(lines: string[], payload: Record<string, unknown>): void {
   appendVariableNameLengthRows(lines, arrayValue<Row>(payload.byNameLength));
   appendDefinitionRows(
@@ -273,7 +260,6 @@ function appendVariableSignals(lines: string[], payload: Record<string, unknown>
   lines.push("");
 }
 
-/** Appends variable definitions ranked by identifier length. */
 function appendVariableNameLengthRows(lines: string[], rows: Row[]): void {
   if (rows.length === 0) {
     return;
@@ -287,7 +273,6 @@ function appendVariableNameLengthRows(lines: string[], rows: Row[]): void {
   lines.push("");
 }
 
-/** Appends long-function rows to text signal output. */
 function appendLengths(lines: string[], lengths: Record<string, unknown>): void {
   lines.push("## Function Lengths");
   for (const [key, label] of [
@@ -340,7 +325,6 @@ function appendSignalStats(lines: string[], stats: Record<string, unknown>): voi
   lines.push("");
 }
 
-/** Formats pandas-like numeric statistics in stable field order. */
 function numericStatsText(stats: Record<string, unknown>): string {
   return [
     ["count", stats.count],
@@ -357,14 +341,12 @@ function numericStatsText(stats: Record<string, unknown>): string {
     .join(", ");
 }
 
-/** Formats named numeric bins without implying chart output. */
 function binsText(bins: Record<string, unknown>): string {
   return Object.entries(bins)
     .map(([label, count]) => `${label}=${numberValue(count)}`)
     .join(", ");
 }
 
-/** Appends file path rows to text signal output. */
 function appendFiles(lines: string[], rows: Row[]): void {
   lines.push("## File Profiles");
   for (const item of rows) {
@@ -373,7 +355,6 @@ function appendFiles(lines: string[], rows: Row[]): void {
   lines.push("");
 }
 
-/** Appends compact docstring coverage and preview rows to signal output. */
 function appendDocstringSignals(lines: string[], payload: Record<string, unknown>): void {
   lines.push("## Docstring Coverage");
   const fileDocstrings = recordValue(payload.file_docstrings);
@@ -395,7 +376,6 @@ function appendDocstringSignals(lines: string[], payload: Record<string, unknown
   lines.push("");
 }
 
-/** Appends full docstring report rows with compact previews. */
 function appendDocstrings(lines: string[], payload: Record<string, unknown>): void {
   lines.push("## Docstring Files");
   lines.push(
@@ -424,7 +404,6 @@ function appendDocstrings(lines: string[], payload: Record<string, unknown>): vo
   lines.push("");
 }
 
-/** Appends definition rows with lexical mentions to text output. */
 function appendDefinitionRows(lines: string[], title: string, rows: Row[]): void {
   lines.push(`## ${title}`);
   if (rows.length === 0) {
@@ -450,7 +429,6 @@ function appendDefinitionRows(lines: string[], title: string, rows: Row[]): void
   }
 }
 
-/** Appends rows that carry file/name/preview docstring fields. */
 function appendDocstringPreviewRows(
   lines: string[],
   title: string,
@@ -471,7 +449,6 @@ function appendDocstringPreviewRows(
   }
 }
 
-/** Appends nested function/class previews for one full docstring file report. */
 function appendDefinitionPreviewChildren(
   lines: string[],
   rows: Row[],
@@ -496,7 +473,6 @@ function appendDefinitionPreviewChildren(
   }
 }
 
-/** Formats a compact docstring preview fallback. */
 function previewText(value: unknown): string {
   const text = String(value ?? "").trim();
   return text || "none";
@@ -513,26 +489,23 @@ export function denseFileCounters(item: Row): string {
   return counters.join(", ");
 }
 
-/** Appends a counter only when the payload includes that metric. */
+/** Absent counters, as in unparsed lightweight rows, are omitted rather than shown as zero. */
 function appendKnownCounter(counters: string[], item: Row, key: string, label: string): void {
   if (key in item) {
     counters.push(`${label}=${numberValue(item[key])}`);
   }
 }
 
-/** Formats the main dense-file score label. */
 function denseFileScoreText(item: Row): string {
   const label = item.total_label === "lines" ? "lines" : "signals";
   return `${label}=${numberValue(item.total)}`;
 }
 
-/** Formats an optional source line-count detail for file profile rows. */
 function sourceLineDetail(item: Row): string {
   const lines = Number(item.lines ?? 0);
   return lines > 0 ? `, lines=${lines}` : "";
 }
 
-/** Appends file-count rows to text signal output. */
 function appendFileCountRows(lines: string[], title: string, rows: Row[]): void {
   if (rows.length === 0) {
     return;

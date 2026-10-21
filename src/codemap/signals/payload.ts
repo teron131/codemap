@@ -1,4 +1,4 @@
-/** Builds JSON signal payload sections for CLI output. */
+/** Shapes the detailed signal export into the payload both `--json` and text output render. It filters test and generated rows and fixes each ranking's order. */
 import { arrayValue, recordValue } from "../json-utils.js";
 import { describeNumbers } from "../math-utils.js";
 import {
@@ -18,7 +18,6 @@ type SignalExport = {
 
 type Row = SignalRow;
 
-/** Selects and shapes signal sections for JSON output. */
 export function buildSignalPayload(
   signalExport: SignalExport,
   { includeTests }: { includeTests: boolean },
@@ -87,7 +86,6 @@ export function buildSignalPayload(
   };
 }
 
-/** Builds JSON payload rows for function usage signals. */
 function functionPayload(
   usageTables: Record<string, unknown>,
   { includeTests }: { includeTests: boolean },
@@ -114,7 +112,6 @@ function functionPayload(
   };
 }
 
-/** Builds JSON payload rows for variable usage signals. */
 function variablePayload(
   usageTables: Record<string, unknown>,
   { includeTests }: { includeTests: boolean },
@@ -144,7 +141,6 @@ function variablePayload(
   };
 }
 
-/** Checks whether a file row belongs to structural source. */
 function isStructuralFileRow(row: Row): boolean {
   const filePath = rowFile(row);
   if (!filePath || filePath.endsWith("__init__.py")) {
@@ -159,7 +155,7 @@ function isStructuralFileRow(row: Row): boolean {
   return [...STRUCTURAL_SUFFIXES].some((suffix) => filePath.endsWith(suffix));
 }
 
-/** Builds a table for the longest scanned code blocks. */
+/** Recomputes statistics after filtering, so they describe only the rows that survive test and generated filtering. */
 function lengthSection(
   section: Record<string, unknown>,
   { includeTests }: { includeTests: boolean },
@@ -171,7 +167,6 @@ function lengthSection(
   };
 }
 
-/** Filters signal rows to one source file. */
 function fileScopedRows(rows: Row[], { includeTests }: { includeTests: boolean }): Row[] {
   return rows.filter((row) => {
     const filePath = rowFile(row);
@@ -179,7 +174,7 @@ function fileScopedRows(rows: Row[], { includeTests }: { includeTests: boolean }
   });
 }
 
-/** Reads the source file path from a signal row. */
+/** Falls back to the `path::name` identifier: `src/app.ts::run` → `src/app.ts`. */
 function rowFile(row: Row): string {
   const filePath = row.file;
   if (filePath) {
@@ -201,7 +196,6 @@ function compactFunctionRows(rows: Row[]): Row[] {
   }));
 }
 
-/** Sorts variable definitions by identifier length and then mentions. */
 function variableNameLengthRows(rows: Row[]): Row[] {
   return rows
     .slice()
@@ -213,7 +207,6 @@ function variableNameLengthRows(rows: Row[]): Row[] {
     );
 }
 
-/** Compacts variable-name rows to location and measured facts. */
 function compactVariableNameLengthRows(rows: Row[]): Row[] {
   return rows.map((row) => ({
     name: String(row.name ?? ""),
@@ -224,7 +217,7 @@ function compactVariableNameLengthRows(rows: Row[]): Row[] {
   }));
 }
 
-/** Builds language-specific payload rows from signal sections. */
+/** Flattens `{ python, typescript }` row lists into one list, tagging each row with its language. */
 export function languageRows(payload: Record<string, unknown>): Row[] {
   const rows: Row[] = [];
   for (const language of ["python", "typescript"]) {
@@ -235,7 +228,7 @@ export function languageRows(payload: Record<string, unknown>): Row[] {
   return rows;
 }
 
-/** Orders function definitions by length, mentions, and stable identity. */
+/** Longest first, then fewest mentions. */
 export function rankFunctionRowsByLength(rows: Row[]): Row[] {
   return rows
     .slice()
@@ -250,7 +243,7 @@ export function rankFunctionRowsByLength(rows: Row[]): Row[] {
     );
 }
 
-/** Orders definitions by mentions, shorter span, and stable identity. */
+/** Fewest mentions first, then shortest. */
 export function rankDefinitionRowsByMentions(rows: Row[]): Row[] {
   return rows
     .slice()
@@ -265,7 +258,7 @@ export function rankDefinitionRowsByMentions(rows: Row[]): Row[] {
     );
 }
 
-/** Selects one signal payload section by CLI section name. */
+/** `top` flattens `stats`, `coverage`, and the top rows into one object, `all` returns everything but `top`, and other sections return `coverage` beside that one section. */
 export function selectPayloadSection(
   payload: Record<string, unknown>,
   section: string,

@@ -1,4 +1,4 @@
-/** Defines CLI behavior for explicit structural search subcommands. */
+/** `search match`, `search calls`, and `search rule`: explicit ast-grep searches. Exit code 1 means no match and 127 an unavailable language. */
 import type { Command } from "commander";
 
 import { resolveProjectFile, type SyntaxMatch, SyntaxSearch } from "../ast-grep/index.js";
@@ -30,7 +30,6 @@ type SearchRuleOptions = {
   json?: boolean | undefined;
 };
 
-/** Registers explicit ast-grep pattern search under the search command. */
 export function addSearchMatchParser(command: Command): void {
   addProjectRootArgument(command);
   command
@@ -47,7 +46,6 @@ export function addSearchMatchParser(command: Command): void {
     });
 }
 
-/** Registers structural call-site search under the search command. */
 export function addSearchCallsParser(command: Command): void {
   command.description(
     "Find call sites: invocations like print(...), logger.info(...), or console.log(...).",
@@ -71,7 +69,6 @@ export function addSearchCallsParser(command: Command): void {
     );
 }
 
-/** Registers read-only ast-grep YAML rule search. */
 export function addSearchRuleParser(command: Command): void {
   addProjectRootArgument(command);
   command
@@ -87,7 +84,6 @@ export function addSearchRuleParser(command: Command): void {
     });
 }
 
-/** Runs explicit ast-grep pattern search and prints matches. */
 function commandSearchMatch(options: SearchMatchOptions): number {
   const root = resolveProjectRoot(options.projectRoot);
   const paths = resolveTargetPaths(root, options.paths ?? []);
@@ -122,7 +118,6 @@ function commandSearchMatch(options: SearchMatchOptions): number {
   return matches.length > 0 ? 0 : 1;
 }
 
-/** Runs structural call-site search and prints matches. */
 function commandSearchCalls(options: SearchCallsOptions): number {
   const limit = options.limit ?? DEFAULT_ROW_LIMIT;
   if (!Number.isInteger(limit) || limit < 1) {
@@ -165,7 +160,6 @@ function commandSearchCalls(options: SearchCallsOptions): number {
   return matches.length > 0 ? 0 : 1;
 }
 
-/** Runs read-only ast-grep YAML rule search and prints matches. */
 async function commandSearchRule(options: SearchRuleOptions): Promise<number> {
   const root = resolveProjectRoot(options.projectRoot);
   const paths = resolveTargetPaths(root, options.paths ?? []);
@@ -190,7 +184,6 @@ async function commandSearchRule(options: SearchRuleOptions): Promise<number> {
   return matches.length > 0 ? 0 : 1;
 }
 
-/** Prints structural-search matches as text or JSON. */
 function printSyntaxMatches(matches: SyntaxMatch[], { jsonOutput }: { jsonOutput: boolean }): void {
   if (jsonOutput) {
     console.log(JSON.stringify(matches.map((match) => matchJson(match))));
@@ -204,7 +197,7 @@ function printSyntaxMatches(matches: SyntaxMatch[], { jsonOutput }: { jsonOutput
   }
 }
 
-/** Serializes one structural-search match for JSON output. */
+/** JSON ranges are zero-based, unlike the one-based positions in text output. */
 function matchJson(match: SyntaxMatch): Record<string, unknown> {
   return {
     text: match.text,
@@ -218,7 +211,6 @@ function matchJson(match: SyntaxMatch): Record<string, unknown> {
   };
 }
 
-/** Resolves command-local or global project-root options. */
 function rootOption(
   options: { projectRoot?: string | undefined },
   command: Command,
@@ -226,7 +218,6 @@ function rootOption(
   return options.projectRoot ?? command.optsWithGlobals<{ projectRoot?: string }>().projectRoot;
 }
 
-/** Prints a focused message when language inference has no source files. */
 function printNoSyntaxTargets(paths: string[]): void {
   console.log("No supported syntax files found.");
   console.log(`Searched: ${paths.length === 0 ? "." : paths.join(", ")}`);

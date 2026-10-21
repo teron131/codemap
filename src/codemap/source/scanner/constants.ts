@@ -1,4 +1,4 @@
-/** Defines scan suffixes, entrypoint names, and ignored filesystem paths. */
+/** Path vocabulary shared by discovery and search. `TYPESCRIPT_SUFFIXES` covers the whole TypeScript/JavaScript family, and `ROOT_IGNORED_DIR_NAMES` apply only at the project root while other ignored directories apply at any depth. */
 export const ENTRYPOINT_BASENAMES = new Set([
   "__main__.py",
   "main.py",

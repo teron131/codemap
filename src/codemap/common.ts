@@ -1,4 +1,4 @@
-/** Provides shared path and project-root helpers. */
+/** Project-root resolution and path predicates shared by every command. `DETAILED_ANALYSIS_FILE_LIMIT` is the file count above which commands skip detailed graph analysis. */
 import { spawnSync } from "node:child_process";
 import { statSync } from "node:fs";
 import { homedir } from "node:os";
@@ -6,7 +6,7 @@ import path from "node:path";
 
 export const DETAILED_ANALYSIS_FILE_LIMIT = 5_000;
 
-/** Resolves and validates the project root path. */
+/** Without `raw`, uses the Git checkout around the working directory, or the working directory itself outside Git; throws when the result is not a directory. */
 export function resolveProjectRoot(raw: string | null | undefined): string {
   let root = raw == null ? nearestGitRoot(process.cwd()) : expandUser(raw);
   if (!path.isAbsolute(root)) {
@@ -18,7 +18,6 @@ export function resolveProjectRoot(raw: string | null | undefined): string {
   return root;
 }
 
-/** Finds the nearest git root for the current directory, falling back to cwd. */
 function nearestGitRoot(cwd: string): string {
   const result = spawnSync("git", ["rev-parse", "--show-toplevel"], {
     cwd,
@@ -30,7 +29,7 @@ function nearestGitRoot(cwd: string): string {
   return cwd;
 }
 
-/** Expands tilde-prefixed filesystem paths. */
+/** Expands only `~` and `~/…`; `~user` forms are returned unchanged. */
 export function expandUser(raw: string): string {
   if (raw === "~") {
     return homedir();
@@ -41,7 +40,6 @@ export function expandUser(raw: string): string {
   return raw;
 }
 
-/** Checks whether a path exists and is a regular file. */
 export function isFile(filePath: string): boolean {
   try {
     return statSync(filePath).isFile();
@@ -50,7 +48,6 @@ export function isFile(filePath: string): boolean {
   }
 }
 
-/** Checks whether a path exists and is a directory. */
 export function isDirectory(filePath: string): boolean {
   try {
     return statSync(filePath).isDirectory();

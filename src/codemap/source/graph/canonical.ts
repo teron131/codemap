@@ -1,4 +1,4 @@
-/** Builds canonical current-tree graph payloads and relationship helpers. */
+/** Owns current-tree graph assembly from supplied scan and import evidence. Inspection and graph search share its edge helpers. */
 import {
   type ImportMapPayload,
   runImportMap,
@@ -9,12 +9,11 @@ import {
 import { buildNodesAndEdges, fileNode } from "./builder.js";
 import type { GraphEdge, GraphNode, GraphPayload } from "./schema.js";
 
-/** Returns graph edges touching a node id. */
 export function relatedEdges(graph: GraphPayload, nodeId: string): GraphEdge[] {
   return graph.edges.filter((edge) => edge.source === nodeId || edge.target === nodeId);
 }
 
-/** Names a relationship from the inspected endpoint while preserving directional import, call, and containment labels. */
+/** Labels an edge from `nodeId`'s side, so an `imports` edge reads `imported by` from its target. */
 export function edgeRelationshipLabel(edge: GraphEdge, nodeId: string): string {
   const outgoing = edge.source === nodeId;
   if (edge.type === "imports") {
@@ -29,7 +28,7 @@ export function edgeRelationshipLabel(edge: GraphEdge, nodeId: string): string {
   return outgoing ? String(edge.type) : `${String(edge.type)} by`;
 }
 
-/** Builds the graph payload directly from the current project tree. */
+/** Scans and resolves imports for the whole tree; callers already holding a scan use `buildCurrentTreeGraph`. */
 export function currentTreeGraph(root: string): GraphPayload {
   const scan = runScan(root);
   return buildCurrentTreeGraph(root, scan, runImportMap(root, scan));
@@ -40,7 +39,7 @@ export function inventoryFileNodes(scan: ScanEntry[]): GraphNode[] {
   return scan.map((entry) => fileNode(entry.path, entry, null, []));
 }
 
-/** Builds selected structure from one import snapshot, keeping extraction sequencing inside the graph owner. */
+/** `emitPaths` limits which files get nodes, while import edges still point into the whole `scan`. */
 export function buildCurrentTreeGraph(
   root: string,
   scan: ScanEntry[],

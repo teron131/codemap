@@ -33,7 +33,7 @@ export type RipgrepFileCollection = {
   scanStatus: RipgrepScanStatus;
 };
 
-/** Finds common Python and TypeScript/JavaScript definition forms with ripgrep. */
+/** Regex lane for common declaration forms: case-insensitive, at most two hits per file, and line-start assignments such as `name = ...` count as definitions. */
 export function ripgrepDefinitionMatches(
   root: string,
   symbol: string,
@@ -115,7 +115,7 @@ export function ripgrepFilesWithMatches(
   return { filePaths, scanStatus };
 }
 
-/** Runs ripgrep and converts output to source match rows. */
+/** Literal, case-insensitive matching with at most two rows per file. */
 export function ripgrepMatches(
   root: string,
   searchText: string,
@@ -152,7 +152,7 @@ export function ripgrepMatches(
   );
 }
 
-/** Compacts one source excerpt and marks character-level shortening. */
+/** Collapses whitespace runs and cuts past 240 characters with `...`, as in `"  if (a)\n    b();"` → `if (a) b();`. */
 export function compactSourceMatchText(value: string): string {
   const text = value.split(/\s+/).filter(Boolean).join(" ");
   if (text.length <= SOURCE_MATCH_TEXT_LIMIT) {
@@ -161,7 +161,6 @@ export function compactSourceMatchText(value: string): string {
   return `${text.slice(0, SOURCE_MATCH_TEXT_LIMIT - 3).trimEnd()}...`;
 }
 
-/** Builds ripgrep glob exclusions from the shared source-scan ignore set. */
 function ripgrepExcludeArgs(): string[] {
   return [
     ...[...IGNORED_DIR_NAMES].flatMap((name) => ["--glob", `!**/${name}/**`]),
@@ -210,7 +209,6 @@ function streamedJsonMatches(
   return matches;
 }
 
-/** Converts one ripgrep JSON match event into a source row. */
 function ripgrepMatch(rgEvent: Record<string, unknown>): SourceMatch | null {
   if (rgEvent.type !== "match") {
     return null;

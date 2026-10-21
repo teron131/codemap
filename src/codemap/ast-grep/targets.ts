@@ -1,4 +1,4 @@
-/** Resolves structural-search paths and language coverage without changing traversal order or root boundaries. */
+/** Resolves structural-search targets inside the project root and infers their languages. Directory walks sort entries, skip symlinks, and honor the scanner's ignored directories but not `.gitignore`. */
 import { readdirSync } from "node:fs";
 import path from "node:path";
 
@@ -33,12 +33,11 @@ const INFERRED_SYNTAX_LANGUAGES = [
   { language: "python", suffixes: new Set([".py"]) },
 ];
 
-/** Normalizes language aliases for ast-grep. */
 export function normalizeLanguage(lang: string): string {
   return LANGUAGE_ALIASES[lang.toLowerCase()] ?? lang;
 }
 
-/** Resolves project target files for ast-grep operations. */
+/** No paths means the whole root; paths that do not exist contribute no files, while paths outside the root throw. */
 export function targetFiles(root: string, paths: string[]): string[] {
   const files: string[] = [];
   for (const rawPath of paths.length > 0 ? paths : ["."]) {
@@ -53,7 +52,6 @@ export function targetFiles(root: string, paths: string[]): string[] {
   return files;
 }
 
-/** Checks whether ast-grep should scan a filesystem path. */
 function shouldScanAstGrepFile(filePath: string, root: string): boolean {
   let relParts: string[];
   const relative = path.relative(root, filePath);
@@ -83,7 +81,6 @@ export function resolveProjectFile(root: string, rawPath: string): string {
   return resolved;
 }
 
-/** Lists target files recursively for ast-grep fallback scans. */
 function recursiveFiles(directory: string): string[] {
   const files: string[] = [];
   let entries = [];
@@ -111,7 +108,7 @@ function recursiveFiles(directory: string): string[] {
   return files;
 }
 
-/** Infers each syntax variant from one already resolved file inventory. */
+/** Returns languages in a fixed TypeScript, TSX, JavaScript, JSX, Python order, which sets the order of search output. */
 export function languagesForFiles(files: string[]): string[] {
   const suffixes = new Set(files.map((file) => path.extname(file)));
   return INFERRED_SYNTAX_LANGUAGES.filter((candidate) =>

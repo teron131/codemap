@@ -1,4 +1,4 @@
-/** Adapts Codebase Memory symbol evidence into normalized inspection reports. */
+/** Backend `inspect` lane for exactly one matching graph symbol with provider source. Other targets fall back to the current tree. */
 import path from "node:path";
 
 import { canonicalPath } from "../codebase-memory/cache.js";
@@ -22,7 +22,6 @@ export type CodebaseMemoryInspectResult = {
 
 const JSON_FORMAT = { format: "json" } as const;
 
-/** Reads and normalizes a backend symbol inspection when one exact match exists. */
 export function codebaseMemoryInspect(
   root: string,
   target: string,
@@ -75,12 +74,10 @@ export function codebaseMemoryInspect(
   });
 }
 
-/** Requires source-owned snippet data before backend inspect can replace local output. */
 function hasSnippetAnswer(value: unknown): boolean {
   return stringField(recordValue(value).source) !== null;
 }
 
-/** Normalizes inspect search, snippet, and trace payloads into one view object. */
 function inspectResultFromPayloads(
   target: string,
   root: string,
@@ -111,7 +108,7 @@ function inspectResultFromPayloads(
   };
 }
 
-/** Extracts one unambiguous exact graph result for a symbol target. */
+/** Returns `{}` unless exactly one qualified name matches the target by name, full qualified name, or `.target` suffix. */
 function firstGraphMatch(value: unknown, target: string): Record<string, unknown> {
   const record = recordValue(value);
   const candidates: Record<string, unknown>[] = [];
@@ -141,7 +138,6 @@ function firstGraphMatch(value: unknown, target: string): Record<string, unknown
   return exact.size === 1 ? ([...exact.values()][0] ?? {}) : {};
 }
 
-/** Builds compact complexity and graph degree facts from a snippet payload. */
 function signalFacts(snippet: Record<string, unknown>): string[] {
   return [
     ["complexity", numberField(snippet.complexity)],
@@ -154,7 +150,7 @@ function signalFacts(snippet: Record<string, unknown>): string[] {
     .map(([name, value]) => `${name}=${value}`);
 }
 
-/** Builds a compact signature row from backend snippet fields. */
+/** Appends the return type unless the signature already ends with it, as in `(root)` with `str` → `run(root) -> str`. */
 function signatureText(snippet: Record<string, unknown>, name: string): string | null {
   const signature = stringField(snippet.signature);
   const returnType = stringField(snippet.return_type);
@@ -168,7 +164,7 @@ function signatureText(snippet: Record<string, unknown>, name: string): string |
   return compactSignature(`${signature}${separator}${returnType}`, name);
 }
 
-/** Compacts backend signature fragments into a readable one-line signature. */
+/** Collapses whitespace and a trailing comma and prepends a missing name, as in `(\n  a,\n  b,\n)` → `run(a, b)`. */
 function compactSignature(signature: string, name: string): string {
   const text = signature
     .replace(/\s+/g, " ")
@@ -179,7 +175,6 @@ function compactSignature(signature: string, name: string): string {
   return text.startsWith("(") ? `${name}${text}` : text;
 }
 
-/** Detects return types already attached to the end of a backend signature. */
 function signatureAlreadyIncludesReturnType(signature: string, returnType: string): boolean {
   const normalized = signature.replace(/\s+/g, " ").trim();
   const normalizedReturn = returnType.replace(/\s+/g, " ").trim();
@@ -191,7 +186,6 @@ function signatureAlreadyIncludesReturnType(signature: string, returnType: strin
   );
 }
 
-/** Builds readable trace rows from Codebase Memory trace arrays. */
 function traceRows(value: unknown, excluded: Set<string> = new Set()): string[] {
   return uniqueTraceRows(
     arrayValue(value)
@@ -240,7 +234,6 @@ function excludedTraceNames(names: string[]): Set<string> {
   return excluded;
 }
 
-/** Shortens absolute paths when Codebase Memory returns them. */
 function displayFilePath(value: string | null, root: string): string | null {
   if (value === null) {
     return null;
@@ -251,7 +244,6 @@ function displayFilePath(value: string | null, root: string): string | null {
   return value;
 }
 
-/** Renders a compact backend-first inspect report. */
 export function renderCodebaseMemoryInspect(
   result: CodebaseMemoryInspectResult,
   { limit }: { limit: number },
@@ -270,7 +262,6 @@ export function renderCodebaseMemoryInspect(
   return lines.join("\n").trim();
 }
 
-/** Adds a concise source section from a normalized backend inspection. */
 function appendCode(
   lines: string[],
   result: CodebaseMemoryInspectResult,
@@ -295,7 +286,6 @@ function appendCode(
   lines.push("```");
 }
 
-/** Adds compact caller and callee rows from a normalized backend inspection. */
 function appendTrace(
   lines: string[],
   result: CodebaseMemoryInspectResult,
@@ -321,7 +311,6 @@ function appendTrace(
   }
 }
 
-/** Chooses a compact Markdown code fence hint from a source path. */
 function codeFenceLanguage(filePath: string | null): string {
   if (filePath === null) {
     return "";

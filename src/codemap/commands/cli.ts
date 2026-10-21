@@ -1,4 +1,4 @@
-/** Builds and dispatches the top-level Codemap CLI parser. */
+/** Builds the commander program and runs it with stdout captured, so the output budget applies once to the whole output. */
 import { Command, CommanderError } from "commander";
 
 import { CODEMAP_VERSION } from "../version.js";
@@ -12,7 +12,7 @@ import { addSummaryParser } from "./summary.js";
 
 const COMMAND_NAMES = new Set(["backend", "index", "inspect", "search", "signals", "summary"]);
 
-/** Creates the top-level commander parser and attaches all subcommands. */
+/** Uses `exitOverride`, so usage errors and `--help` throw `CommanderError` for `dispatch` to map instead of exiting the process. */
 export function buildParser(): Command {
   const program = new Command();
   program
@@ -33,7 +33,7 @@ export function buildParser(): Command {
   return program;
 }
 
-/** Parses CLI arguments and returns a process exit code. */
+/** Maps usage errors to exit code 2 and thrown errors to 1 with the message on stderr; otherwise returns the `process.exitCode` the command set. */
 export async function dispatch(program: Command, argv: string[]): Promise<number> {
   try {
     await program.parseAsync(argv);
@@ -50,7 +50,7 @@ export async function dispatch(program: Command, argv: string[]): Promise<number
   }
 }
 
-/** Runs Codemap CLI parsing with the process argument vector. */
+/** Buffers everything written to stdout during dispatch, then writes it once through `applyOutputBudget`; budget notices go to stderr. */
 export async function main(argv: string[] = process.argv): Promise<number> {
   const chunks: Buffer[] = [];
   const stdoutWrite = process.stdout.write;
@@ -84,7 +84,7 @@ export async function main(argv: string[] = process.argv): Promise<number> {
   return exitCode;
 }
 
-/** Runs the CLI entrypoint and records a nonzero exit code. */
+/** Sets `process.exitCode` rather than calling `process.exit`, so buffered stdout can drain before the process ends. */
 export function run(): void {
   void main(process.argv).then((exitCode) => {
     if (exitCode !== 0) {
@@ -93,7 +93,7 @@ export function run(): void {
   });
 }
 
-/** Restores a script placeholder when a launcher omits argv[1]. */
+/** Restores the script placeholder some launchers omit: `[node, "search", "x"]` → `[node, "codemap", "search", "x"]`. */
 function normalizedArgv(argv: string[]): string[] {
   const firstArgument = argv[1];
   if (

@@ -1,4 +1,4 @@
-/** Defines the signal section vocabulary and shared row shapes for payload construction and rendering. */
+/** Section vocabulary for `signals` and the row shapes its payload builders and text renderers exchange. */
 import type { NumericStats } from "../math-utils.js";
 
 /** Section names the `signals` command accepts, and the order the all-section payload emits. */
@@ -17,7 +17,6 @@ export const SIGNAL_SECTION_CHOICES = [
 
 export type SignalSection = (typeof SIGNAL_SECTION_CHOICES)[number];
 
-/** Narrows CLI text to one accepted signal section. */
 export function isSignalSection(value: string): value is SignalSection {
   return (SIGNAL_SECTION_CHOICES as readonly string[]).includes(value);
 }

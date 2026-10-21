@@ -1,4 +1,4 @@
-/** Defines CLI behavior for Codebase Memory backend operations. */
+/** `backend` diagnostics and the `index` refresh. Every command rebuilds the project index first, prints compact text unless `--json`, and appends the provider's failure reason on error. */
 import type { Command } from "commander";
 
 import { canonicalPath } from "../codebase-memory/cache.js";
@@ -28,7 +28,6 @@ type BackendChangesOptions = ProjectRootOptions &
     json?: boolean;
   };
 
-/** Registers Codebase Memory backend commands. */
 export function addBackendParsers(program: Command): void {
   const backend = program
     .command("backend")
@@ -83,7 +82,6 @@ export function addBackendParsers(program: Command): void {
   addProjectRootArgument(backendChanges);
 }
 
-/** Registers the top-level Codebase Memory refresh command. */
 export function addIndexParser(program: Command): void {
   const index = program
     .command("index")
@@ -94,7 +92,6 @@ export function addIndexParser(program: Command): void {
   addProjectRootArgument(index);
 }
 
-/** Lists Codebase Memory projects after refreshing the current project root. */
 export function commandBackendProjects(
   options: ProjectRootOptions,
   rootOptions: ProjectRootOptions = {},
@@ -109,7 +106,6 @@ export function commandBackendProjects(
   return 1;
 }
 
-/** Prints Codebase Memory backend status for the project root. */
 export function commandBackendStatus(
   options: ProjectRootOptions,
   rootOptions: ProjectRootOptions = {},
@@ -124,7 +120,6 @@ export function commandBackendStatus(
   return 1;
 }
 
-/** Prints Codebase Memory graph schema for the project root. */
 export function commandBackendSchema(
   options: ProjectRootOptions,
   rootOptions: ProjectRootOptions = {},
@@ -139,7 +134,6 @@ export function commandBackendSchema(
   return 1;
 }
 
-/** Runs a Codebase Memory Cypher query for the project root. */
 export function commandBackendQuery(
   query: string[],
   options: BackendQueryOptions,
@@ -166,7 +160,6 @@ export function commandBackendQuery(
   return 1;
 }
 
-/** Runs Codebase Memory changed-code impact analysis. */
 export function commandBackendChanges(
   options: BackendChangesOptions,
   rootOptions: ProjectRootOptions = {},
@@ -181,7 +174,6 @@ export function commandBackendChanges(
   return 1;
 }
 
-/** Explicitly refreshes Codebase Memory and prints timing for diagnostics. */
 export function commandIndex(
   options: ProjectRootOptions,
   rootOptions: ProjectRootOptions = {},
@@ -204,23 +196,20 @@ export function commandIndex(
   return 1;
 }
 
-/** Appends the concrete provider failure while keeping the command context visible. */
 function backendFailureMessage(root: string, summary: string): string {
   const reason = codebaseMemoryFailureReason(root);
   return reason === null ? summary : `${summary}\nreason: ${reason}`;
 }
 
-/** Detects Cypher clauses that can mutate the backend graph. */
+/** Keyword screen, not a Cypher parse: a keyword anywhere, even inside a string literal such as `'create'`, refuses the query. */
 function mutatesGraph(query: string): boolean {
   return /\b(CREATE|MERGE|DELETE|DETACH|SET|REMOVE|DROP|LOAD\s+CSV)\b/i.test(query);
 }
 
-/** Resolves command-local or global project-root options for backend commands. */
 function resolveBackendRoot(options: ProjectRootOptions, rootOptions: ProjectRootOptions): string {
   return resolveProjectRoot(options.projectRoot ?? rootOptions.projectRoot);
 }
 
-/** Renders backend status fields for the diagnostic command. */
 function renderBackendStatus(result: CodebaseMemoryStatusResult): string {
   const lines = [
     `CodebaseMemory index: ${result.projectName}`,
@@ -236,7 +225,7 @@ function renderBackendStatus(result: CodebaseMemoryStatusResult): string {
   return lines.join("\n");
 }
 
-/** Renders backend projects with the active root first and stale work roots hidden. */
+/** Lists the active root first and hides projects rooted under `test/.work/`, where Codemap's test fixtures live. */
 function renderBackendProjects(value: unknown, currentRoot: string): string {
   const projects = arrayValue(recordValue(value).projects)
     .map(projectRecord)
@@ -272,7 +261,6 @@ type BackendProject = {
   edges: number | null;
 };
 
-/** Normalizes one backend project row for diagnostic presentation. */
 function projectRecord(value: unknown): BackendProject | null {
   const project = recordValue(value);
   const name = stringField(project.name);
@@ -287,7 +275,6 @@ function projectRecord(value: unknown): BackendProject | null {
   };
 }
 
-/** Renders one backend project row without raw JSON. */
 function projectRow(project: BackendProject): string {
   const detail = [
     project.root,
@@ -297,7 +284,6 @@ function projectRow(project: BackendProject): string {
   return `${project.name}${detail.length > 0 ? ` (${detail.join(", ")})` : ""}`;
 }
 
-/** Renders backend schema labels and edge types. */
 function renderBackendSchema(value: unknown): string {
   const record = recordValue(value);
   const nodeLabels = arrayValue(record.node_labels);
@@ -309,7 +295,6 @@ function renderBackendSchema(value: unknown): string {
   ].join("\n");
 }
 
-/** Renders one schema count row from object or string payloads. */
 function schemaRow(value: unknown): string {
   if (typeof value === "string") {
     return value;
@@ -320,7 +305,6 @@ function schemaRow(value: unknown): string {
   return count === null ? name : `${name} (${count})`;
 }
 
-/** Renders arbitrary backend query rows compactly. */
 function renderQueryRows(value: unknown): string {
   const record = recordValue(value);
   const rows =
@@ -340,7 +324,7 @@ function renderQueryRows(value: unknown): string {
   return lines.join("\n");
 }
 
-/** Renders one backend query row without noisy scalar JSON. */
+/** Joins cells with ` | ` and decodes JSON-encoded string cells: `["run", '["src/a.ts"]']` → `run | src/a.ts`. */
 function rowValueText(value: unknown): string {
   if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
     return scalarRowText(value);
@@ -355,7 +339,6 @@ function rowValueText(value: unknown): string {
   return JSON.stringify(value);
 }
 
-/** Decodes JSON-encoded scalar cells before rendering them. */
 function scalarRowText(value: string | number | boolean): string {
   if (typeof value !== "string") {
     return String(value);
@@ -371,7 +354,6 @@ function scalarRowText(value: string | number | boolean): string {
   }
 }
 
-/** Renders backend changed-code impact output. */
 function renderBackendChanges(value: unknown): string {
   const record = recordValue(value);
   const lines = ["CodebaseMemory changed-code impact:"];
@@ -406,14 +388,12 @@ function renderBackendChanges(value: unknown): string {
   return lines.join("\n");
 }
 
-/** Appends backend rows for the shared final-output budget. */
 function appendRows<T>(lines: string[], rows: T[], render: (row: T) => string): void {
   for (const row of rows) {
     lines.push(`- ${render(row)}`);
   }
 }
 
-/** Renders one impacted symbol from changed-code analysis. */
 function symbolImpactRow(value: unknown): string {
   const record = recordValue(value);
   const name = stringField(record.name) ?? JSON.stringify(value);

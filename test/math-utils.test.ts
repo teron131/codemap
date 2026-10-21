@@ -1,4 +1,4 @@
-/** Checks shared numeric population summaries. */
+/** Checks `describeNumbers` sample deviation, interpolated percentiles, and data-derived bins. */
 import { describe, expect, it } from "vitest";
 
 import { describeNumbers } from "../src/codemap/math-utils.js";

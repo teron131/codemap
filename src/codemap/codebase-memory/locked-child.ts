@@ -1,4 +1,4 @@
-/** Runs the official MCP client while retaining lock ownership until its provider process has exited. */
+/** Per-call child that `transport.ts` runs synchronously. It drives the official async MCP client and holds the project lock until the provider process has exited. */
 import { readFileSync, writeFileSync, writeSync } from "node:fs";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -47,7 +47,6 @@ function writeAll(fd: number, value: string): void {
   }
 }
 
-/** Keeps SDK negotiation, cancellation, and provider shutdown inside the existing synchronous caller boundary. */
 async function run(): Promise<void> {
   const request = JSON.parse(readFileSync(0, "utf8")) as {
     name: string;

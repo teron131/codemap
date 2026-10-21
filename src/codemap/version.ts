@@ -1,4 +1,4 @@
-/** Exposes the package-owned Codemap version to runtime integrations. */
+/** Reads the version from `package.json` once at import, failing at startup when it is missing. The path is relative to this module, so `src/` and `dist/` find the same manifest. */
 import { readFileSync } from "node:fs";
 
 type PackageMetadata = {

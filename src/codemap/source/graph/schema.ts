@@ -1,4 +1,4 @@
-/** Defines the current-tree graph node, edge, and payload shapes shared by search fallback and inspection. */
+/** Current-tree graph shapes shared by graph search fallback and inspection. Node ids are `type:path` for files and `type:path:name` for definitions. */
 export type GraphNode = {
   id: string;
   type: string;

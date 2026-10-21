@@ -1,4 +1,4 @@
-/** Checks TypeScript-family scanner edge cases. */
+/** Checks TypeScript-family scanning and Oxc import resolution. Cases cover module suffixes, nested configs, and workspace packages. */
 import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 

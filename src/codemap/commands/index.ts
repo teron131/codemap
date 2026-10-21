@@ -1,4 +1,4 @@
-/** Re-exports the CLI runner and one handler per command. */
+/** CLI entry points: `run` for the installed bin, plus one handler per command that tests call with parsed options. */
 export {
   commandBackendChanges,
   commandBackendProjects,

@@ -1,10 +1,11 @@
-/** Checks likely-entry ranking shared by summary and inspect output. */
+/** Checks the likely-entry ranking behind inspect's navigation context. */
 import { describe, expect, it } from "vitest";
 
 import type { GraphNode, GraphPayload } from "../src/codemap/source/graph/index.js";
 import {
   buildLikelyEntries,
   buildPathRankedLikelyEntries,
+  inventoryFileNodes,
 } from "../src/codemap/source/graph/index.js";
 
 describe("source graph likely-entry ranking", () => {
@@ -23,6 +24,24 @@ describe("source graph likely-entry ranking", () => {
 
     expect(entries.map((entry) => entry.title)).not.toContain("src/index.test.ts");
     expect(entries[0]?.title).toBe("src/index.ts");
+  });
+
+  it("treats only conventional test paths as test files when tagging inventory nodes", () => {
+    const entries = buildPathRankedLikelyEntries(
+      inventoryFileNodes(
+        ["src/inspect/render.ts", "src/latest.ts", "src/app.test.ts"].map((path) => ({
+          path,
+          language: "typescript",
+          fileCategory: "code",
+          sizeLines: 10,
+        })),
+      ),
+    );
+
+    expect(entries.map((entry) => entry.title).sort()).toEqual([
+      "src/inspect/render.ts",
+      "src/latest.ts",
+    ]);
   });
 
   it("prefers core large-repo fallback entries over alphabetical extension entries", () => {

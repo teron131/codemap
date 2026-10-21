@@ -33,7 +33,7 @@ function collectManifestTargets(value: unknown, targets: Set<string>): void {
   }
 }
 
-/** Maps emitted manifest targets back to plausible current-tree source files. */
+/** Maps emitted manifest targets back to plausible current-tree source files: `./dist/cli.js` yields `dist/cli.js`, `src/cli.ts`, `src/cli/index.ts`, and the other source suffixes. */
 function manifestSourceCandidates(target: string): string[] {
   const normalized = target.replace(/^\.\//, "").split(path.sep).join("/");
   const sourceBase = normalized.replace(/^(?:dist|build|lib)\//, "src/");
@@ -60,7 +60,7 @@ export function isConventionalSurface(filePath: string): boolean {
   return /^index\.(?:[cm]?[jt]sx?)$/.test(name);
 }
 
-/** Reads authored package boundaries and their declared in-repository dependencies. */
+/** Deepest packages come first, and in a multi-package tree the root package survives only when it declares entry points. */
 export function sourcePackages(source: SourceContext): SourcePackage[] {
   const packages = new Map<string, SourcePackage>();
   for (const manifestPath of source.discoveredFiles) {
@@ -107,7 +107,7 @@ export function sourcePackages(source: SourceContext): SourcePackage[] {
   );
 }
 
-/** Parses only package identity, dependencies, and entry-surface presence from one manifest. */
+/** Parses only package identity, dependencies, and entry-surface presence from one manifest, reading `pyproject.toml` with regular expressions over its `[project]` table rather than a TOML parser. */
 function sourcePackageManifest(
   manifestPath: string,
   manifestFileName: string,
@@ -175,7 +175,6 @@ function sourcePackageManifest(
   };
 }
 
-/** Resolves emitted manifest targets to current-tree source paths within one package root. */
 function manifestSurfacePaths(root: string, targets: string[], filePaths: Set<string>): string[] {
   return targets.flatMap((target) => {
     const candidate = manifestSourceCandidates(target)
@@ -197,7 +196,6 @@ function nonProductManifestPath(file: string): boolean {
     );
 }
 
-/** Counts non-empty POSIX path segments for package specificity ordering. */
 function pathDepth(value: string): number {
   return value.split("/").filter(Boolean).length;
 }

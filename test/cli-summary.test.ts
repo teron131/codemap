@@ -571,7 +571,6 @@ describe("summary CLI", () => {
   });
 });
 
-/** Collects mocked console output as printable test lines. */
 function logLines(logSpy: ReturnType<typeof vi.spyOn>): string[] {
   return logSpy.mock.calls.map((call: unknown[]) => call.join(" "));
 }

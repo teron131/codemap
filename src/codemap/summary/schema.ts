@@ -1,4 +1,4 @@
-/** Defines the normalized repository summary schema assembled before text presentation. */
+/** Repository summary shape that `architecture/pipeline.ts` assembles and `presentation.ts` renders. Share fields are fractions of 1. */
 
 export type ReadmeSection = {
   level: number;

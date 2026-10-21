@@ -1,4 +1,4 @@
-/** Re-exports scan discovery, per-file scanning, metrics, and language constants. */
+/** File discovery, path policy, and per-file syntax scanning shared by every capability. */
 export {
   ENTRYPOINT_BASENAMES,
   IGNORED_DIR_NAMES,

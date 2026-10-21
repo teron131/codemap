@@ -66,12 +66,11 @@ export const CONFIG_BASENAMES = new Set([
   "uv.lock",
 ]);
 
-/** Scans project files into inventory rows. */
+/** Reads every file to count its lines but parses none. */
 export function runScan(root: string, filePaths: string[] = discoverFiles(root)): ScanEntry[] {
   return filePaths.map((filePath) => scanEntry(root, filePath));
 }
 
-/** Builds one scan inventory entry from a project-relative path. */
 export function scanEntry(root: string, filePath: string): ScanEntry {
   const relPath = relativePath(filePath, { displayRoot: root });
   const suffix = path.extname(filePath);
@@ -83,7 +82,6 @@ export function scanEntry(root: string, filePath: string): ScanEntry {
   };
 }
 
-/** Counts newline-delimited lines in source text. */
 function countLines(filePath: string): number {
   let text: string;
   try {
@@ -94,7 +92,7 @@ function countLines(filePath: string): number {
   return sourceLineCount(text);
 }
 
-/** Classifies a project path as code, docs, config, or data. */
+/** Returns `docs`, `config`, `infra`, `data`, or the `code` fallback, which also covers unrecognized files such as `logo.png`. */
 export function categoryForPath(relPath: string): string {
   const lowerPath = relPath.toLowerCase();
   const name = path.basename(relPath);

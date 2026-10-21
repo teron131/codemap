@@ -36,7 +36,7 @@ const READY_INDEX_STATUSES = new Set(["complete", "completed", "indexed", "ready
 const activeOperations: ActiveCodebaseMemoryOperation[] = [];
 const failureReasons = new Map<string, string>();
 
-/** Returns whether the optional CodebaseMemory integration is enabled. */
+/** Off for `CODEMAP_CODEBASE_MEMORY` values `0`, `false`, and `off`, and off by default under Vitest so tests reach a provider only when they opt in. */
 function codebaseMemoryEnabled(): boolean {
   const value = process.env.CODEMAP_CODEBASE_MEMORY;
   if (process.env.VITEST === "true" && value === undefined) {
@@ -45,7 +45,11 @@ function codebaseMemoryEnabled(): boolean {
   return value !== "0" && value !== "false" && value !== "off";
 }
 
-/** Runs one operation against a clean index while serializing the same repository across processes. */
+/**
+ * Runs one operation against a clean index while serializing the same repository across processes.
+ *
+ * Returns null when the backend is disabled, the lock is unavailable, or the refresh fails, recording why for `codebaseMemoryFailureReason`. Nested calls for the same root reuse the active snapshot, and `operation` must be synchronous because the lock is released when it returns.
+ */
 export function withFreshCodebaseMemoryProject<T>(
   root: string,
   operation: (project: CodebaseMemoryReadyProject) => T,
@@ -86,12 +90,11 @@ export function withFreshCodebaseMemoryProject<T>(
   }
 }
 
-/** Returns the most recent backend failure for one project root. */
+/** The latest failure recorded for `root`; each new operation and each successful call for that root clears it. */
 export function codebaseMemoryFailureReason(root: string): string | null {
   return failureReasons.get(canonicalPath(root)) ?? null;
 }
 
-/** Runs a callback while rejecting asynchronous callback forms. */
 function runSynchronousProjectOperation<T>(
   project: CodebaseMemoryReadyProject,
   operation: (project: CodebaseMemoryReadyProject) => T,
@@ -110,7 +113,6 @@ function runSynchronousProjectOperation<T>(
   return value;
 }
 
-/** Detects Promise-like callback results before the cache lock is released. */
 function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
   return (
     (typeof value === "object" || typeof value === "function") &&
@@ -120,7 +122,6 @@ function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
   );
 }
 
-/** Rebuilds the requested root and returns its ready project metadata. */
 function refreshProject(root: string): CodebaseMemoryRefreshResult {
   const deletion = deleteExistingProject(root);
   if (!deletion.ok) {
@@ -228,7 +229,7 @@ function deleteExistingProject(root: string): { ok: true } | { ok: false; reason
     : { ok: false, reason: "Could not delete existing project: invalid deletion response." };
 }
 
-/** Extracts a concise provider hint from JSON-encoded or plain tool failures. */
+/** Shortens JSON-encoded failures to their hint, as in `{"outcome":"timeout","hint":"retry"}` → `timeout: retry`; other reasons pass through. */
 function readableToolReason(reason: string): string {
   try {
     const payload = recordValue(JSON.parse(reason));

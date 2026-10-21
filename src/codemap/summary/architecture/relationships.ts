@@ -24,7 +24,7 @@ const IMPORT_RELATIONSHIPS_QUERY =
 const CALL_RELATIONSHIPS_QUERY =
   "MATCH (a)-[r:CALLS]->(b) RETURN a.file_path AS source, b.file_path AS target, count(r) AS weight";
 
-/** Requests native architecture facts and relationship rows after a fresh graph index. */
+/** Null when the backend is unavailable or reports an empty architecture; a relationship query that fails contributes no rows. */
 export function relationshipEvidence(
   root: string,
   sourceFileCount: number,
@@ -137,7 +137,7 @@ const GENERIC_BACKEND_NAMES = new Set([
   "yield",
 ]);
 
-/** Converts native call counts into described, non-generic hotspot rows. */
+/** Drops generic names; `callShare` is a hotspot's fan-in as a fraction of all call edges. */
 function hotspotSummaries(architecture: RelationshipRow, source: SourceContext): HotspotSummary[] {
   const callEdges = namedCount(architecture.edge_types, "type", "CALLS");
   return arrayValue(architecture.hotspots)
@@ -159,7 +159,7 @@ function hotspotSummaries(architecture: RelationshipRow, source: SourceContext):
     });
 }
 
-/** Converts native communities into source-labelled size and internal-call percentages. */
+/** `codeShare` is members over analyzed functions, methods, and classes, and `internalCallShare` is the provider's cohesion; both are fractions. */
 function clusterSummaries(architecture: RelationshipRow, source: SourceContext): ClusterSummary[] {
   const analyzedSymbols = Math.min(
     CLUSTER_NODE_CAP,
@@ -227,7 +227,7 @@ function clusterSummaries(architecture: RelationshipRow, source: SourceContext):
   }));
 }
 
-/** Finds the deepest directory shared by resolved cluster symbols. */
+/** Finds the deepest directory shared by resolved cluster symbols; null unless it is at least two segments deep, so a bare `src` never labels a cluster. */
 function commonOwnerPath(files: string[]): string | null {
   if (files.length === 0) {
     return null;
@@ -244,7 +244,6 @@ function commonOwnerPath(files: string[]): string | null {
   return commonParts.length > 1 ? commonParts.join("/") : null;
 }
 
-/** Reads one named count from a backend count-row array. */
 function namedCount(value: unknown, nameKey: string, expectedName: string): number {
   for (const item of arrayValue(value)) {
     const row = recordValue(item);
@@ -265,7 +264,7 @@ function genericBackendName(value: string): boolean {
   return name.startsWith("#") || GENERIC_BACKEND_NAMES.has(name);
 }
 
-/** Detects provider labels derived from the repository path rather than a source owner. */
+/** Detects provider labels derived from the repository path rather than a source owner; under `/work/acme/api` those are `api`, `acme-api`, and `work-acme-api`. */
 function projectWideClusterLabel(label: string, root: string): boolean {
   if (!root) {
     return false;
@@ -277,7 +276,6 @@ function projectWideClusterLabel(label: string, root: string): boolean {
   return parts.some((_, index) => parts.slice(index).join("-") === label.toLowerCase());
 }
 
-/** Converts internal relationship evidence into the human-facing hotspot and cluster views. */
 export function relationshipSummaries(
   architecture: RelationshipRow,
   source: SourceContext,

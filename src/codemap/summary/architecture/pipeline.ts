@@ -1,4 +1,4 @@
-/** Builds one repository summary from current-tree documentation and Codebase Memory structure. */
+/** Builds one repository summary from current-tree documentation and Codebase Memory structure. The local skeleton and public API survive when the backend is unavailable. */
 import path from "node:path";
 
 import { codebaseMemoryFailureReason } from "../../codebase-memory/client.js";
@@ -9,7 +9,6 @@ import { relationshipEvidence, relationshipSummaries } from "./relationships.js"
 import { buildSourceContext, languageSummaries } from "./source-context.js";
 import { currentTreeRelationshipRows, structuralSummary } from "./structure.js";
 
-/** Combines source-owned orientation with native architecture facts. */
 export function buildRepositorySummary(root: string): RepositorySummary {
   const source = buildSourceContext(root);
   const evidence = relationshipEvidence(root, source.files.length);

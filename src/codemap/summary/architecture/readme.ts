@@ -31,7 +31,7 @@ const SUPPRESSED_HTML = new Set([
 ]);
 const HTML_BLOCKS = new Set(["p", "div", "section", "article", "ul", "ol", "li", "h1", "h2", "h3"]);
 
-/** Preserves Codemap's section selection while leaving Markdown boundaries and inline syntax to the parser. */
+/** Keeps the introduction and headings up to level 3, dropping setup and project-administration headings with their subsections; only the first two sections with prose keep their content. */
 export function readmeSummaryFromText(text: string): ReadmeSection[] {
   const blocks = markdownBlocks(text);
   const sections: ReadmeSection[] = [];
@@ -81,7 +81,7 @@ function markdownBlocks(text: string): Block[] {
   });
 }
 
-/** Reads the first supported README, retaining the existing plain-text/setext subset for reStructuredText files. */
+/** Parses `README.rst` with the Markdown parser too, so only its plain-text and setext-heading subset is understood. */
 export function readmeSummary(root: string): ReadmeSection[] {
   for (const name of README_NAMES) {
     const file = path.join(root, name);
@@ -176,6 +176,7 @@ function suppressedHtml(node: HtmlNode): boolean {
   );
 }
 
+/** Strips emphasis markers and leading symbols: `🚀 **Getting** _started_` → `Getting started`. */
 function headingTitle(value: string): string {
   return value
     .replace(/[`*_~]/g, "")

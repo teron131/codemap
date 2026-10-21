@@ -86,7 +86,6 @@ export type DocstringSignals = {
   }>;
 };
 
-/** Finds Python and TypeScript-family files supported by docstring reports. */
 function collectSupportedFiles(targetPath: string): string[] {
   if (isFile(targetPath)) {
     return DOCSTRING_SUFFIXES.has(path.extname(targetPath)) ? [targetPath] : [];
@@ -96,7 +95,7 @@ function collectSupportedFiles(targetPath: string): string[] {
   );
 }
 
-/** Builds a compact preview from one file docstring. */
+/** The first non-blank line, cut to `maxLength` characters ending in `...`; missing documentation yields `fallback`, the string `none` by default, never null. */
 export function docstringPreview(
   docstring: string | null,
   { fallback = "none", maxLength = 120 }: { fallback?: string; maxLength?: number } = {},
@@ -117,7 +116,6 @@ export function docstringPreview(
   return `${firstLine.slice(0, maxLength - 3).trimEnd()}...`;
 }
 
-/** Orders docstring focus paths before broad report files. */
 function resolveFocusPathsInOrder(
   focusFiles: string[],
   { moduleRoot }: { moduleRoot: string },
@@ -127,7 +125,6 @@ function resolveFocusPathsInOrder(
   );
 }
 
-/** Chooses docstring reports matching requested focus paths. */
 function selectReports(
   reports: FileReport[],
   { focusFiles, moduleRoot }: { focusFiles: string[]; moduleRoot: string },
@@ -142,7 +139,6 @@ function selectReports(
     .filter((report): report is FileReport => report !== undefined);
 }
 
-/** Ranks functions for docstring signal selection. */
 function functionPriority(report: FunctionReport): [number, number, number] {
   const loweredName = report.name.toLowerCase();
   const hasDocstring = report.docstring ? 0 : 1;
@@ -158,7 +154,6 @@ function functionPriority(report: FunctionReport): [number, number, number] {
   return [hasDocstring, isDunder, publicRank];
 }
 
-/** Selects functions that need useful docstrings most. */
 function functionSignalCandidates(
   report: FunctionReport,
   { ownerName = null }: { ownerName?: string | null } = {},
@@ -175,7 +170,6 @@ function functionSignalCandidates(
   return candidates;
 }
 
-/** Collects functions that should appear in docstring signal output. */
 function collectSignalFunctions(report: FileReport): Array<[string, FunctionReport]> {
   const candidates: Array<[string, FunctionReport]> = [];
   for (const functionReport of report.functions) {
@@ -203,7 +197,6 @@ function collectSignalFunctions(report: FileReport): Array<[string, FunctionRepo
   });
 }
 
-/** Serializes a function docstring report for JSON output. */
 function functionToDict(
   report: FunctionReport,
   { qualifiedName = null }: { qualifiedName?: string | null } = {},
@@ -225,7 +218,6 @@ function functionToDict(
   };
 }
 
-/** Serializes a class docstring report for JSON output. */
 function classToDict(
   report: ClassReport,
   { qualifiedName = null }: { qualifiedName?: string | null } = {},
@@ -250,12 +242,10 @@ function classToDict(
   };
 }
 
-/** Counts function reports including nested functions. */
 function countFunctions(functions: FunctionReport[]): number {
   return functions.reduce((total, report) => total + 1 + countFunctions(report.nestedFunctions), 0);
 }
 
-/** Counts methods nested under class docstring reports. */
 function countClassMethods(classes: ClassReport[]): number {
   return classes.reduce(
     (total, classReport) =>
@@ -264,7 +254,6 @@ function countClassMethods(classes: ClassReport[]): number {
   );
 }
 
-/** Counts class reports including nested classes. */
 function countClasses(classes: ClassReport[]): number {
   return classes.reduce(
     (total, classReport) => total + 1 + countClasses(classReport.nestedClasses),
@@ -272,14 +261,13 @@ function countClasses(classes: ClassReport[]): number {
   );
 }
 
-/** Filters requested docstring focus paths to supported source files. */
 function supportedFocusPaths(paths: string[]): string[] {
   return paths.filter(
     (filePath) => isFile(filePath) && DOCSTRING_SUFFIXES.has(path.extname(filePath)),
   );
 }
 
-/** Builds docstring file reports for supported source files. */
+/** Returns `[moduleRoot, reports]`, where the module root is `targetPath` or, for a file, its directory; non-empty `focusFiles` replaces discovery. */
 export function collectReports(
   targetPath: string,
   { focusFiles = null }: { focusFiles?: string[] | null } = {},
@@ -302,7 +290,7 @@ export function collectReports(
   return [moduleRoot, reports];
 }
 
-/** Finds one symbol docstring in a supported source file report. */
+/** Parses the file afresh; callers already holding its report use `symbolDocstring`. */
 export function docstringForSymbol(
   filePath: string,
   {
@@ -327,7 +315,7 @@ export function docstringForSymbol(
   return symbolDocstring(report, { kind, name, line });
 }
 
-/** Matches a symbol against an existing report so one operation can reuse its file parse. */
+/** Matches a symbol against an existing report so one operation can reuse its file parse; `line` 0 accepts the first definition with that name. */
 export function symbolDocstring(
   report: FileReport,
   { kind, name, line = 0 }: { kind: SymbolDocstringKind; name: string; line?: number },
@@ -337,7 +325,6 @@ export function symbolDocstring(
   return functionDocstring ?? matchingClassDocstring(report.classes, name, line, kind);
 }
 
-/** Finds a function docstring by name with line-number disambiguation. */
 function matchingFunctionDocstring(
   reports: FunctionReport[],
   name: string,
@@ -355,7 +342,6 @@ function matchingFunctionDocstring(
   return null;
 }
 
-/** Finds a class or method docstring by name with line-number disambiguation. */
 function matchingClassDocstring(
   reports: ClassReport[],
   name: string,
@@ -379,7 +365,6 @@ function matchingClassDocstring(
   return null;
 }
 
-/** Collects full docstring report data for a target path. */
 export function buildDocstringsData(targetPath: string): DocstringsData {
   const [, reports] = collectReports(targetPath);
   const pythonFiles = reports.filter((report) =>
@@ -407,7 +392,7 @@ export function buildDocstringsData(targetPath: string): DocstringsData {
   };
 }
 
-/** Builds docstring coverage summaries for selected source files. */
+/** A `maxFiles` of zero or less previews every focused file; `maxFunctions` caps function rows across them. */
 export function buildDocstringSignals(
   targetPath: string,
   {
