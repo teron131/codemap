@@ -170,7 +170,7 @@ export function symbolDescription(
   return shortDescription(docstring) ?? filePreview(source, symbol.file);
 }
 
-/** The file overview's first sentence after `docstringPreview` cuts its first line; null without an overview. */
+/** The first sentence of the file overview's first line; null without an overview. */
 export function filePreview(source: SourceContext, file: string): string | null {
   const report = fileReport(source, file);
   const preview = report === null ? null : docstringPreview(report.fileDocstring);
