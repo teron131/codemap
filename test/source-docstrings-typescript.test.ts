@@ -4,7 +4,11 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { collectReports, docstringForSymbol } from "../src/codemap/source/docstrings/index.js";
+import {
+  collectReports,
+  docstringForSymbol,
+  docstringPreview,
+} from "../src/codemap/source/docstrings/index.js";
 import { scanFile } from "../src/codemap/source/scanner/index.js";
 
 let root: string;
@@ -134,5 +138,11 @@ describe("TypeScript-family documentation", () => {
     expect(reports[0]?.functions.map((item) => item.name)).toEqual(["version", "undocumented"]);
     expect(reports[0]?.functions[0]?.docstring).toBe("Public constant.");
     expect(reports[0]?.functions[1]?.docstring).toBeNull();
+  });
+
+  it("previews the whole first line and cuts at a word boundary only past the cap", () => {
+    const longFirstLine = `${"word ".repeat(40).trim()}.`;
+    expect(docstringPreview(`${longFirstLine}\nSecond line.`)).toBe(longFirstLine);
+    expect(docstringPreview("alpha beta gamma", { maxLength: 12 })).toBe("alpha...");
   });
 });

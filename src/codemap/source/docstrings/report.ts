@@ -95,10 +95,10 @@ function collectSupportedFiles(targetPath: string): string[] {
   );
 }
 
-/** The first non-blank line, cut to `maxLength` characters ending in `...`; missing documentation yields `fallback`, the string `none` by default, never null. */
+/** The first non-blank line, cut at a word boundary ending in `...` only past `maxLength`, a sanity cap; missing documentation yields `fallback`, the string `none` by default, never null. */
 export function docstringPreview(
   docstring: string | null,
-  { fallback = "none", maxLength = 120 }: { fallback?: string; maxLength?: number } = {},
+  { fallback = "none", maxLength = 1000 }: { fallback?: string; maxLength?: number } = {},
 ): string {
   if (!docstring) {
     return fallback;
@@ -113,7 +113,9 @@ export function docstringPreview(
   if (firstLine.length <= maxLength) {
     return firstLine;
   }
-  return `${firstLine.slice(0, maxLength - 3).trimEnd()}...`;
+  const cut = firstLine.slice(0, maxLength - 3);
+  const wordEnd = cut.lastIndexOf(" ");
+  return `${(wordEnd > 0 ? cut.slice(0, wordEnd) : cut).trimEnd()}...`;
 }
 
 function resolveFocusPathsInOrder(
