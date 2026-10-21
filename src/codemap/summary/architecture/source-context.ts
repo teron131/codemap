@@ -114,7 +114,7 @@ export function buildSourceContext(root: string): SourceContext {
   };
 }
 
-/** Finds one source definition, using backend qualification to disambiguate duplicate names. */
+/** Finds one source definition, using backend qualification to disambiguate duplicate names; null while the name stays ambiguous. */
 export function resolveSourceSymbol(
   source: SourceContext,
   name: string,
@@ -135,7 +135,7 @@ export function resolveSourceSymbol(
   return null;
 }
 
-/** Converts a source path into the module fragment used in backend qualified names. */
+/** Converts a source path into the module fragment used in backend qualified names: `src/app/main.ts` → `src.app.main`. */
 function sourceModuleName(filePath: string): string {
   return filePath
     .replace(/\.d\.ts$/, "")
@@ -170,7 +170,7 @@ export function symbolDescription(
   return shortDescription(docstring) ?? filePreview(source, symbol.file);
 }
 
-/** Projects the cached report through the established file-preview length and sentence policy. */
+/** The file overview's first sentence after `docstringPreview` cuts its first line; null without an overview. */
 export function filePreview(source: SourceContext, file: string): string | null {
   const report = fileReport(source, file);
   const preview = report === null ? null : docstringPreview(report.fileDocstring);

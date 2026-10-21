@@ -8,9 +8,7 @@ import { scanPythonFile } from "./python.js";
 import { scanTypescriptFile } from "./typescript.js";
 
 /**
- * Scans one file with the matching language scanner.
- *
- * Supplied source reuses the calling operation's read without retaining state between commands.
+ * `source` lets a caller that already read the file skip a second read.
  * Unsupported suffixes return empty metrics rather than failing, so callers can walk a mixed tree without pre-filtering by language.
  */
 export function scanFile(

@@ -1,4 +1,4 @@
-/** Checks signals CLI JSON output on a small fixture project. */
+/** Runs `signals` on fixture projects under `test/.work` and checks its text and JSON output. Cases cover lightweight mode and the final output budget. */
 import { spawnSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";

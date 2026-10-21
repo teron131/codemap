@@ -1,4 +1,4 @@
-/** Builds complete signal views from current-tree and optional backend evidence. */
+/** Assembles `signals` output from current-tree sections. `top` and `all` also carry Codebase Memory function metrics labeled with their freshness. */
 import { existsSync } from "node:fs";
 import path from "node:path";
 
@@ -44,7 +44,7 @@ const BACKEND_FUNCTION_METRICS_COLUMNS = [
 const BACKEND_FUNCTION_METRICS_LIMIT = 100;
 const BACKEND_FUNCTION_METRICS_FILE_LIMIT = 10_000;
 
-/** Builds the selected signal payload with backend metrics layered over local evidence. */
+/** Throws when current-tree analysis fails; backend failures only mark the payload's `freshness` as degraded. */
 export function buildSignalView(
   root: string,
   section: string,
@@ -56,7 +56,7 @@ export function buildSignalView(
   });
 }
 
-/** Adds backend function metrics to compact top output. */
+/** `top` fills backend rows out with distinct current-tree rows, while `all` carries backend rows alone; above 10,000 eligible files the backend is skipped. */
 function addBackendFunctionMetrics(
   payload: Record<string, unknown>,
   section: string,
@@ -113,12 +113,10 @@ function mergedFunctionMetrics(
   return rows;
 }
 
-/** Builds a stable source identity for mixed backend and local metric rows. */
 function functionMetricKey(row: Record<string, unknown>): string {
   return `${String(row.path ?? "")}\0${String(row.name ?? "")}`;
 }
 
-/** Queries and normalizes backend function metrics. */
 function backendFunctionMetrics(
   root: string,
   { includeTests }: { includeTests: boolean },
@@ -193,7 +191,6 @@ function functionMetricRow(
   };
 }
 
-/** Orders backend functions by cognitive, cyclomatic, length, and identity. */
 function compareFunctionMetrics(
   left: Record<string, unknown>,
   right: Record<string, unknown>,
@@ -207,18 +204,16 @@ function compareFunctionMetrics(
   );
 }
 
-/** Reads number-like graph fields emitted as JSON numbers or strings. */
+/** Accepts numbers or numeric strings; negative and non-numeric values become 0. */
 function numericField(value: unknown): number {
   const parsed = typeof value === "number" ? value : Number(value);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
 }
 
-/** Reads boolean graph fields emitted as JSON booleans or strings. */
 function booleanField(value: unknown): boolean {
   return value === true || value === "true" || value === 1 || value === "1";
 }
 
-/** Builds the selected current-tree signal payload for CLI output. */
 function buildCurrentTreeSignalPayload(
   root: string,
   section: string,
@@ -249,12 +244,12 @@ function buildCurrentTreeSignalPayload(
     includeTests: Boolean(options.includeTests),
   });
   if (section === "all") {
+    // `all` keeps the `docstrings` key but leaves full reports to the separate `docstrings` request.
     payload.docstrings = {};
   }
   return selectPayloadSection(payload, section);
 }
 
-/** Builds docstring sections without forcing full signal export work. */
 function docstringSignalPayload(
   root: string,
   section: "docstring-signals" | "docstrings",

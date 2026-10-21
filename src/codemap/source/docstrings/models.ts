@@ -1,4 +1,4 @@
-/** Defines docstring report objects for files, classes, and functions. */
+/** Language-neutral documentation report shapes. A non-null `parseError` marks documentation as incomplete rather than absent. */
 import { PYTHON_SUFFIXES, TYPESCRIPT_SUFFIXES } from "../scanner/constants.js";
 
 export const DOCSTRING_SUFFIXES = new Set([...PYTHON_SUFFIXES, ...TYPESCRIPT_SUFFIXES]);
@@ -27,6 +27,7 @@ export const LIKELY_MAIN_FUNCTION_PREFIXES = [
   "display_",
 ] as const;
 
+/** `inputs` and `outputs` are display text, with `none` for no parameters and `unannotated` for a missing return annotation. */
 export type FunctionReport = {
   name: string;
   lineno: number;

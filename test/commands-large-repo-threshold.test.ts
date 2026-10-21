@@ -136,7 +136,6 @@ describe("large-repo command fallbacks", () => {
   });
 });
 
-/** Collects mocked console output as printable test lines. */
 function logLines(): string[] {
   return logSpy.mock.calls.map((call: unknown[]) => call.join(" "));
 }

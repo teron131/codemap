@@ -1,4 +1,4 @@
-/** Resolves source imports through Oxc while retaining Codemap's repository eligibility boundary. */
+/** Resolves TypeScript-family imports with Oxc in each importing file's own configuration. Only targets inside the inspected file inventory are kept. */
 import { realpathSync } from "node:fs";
 import path from "node:path";
 
@@ -22,12 +22,14 @@ export class TypeScriptResolver {
     const options: NapiResolveOptions = {
       tsconfig: "auto",
       extensions,
+      // NodeNext-style `./x.js` specifiers name their `.ts` sources.
       extensionAlias: Object.fromEntries(
         [".js", ".jsx", ".mjs", ".cjs"].map((extension) => [
           extension,
           [extension, ...extensions.filter((suffix) => suffix !== extension)],
         ]),
       ),
+      // `source` leads conditions and main fields so workspace packages resolve to authored files in the inventory rather than build output.
       conditionNames: ["source", "import", "node", "default"],
       mainFields: ["source", "module", "main"],
       builtinModules: true,

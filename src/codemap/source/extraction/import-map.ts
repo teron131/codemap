@@ -1,4 +1,4 @@
-/** Builds the project-wide import map across Python and TypeScript-family files. */
+/** Maps each inventoried file to the inventoried files it imports, scanning each source file once for later reuse. */
 import path from "node:path";
 
 import { PYTHON_SUFFIXES, TYPESCRIPT_SUFFIXES } from "../scanner/constants.js";
@@ -18,7 +18,6 @@ export type ImportMapPayload = {
   fileMetrics: Record<string, FileMetrics>;
 };
 
-/** Builds the project import map across Python and TypeScript-family files. */
 export function runImportMap(root: string, files: ScanEntry[]): ImportMapPayload {
   const filePaths = new Set(files.map((scanEntry) => String(scanEntry.path)));
   const pythonModules = pythonModuleIndex(filePaths);

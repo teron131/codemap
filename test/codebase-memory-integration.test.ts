@@ -804,6 +804,22 @@ describe("Codebase Memory integration", () => {
     }
   });
 
+  it("hides camelCase test names without hiding words that start with test", () => {
+    vi.stubEnv("CODEBASE_MEMORY_MOCK_TEST_WORDS", "1");
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      expect(printCodebaseMemorySearch(workDir, "needle", 5)).toBe(true);
+      const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+
+      expect(output).toContain("- testament");
+      expect(output).toContain("- needle");
+      expect(output).not.toContain("testParser");
+      expect(output).toContain("hidden tests: 1 (use --include-tests)");
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
   it("falls back when default filters hide all backend matches", () => {
     vi.stubEnv("CODEBASE_MEMORY_MOCK_TEST_ONLY", "1");
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
@@ -1608,7 +1624,6 @@ describe("Codebase Memory integration", () => {
   });
 });
 
-/** Reads mock index_repository call records written by the MCP test server. */
 function readIndexCalls(): unknown[] {
   const logPath = path.join(workDir, "index-calls.jsonl");
   if (!existsSync(logPath)) {
@@ -1620,7 +1635,6 @@ function readIndexCalls(): unknown[] {
     .map((line) => JSON.parse(line));
 }
 
-/** Reads mock delete_project call records written by the MCP test server. */
 function readDeleteCalls(): unknown[] {
   const logPath = path.join(workDir, "delete-calls.jsonl");
   if (!existsSync(logPath)) {
@@ -1632,7 +1646,6 @@ function readDeleteCalls(): unknown[] {
     .map((line) => JSON.parse(line));
 }
 
-/** Reads mock query_graph call records written by the MCP test server. */
 function readQueryCalls(): unknown[] {
   const logPath = path.join(workDir, "query-calls.jsonl");
   if (!existsSync(logPath)) {
@@ -1644,7 +1657,6 @@ function readQueryCalls(): unknown[] {
     .map((line) => JSON.parse(line));
 }
 
-/** Reads child working directories recorded by the MCP test server. */
 function readChildCwds(): string[] {
   const logPath = path.join(workDir, "child-cwds.jsonl");
   if (!existsSync(logPath)) {
@@ -1668,7 +1680,6 @@ type SchemaCliResult = {
   stdout: string;
 };
 
-/** Reads cross-process tool events emitted by the MCP test server. */
 function readOperationEvents(): OperationEvent[] {
   const logPath = path.join(workDir, "operation-events.jsonl");
   if (!existsSync(logPath)) {
@@ -1752,7 +1763,6 @@ async function waitForOperationStart(operationId: string, toolName: string): Pro
   throw new Error(`Timed out waiting for ${operationId}:${toolName}`);
 }
 
-/** Yields briefly while process-level test fixtures make progress. */
 function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
@@ -1960,6 +1970,12 @@ const payloads = {
         }
       : {
           results: [
+            ...(process.env.CODEBASE_MEMORY_MOCK_TEST_WORDS === "1"
+              ? [
+                  { node: "testament", qualified_name: "mock-project.src.testament" },
+                  { node: "testParser", qualified_name: "mock-project.src.testParser" },
+                ]
+              : []),
             ...(process.env.CODEBASE_MEMORY_MOCK_TEST_FIRST === "1"
               ? [
                   {

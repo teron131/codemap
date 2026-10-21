@@ -1,4 +1,4 @@
-/** Builds and formats current-tree source inspection profiles. */
+/** Current-tree `inspect` profiles from the local graph, or path-only ones above the detailed-analysis limit. */
 import path from "node:path";
 
 import { DETAILED_ANALYSIS_FILE_LIMIT } from "../common.js";
@@ -28,7 +28,7 @@ import {
 } from "./profiles.js";
 import { inspectCandidates, inspectPathTargetKind, nodeLabel, normalizeTarget } from "./targets.js";
 
-/** Runs the current-tree inspect workflow without command-specific fallback text. */
+/** Null when the target matches nothing, leaving the no-match message to the command. */
 export function renderCurrentTreeInspection(
   root: string,
   target: string,
@@ -62,7 +62,6 @@ function likelyEntriesByFile(entries: LikelyEntry[]): Map<string, LikelyEntry> {
   return new Map(entries.map((entry) => [entry.title, entry]));
 }
 
-/** Renders the opposite endpoint and direction for a graph edge. */
 function edgeEndpoint(edge: GraphEdge, nodeId: string, nodesById: Map<string, GraphNode>): string {
   const otherId = edge.source === nodeId ? edge.target : edge.source;
   const other = nodesById.get(otherId);
@@ -70,7 +69,6 @@ function edgeEndpoint(edge: GraphEdge, nodeId: string, nodesById: Map<string, Gr
   return `${edgeRelationshipLabel(edge, nodeId)}: ${label}`;
 }
 
-/** Appends related import and symbol sections to inspection output. */
 function appendRelatedSections(
   lines: string[],
   graph: GraphPayload,
@@ -123,7 +121,6 @@ function appendRelatedSections(
   );
 }
 
-/** Renders an inspection profile with related graph context. */
 function renderInspection(
   root: string,
   graph: GraphPayload,
@@ -155,6 +152,7 @@ function renderInspection(
   if (relPath) {
     appendFileProfile(lines, metrics, relPath, {
       limit,
+      // The whole-file inventory would dominate function answers in large files; file inspection still shows it.
       includeFunctions: node.type !== "function",
     });
   }
@@ -165,7 +163,6 @@ function renderInspection(
   return lines.join("\n").trim();
 }
 
-/** Appends the target symbol's source docstring or declaration comment. */
 function appendDocstringSection(lines: string[], root: string, node: GraphNode): void {
   const docstring = docstringForNode(root, node);
   if (docstring === null) {
@@ -178,7 +175,6 @@ function appendDocstringSection(lines: string[], root: string, node: GraphNode):
   }
 }
 
-/** Finds a docstring report entry matching one inspected graph node. */
 function docstringForNode(root: string, node: GraphNode): string | null {
   const relPath = node.filePath;
   if (!relPath || (node.type !== "class" && node.type !== "function")) {

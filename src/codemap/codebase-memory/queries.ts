@@ -1,4 +1,4 @@
-/** Provides normalized Codebase Memory operations for backend diagnostics and signal queries. */
+/** Backend diagnostics and Cypher queries. Each operation rebuilds the project index first and returns null when the provider fails. */
 import { performance } from "node:perf_hooks";
 
 import { arrayValue, recordValue } from "../json-utils.js";
@@ -36,7 +36,6 @@ type CodebaseMemoryProjectQueryResult = {
 const JSON_FORMAT = { format: "json" } as const;
 const QUERY_REQUEST_TIMEOUT_MS = 30_000;
 
-/** Lists indexed Codebase Memory projects after refreshing the current root. */
 export function codebaseMemoryProjects(root: string): unknown | null {
   return withFreshCodebaseMemoryProject(root, () => {
     const result = callCodebaseMemoryTool("list_projects", {});
@@ -44,7 +43,6 @@ export function codebaseMemoryProjects(root: string): unknown | null {
   });
 }
 
-/** Reads Codebase Memory graph schema details for the current project. */
 export function codebaseMemorySchema(root: string): unknown | null {
   return withFreshCodebaseMemoryProject(root, (project) => {
     const result = callCodebaseMemoryTool("get_graph_schema", {
@@ -55,7 +53,7 @@ export function codebaseMemorySchema(root: string): unknown | null {
   });
 }
 
-/** Executes a read-oriented Codebase Memory Cypher query for advanced graph analysis. */
+/** Runs `query` as given; refusing mutating Cypher is left to the `backend query` command. */
 export function codebaseMemoryQuery(
   root: string,
   query: string,
@@ -64,7 +62,7 @@ export function codebaseMemoryQuery(
   return codebaseMemoryQueryWithProject(root, query, maxRows)?.value ?? null;
 }
 
-/** Executes a graph query and retains the indexed project freshness metadata. */
+/** Retries once when the provider times out or returns no response; `freshness` is `partial` when indexing skipped files. */
 export function codebaseMemoryQueryWithProject(
   root: string,
   query: string,
@@ -93,7 +91,7 @@ export function codebaseMemoryQueryWithProject(
   });
 }
 
-/** Normalizes query_graph column and row payloads into named records. */
+/** Null when the payload is not tabular or lacks a required column, so callers can tell a provider mismatch from an empty result. */
 export function codebaseMemoryQueryRows(
   value: unknown,
   requiredColumns: string[] = [],
@@ -118,7 +116,6 @@ export function codebaseMemoryQueryRows(
     .filter((row) => Object.keys(row).length > 0);
 }
 
-/** Reads Codebase Memory changed-code impact for the current project. */
 export function codebaseMemoryChanges(
   root: string,
   options: CodebaseMemoryChangeOptions,
@@ -136,7 +133,6 @@ export function codebaseMemoryChanges(
   });
 }
 
-/** Reads Codebase Memory index status and schema metadata when available. */
 export function codebaseMemoryStatus(root: string): CodebaseMemoryStatusResult | null {
   return withFreshCodebaseMemoryProject(root, (project) => {
     const schemaResult = callCodebaseMemoryTool("get_graph_schema", {
@@ -155,7 +151,7 @@ export function codebaseMemoryStatus(root: string): CodebaseMemoryStatusResult |
   });
 }
 
-/** Explicitly refreshes Codebase Memory and returns timing plus status metadata. */
+/** Times `codebaseMemoryStatus`, whose fresh-index setup is the refresh being measured. */
 export function codebaseMemoryIndex(root: string): CodebaseMemoryIndexResult | null {
   const start = performance.now();
   const status = codebaseMemoryStatus(root);

@@ -1,4 +1,4 @@
-/** Defines CLI behavior for ranked source-metric output. */
+/** `signals` command: validates the section and prints the signal view as text or `--json`. Analysis failures exit 1. */
 import type { Command } from "commander";
 
 import { resolveProjectRoot } from "../common.js";
@@ -16,7 +16,6 @@ type SignalOptions = {
   json?: boolean;
 };
 
-/** Registers ranked source-metric commands and output modes. */
 export function addSignalsParser(program: Command): void {
   const signals = program
     .command("signals")
@@ -30,7 +29,6 @@ export function addSignalsParser(program: Command): void {
   addProjectRootArgument(signals);
 }
 
-/** Runs source-metric analysis and prints text or JSON output. */
 export function commandSignals(
   section: string,
   options: SignalOptions,

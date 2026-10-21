@@ -28,7 +28,6 @@ export type InspectMetrics = {
   variableDefinitions: VariableDefinitionRow[];
 };
 
-/** Builds graph evidence for current-tree inspection. */
 export function currentTreeInspectGraph(
   root: string,
   rawTarget: string,
@@ -49,7 +48,7 @@ export function currentTreeInspectGraph(
   return [graph, metricsForFiles(root, structureFiles, fileMetricsByPath)];
 }
 
-/** Builds import incoming and outgoing rows for inspection. */
+/** Returns `[incoming, outgoing]` imports that cross the boundary of `filePaths`, each formatted `source -> target`. */
 export function importBoundaryRows(
   graph: GraphPayload,
   filePaths: Set<string>,
@@ -73,7 +72,7 @@ export function importBoundaryRows(
   return [uniqueStrings(incoming).slice(0, limit), uniqueStrings(outgoing).slice(0, limit)];
 }
 
-/** Builds scanner metrics for selected inspection files. */
+/** Fills a zero `lines` count from the scan entry, mutating the cached metrics record. */
 export function metricsForFiles(
   root: string,
   files: ScanEntry[],

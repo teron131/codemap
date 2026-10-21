@@ -5,7 +5,7 @@ import type { FileMetrics } from "../scanner/metrics.js";
 
 type PythonModuleIndex = Map<string, string[]>;
 
-/** Resolves imports in one Python file against the project module index. */
+/** `from pkg import name` points at the `pkg.name` submodule when any imported name is one, and at `pkg` otherwise. */
 export function pythonImportTargets(
   metrics: FileMetrics,
   filePaths: Set<string>,
@@ -46,13 +46,12 @@ export function pythonImportTargets(
   }
   return [...targets].sort();
 
-  /** Resolves a dotted Python module reference to candidate files. */
   function targetsForModule(parts: string[]): string[] {
     return resolvePythonModule(parts.filter(Boolean), filePaths, moduleIndex);
   }
 }
 
-/** Builds a dotted-module lookup for Python package files. */
+/** Keys each file under a top-level package by its dotted module name, as in `src/pkg/sub/mod.py` → `pkg.sub.mod`, so src-layout imports resolve. */
 export function pythonModuleIndex(filePaths: Set<string>): PythonModuleIndex {
   const initDirs = new Set(
     [...filePaths]
@@ -86,7 +85,7 @@ export function pythonModuleIndex(filePaths: Set<string>): PythonModuleIndex {
   return modules;
 }
 
-/** Resolves Python module parts to source files in the project. */
+/** Root-relative module paths win over the package index. */
 function resolvePythonModule(
   parts: string[],
   filePaths: Set<string>,
@@ -104,17 +103,14 @@ function resolvePythonModule(
   return moduleIndex.get(moduleKey(parts)) ?? [];
 }
 
-/** Encodes dotted Python module parts for lookup-map keys. */
 function moduleKey(parts: string[]): string {
   return parts.join("\0");
 }
 
-/** Removes a matched Python path suffix while resolving modules. */
 function stripSuffix(value: string, suffix: string): string {
   return suffix && value.endsWith(suffix) ? value.slice(0, -suffix.length) : value;
 }
 
-/** Normalizes Python module paths to slash-separated project keys. */
 function toPosixPath(filePath: string): string {
   return filePath.split(path.sep).join("/");
 }

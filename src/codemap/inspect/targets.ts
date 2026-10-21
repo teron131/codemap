@@ -1,4 +1,4 @@
-/** Resolves inspection target strings to files, symbols, and emit paths. */
+/** Resolves an inspect target to the files it names or defines, widened by one import hop each way for graph emission. */
 import { statSync } from "node:fs";
 import path from "node:path";
 
@@ -9,7 +9,6 @@ import { type FileMetrics, scanFile } from "../source/scanner/index.js";
 
 type InspectTargetKind = "directory" | "file";
 
-/** Classifies a target that directly names a filesystem path. */
 export function inspectPathTargetKind(root: string, target: string): InspectTargetKind | null {
   const targetPath = path.resolve(root, target);
   try {
@@ -23,7 +22,7 @@ export function inspectPathTargetKind(root: string, target: string): InspectTarg
   }
 }
 
-/** Converts inspect targets into normalized slash-separated paths. */
+/** Makes absolute targets inside `root` relative and leaves others alone; with root `/repo`, `/repo/src/a.ts` → `src/a.ts`, `/repo` → `""`, and `parseConfig` → `parseConfig`. */
 export function normalizeTarget(root: string, target: string): string {
   const expanded = expandUser(target);
   if (path.isAbsolute(expanded)) {
@@ -39,7 +38,6 @@ export function normalizeTarget(root: string, target: string): string {
   return target;
 }
 
-/** Selects scan entries that belong to an inspect target path. */
 function targetFilePaths(
   root: string,
   rawTarget: string,
@@ -57,7 +55,6 @@ function targetFilePaths(
   return symbolFilePaths(root, target, files, fileMetricsByPath);
 }
 
-/** Lists files under a directory inspection target. */
 function directoryFilePaths(target: string, filesByPath: Set<string>): Set<string> {
   if (target === "" || target === ".") {
     return new Set(filesByPath);
@@ -66,7 +63,7 @@ function directoryFilePaths(target: string, filesByPath: Set<string>): Set<strin
   return new Set([...filesByPath].filter((filePath) => filePath.startsWith(prefix)));
 }
 
-/** Finds symbol owners and retains newly scanned metrics for the same inspection operation. */
+/** Caches every metrics record it scans into `fileMetricsByPath` (mutated) for the rest of the inspection. */
 function symbolFilePaths(
   root: string,
   target: string,
@@ -94,7 +91,7 @@ function symbolFilePaths(
   return paths;
 }
 
-/** Resolves files whose source should be emitted for inspection. */
+/** Null when the target names no file, directory, or defined symbol; scans it performs are cached into `fileMetricsByPath`. */
 export function inspectEmitPaths(
   root: string,
   rawTarget: string,
@@ -120,7 +117,7 @@ export function inspectEmitPaths(
   return paths;
 }
 
-/** Lists graph nodes that can satisfy an inspect target. */
+/** Case-insensitive exact matches on id, path, or name come before substring matches. */
 export function inspectCandidates(graphNodes: GraphNode[], target: string): GraphNode[] {
   const lowered = target.toLowerCase();
   const exact: GraphNode[] = [];
@@ -136,7 +133,6 @@ export function inspectCandidates(graphNodes: GraphNode[], target: string): Grap
   return [...exact, ...partial];
 }
 
-/** Builds the human-readable label for a graph node candidate. */
 export function nodeLabel(node: GraphNode): string {
   if (node.type === "function" || node.type === "class") {
     const suffix = node.lineRange?.length ? `:${String(node.lineRange[0])}` : "";

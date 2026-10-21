@@ -1,4 +1,4 @@
-/** Adapts ast-grep NAPI behavior to Codemap syntax operations. */
+/** Runs ast-grep through its bundled NAPI parsers, so structural search needs no ast-grep CLI. The Python grammar registers at import, and match positions are one-based. */
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
@@ -25,7 +25,7 @@ export type SyntaxMatch = {
 
 registerDynamicLanguage({ python });
 
-/** Parses source text into an ast-grep root node for a language. */
+/** Null for languages without a bundled parser and when parsing throws. */
 export function astGrepRoot(source: string, language: string): SgNode | null {
   const napiLanguage = napiLanguageFor(normalizeLanguage(language));
   if (napiLanguage === null) {
@@ -47,12 +47,11 @@ export class SyntaxSearch {
     private readonly paths: string[],
   ) {}
 
-  /** Infers syntax variants lazily so explicit unsupported languages keep their original failure behavior. */
   languages(): string[] {
     return languagesForFiles(this.targetFiles());
   }
 
-  /** Finds one rule, optionally rejecting irrelevant source before native parsing. */
+  /** Null when the language has no bundled parser; `prefilter` skips files whose text cannot match before parsing them. */
   matches(
     language: string,
     config: NapiConfig,
@@ -122,7 +121,7 @@ export class SyntaxSearch {
   }
 }
 
-/** Loads and parses an ast-grep YAML rule file, loading the YAML parser only when a rule search needs it. */
+/** Imports the YAML parser lazily because only rule searches need it. */
 export async function loadRule(rulePath: string): Promise<Record<string, unknown>> {
   const { parse: parseYaml } = await import("yaml");
   const data: unknown = parseYaml(readFileSync(rulePath, "utf8"));
@@ -139,7 +138,6 @@ export async function loadRule(rulePath: string): Promise<Record<string, unknown
   return rule;
 }
 
-/** Builds an ast-grep NAPI match config from a YAML rule. */
 export function matchConfigFromRule(rule: Record<string, unknown>): NapiConfig {
   const matchConfig: Record<string, unknown> = { rule: rule.rule };
   for (const key of ["constraints", "utils", "transform"]) {
@@ -151,7 +149,6 @@ export function matchConfigFromRule(rule: Record<string, unknown>): NapiConfig {
   return matchConfig as unknown as NapiConfig;
 }
 
-/** Builds context text around a syntax match range. */
 function contextLines(sourceLines: string[], startLine: number, endLine: number): string {
   if (sourceLines.length === 0) {
     return "";
@@ -161,7 +158,6 @@ function contextLines(sourceLines: string[], startLine: number, endLine: number)
   return sourceLines.slice(start, end).join("\n");
 }
 
-/** Maps normalized language names to ast-grep NAPI languages. */
 function napiLanguageFor(language: string): Lang | string | null {
   const languages: Record<string, Lang | string> = {
     javascript: Lang.JavaScript,
@@ -173,7 +169,6 @@ function napiLanguageFor(language: string): Lang | string | null {
   return languages[language] ?? null;
 }
 
-/** Normalizes source text to newline-delimited lines. */
 function splitLines(text: string): string[] {
   const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
   const lines = normalized.split("\n");

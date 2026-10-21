@@ -1,4 +1,4 @@
-/** Registers CLI commands that search text, graph nodes, symbols, and calls. */
+/** `search` command: orders current-tree and Codebase Memory lanes so direct paths and definitions answer first. It also mounts the structural `match`, `calls`, and `rule` subcommands. */
 import type { Command } from "commander";
 
 import { DETAILED_ANALYSIS_FILE_LIMIT, resolveProjectRoot } from "../common.js";
@@ -61,7 +61,6 @@ type CurrentTreeSourceSearch = {
 const EXACT_SOURCE_MATCH_LIMIT = 3;
 const DEFAULT_SEARCH_LIMIT = 15;
 
-/** Registers backend-ranked source, graph, semantic, and structural search commands. */
 export function addSearchParser(program: Command): void {
   const search = program
     .command("search")
@@ -101,7 +100,14 @@ export function addSearchParser(program: Command): void {
   addSearchRuleParser(search.command("rule"));
 }
 
-/** Runs backend-ranked source or graph search with current-tree fallback. */
+/**
+ * Lanes run in order, and the first with an answer prints it and returns.
+ * 1. `--semantic`: an exact current-tree definition answers before backend ranking.
+ * 2. Ordinary search: direct paths, exact definitions, a decisive current-tree candidate set, then up to three exact implementation-text matches for multi-term queries.
+ * 3. Codebase Memory search in the chosen lane.
+ * 4. `--graph` without a backend answer: the current-tree relationship graph.
+ * 5. Otherwise: current-tree concept paths and text, or partial candidates, reusing the step 2 preflight.
+ */
 export async function commandSearch(
   searchArgs: string[],
   options: SearchOptions,
@@ -217,7 +223,7 @@ export async function commandSearch(
   return 0;
 }
 
-/** Collects one bounded current-tree source result without refreshing the optional backend. */
+/** Reuses the ordinary-search preflight when one ran, so the partial-candidate scan happens at most once. */
 function currentTreeSourceSearch(
   root: string,
   searchText: string,
@@ -260,7 +266,6 @@ function currentTreeSourceSearch(
   };
 }
 
-/** Prints current-tree source or partial fallback results with large-repository status. */
 function printCurrentTreeSourceSearch(result: CurrentTreeSourceSearch): void {
   const notes = [];
   if (result.largeRepo) {
@@ -286,7 +291,6 @@ function printCurrentTreeSourceSearch(result: CurrentTreeSourceSearch): void {
   });
 }
 
-/** Detects filters whose meaning exists only in graph search. */
 function hasGraphOnlyFilters(options: SearchOptions): boolean {
   return [
     options.label,
@@ -301,7 +305,6 @@ function hasGraphOnlyFilters(options: SearchOptions): boolean {
   ].some((value) => value !== undefined && value !== false);
 }
 
-/** Prints source search matches in CLI text format. */
 function printSourceMatches(matches: SourceMatch[], { note = "" }: { note?: string } = {}): void {
   console.log("\nSource matches:");
   if (note) {
@@ -320,7 +323,6 @@ function printSourceMatches(matches: SourceMatch[], { note = "" }: { note?: stri
   }
 }
 
-/** Prints file-oriented source candidates with coverage and bounded concrete anchors. */
 function printSourceFallbackMatches(
   result: SourceFallbackSearch,
   { note = "" }: { note?: string } = {},
@@ -349,7 +351,6 @@ function printSourceFallbackMatches(
   }
 }
 
-/** Projects the same graph filters and test-visibility choice for backend and current-tree search. */
 function graphSearchOptions(options: SearchOptions): CodebaseMemoryGraphSearchOptions {
   return {
     ...(options.includeTests !== undefined ? { includeTests: options.includeTests } : {}),

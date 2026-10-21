@@ -1,4 +1,4 @@
-/** Provides shared descriptive statistics for numeric populations. */
+/** Describes one homogeneous numeric population: count, mean, sample deviation, quantiles, and at most ten bins. */
 
 const AUTO_BIN_LIMIT = 10;
 
@@ -15,7 +15,11 @@ export type NumericStats = {
   bins: Record<string, number>;
 };
 
-/** Describes one numeric population with pandas-like quantiles and automatic bins. */
+/**
+ * Drops non-finite values, interpolates quantiles linearly as pandas does, rounds mean, std, and quantiles to two decimals, and returns zeros with empty bins for an empty population.
+ *
+ * Sturges-sized bins are inclusive ranges for integer populations and half-open intervals otherwise, the last one closed: `[1, 2, 3, 4, 5]` → `{"1-2": 2, "3-4": 2, "5-5": 1}` and `[0.5, 1.5, 2.5]` → `{"[0.5,1.16667)": 1, "[1.16667,1.83333)": 1, "[1.83333,2.5]": 1}`.
+ */
 export function describeNumbers(values: number[]): NumericStats {
   const sorted = values.filter(Number.isFinite).sort((left, right) => left - right);
   if (sorted.length === 0) {
@@ -81,7 +85,6 @@ export function describeNumbers(values: number[]): NumericStats {
   };
 }
 
-/** Interpolates one percentile from sorted numeric values. */
 function percentile(sorted: number[], fraction: number): number {
   const position = (sorted.length - 1) * fraction;
   const lower = Math.floor(position);

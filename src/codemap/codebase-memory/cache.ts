@@ -33,7 +33,7 @@ const INCOMPLETE_LOCK_GRACE_MS = 30_000;
 export const CHILD_RECOVERY_GRACE_MS = 5_000;
 const lockSleepView = new Int32Array(new SharedArrayBuffer(4));
 
-/** Acquires one repository's operational cache lock. */
+/** Blocks the thread for up to three minutes, clearing stale owners while it waits; null on timeout or any filesystem error. */
 export function acquireProjectLock(lockPath: string): CodebaseMemoryLock | null {
   try {
     mkdirSync(path.dirname(lockPath), { recursive: true, mode: 0o700 });
@@ -74,7 +74,7 @@ export function acquireProjectLock(lockPath: string): CodebaseMemoryLock | null 
   return null;
 }
 
-/** Removes a dead owner's lock while serializing stale-lock recovery. */
+/** Holds the `.recovery` directory across the staleness check and unlink, so two waiters cannot both judge a lock stale and one delete the lock the other just acquired. */
 function clearStaleProjectLock(lockPath: string): void {
   const recoveryPath = `${lockPath}.recovery`;
   if (!claimRecoveryDirectory(recoveryPath)) {
@@ -93,7 +93,7 @@ function clearStaleProjectLock(lockPath: string): void {
   }
 }
 
-/** Claims the tiny stale-lock recovery section and repairs an abandoned claim. */
+/** Takes over a claim older than `INCOMPLETE_LOCK_GRACE_MS`, which a crashed claimant left behind. */
 function claimRecoveryDirectory(recoveryPath: string): boolean {
   try {
     mkdirSync(recoveryPath);
@@ -113,7 +113,7 @@ function claimRecoveryDirectory(recoveryPath: string): boolean {
   return false;
 }
 
-/** Checks whether a lock owner is gone or an incomplete lock has aged past its write window. */
+/** Checks whether a lock owner is gone or an incomplete lock has aged past its write window. A lock naming this process counts as stale, because same-process operations reuse an active lock instead of reacquiring it. */
 function projectLockIsStale(lockPath: string): boolean {
   let modifiedAt = Date.now();
   try {
@@ -144,7 +144,7 @@ function projectLockIsStale(lockPath: string): boolean {
   }
 }
 
-/** Validates lock metadata before using its process identifier. */
+/** Rejects non-positive pids, which `process.kill(pid, 0)` would read as a process group rather than the owner. */
 function lockOwner(value: unknown): CodebaseMemoryLockOwner | null {
   if (
     typeof value !== "object" ||
@@ -170,7 +170,6 @@ function lockOwner(value: unknown): CodebaseMemoryLockOwner | null {
   };
 }
 
-/** Waits briefly for exclusive access to the lock recovery sentinel. */
 function claimTransferRecovery(recoveryPath: string): boolean {
   const deadline = Date.now() + CHILD_RECOVERY_GRACE_MS;
   while (Date.now() <= deadline) {
@@ -182,7 +181,7 @@ function claimTransferRecovery(recoveryPath: string): boolean {
   return false;
 }
 
-/** Transfers the lock only when its token still identifies this operation. */
+/** Rewrites the owner only while the token still matches; `recoverAfter` keeps the lock from reading as stale before that time even if `pid` has died. */
 export function transferProjectLock(
   { path: lockPath, token }: CodebaseMemoryLock,
   pid: number,
@@ -220,13 +219,13 @@ export function releaseProjectLock(lockPath: string, token: string): void {
   } catch {}
 }
 
-/** Derives a stable lock path beside CodebaseMemory's operational cache. */
+/** Hashes `root` as given, so callers pass `canonicalPath(root)` to share one lock across path aliases. */
 export function projectLockPath(root: string): string {
   const rootHash = createHash("sha256").update(root).digest("hex");
   return path.join(codebaseMemoryCacheRoot(), "codemap-locks", `${rootHash}.lock`);
 }
 
-/** Canonicalizes path aliases for cache matching and backend result normalization. */
+/** Resolves symlinks for existing paths; missing paths fall back to `path.resolve` instead of throwing. */
 export function canonicalPath(root: string): string {
   try {
     return realpathSync.native(root);
@@ -235,7 +234,6 @@ export function canonicalPath(root: string): string {
   }
 }
 
-/** Reads a Node filesystem or process error code without widening catches. */
 function errorCode(error: unknown): string | null {
   return typeof error === "object" &&
     error !== null &&
@@ -245,7 +243,7 @@ function errorCode(error: unknown): string | null {
     : null;
 }
 
-/** Uses the configured cache, the normal user cache, or a sandbox-writable temporary cache. */
+/** Prefers `CBM_CACHE_DIR`, then the user cache, then a per-user temporary cache when the user cache is unwritable; choosing the default or fallback creates that directory. */
 export function codebaseMemoryCacheRoot(): string {
   if (process.env.CBM_CACHE_DIR) {
     return path.resolve(process.env.CBM_CACHE_DIR);
@@ -263,7 +261,6 @@ export function codebaseMemoryCacheRoot(): string {
   return fallbackRoot;
 }
 
-/** Creates one private cache directory and verifies that the current process may write it. */
 function ensureWritableDirectory(directory: string): boolean {
   try {
     mkdirSync(directory, { recursive: true, mode: 0o700 });

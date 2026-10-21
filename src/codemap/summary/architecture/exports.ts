@@ -222,17 +222,16 @@ function exportNameCount(surface: ExportSurfaceCandidate): number {
   return surface.groups.reduce((total, group) => total + group.names.length, 0);
 }
 
-/** Measures depth beneath a focus path without treating the filename as a directory. */
 function relativePathDepth(file: string, focus: string): number {
   return pathDepth(focus ? path.posix.relative(focus, file) : file);
 }
 
-/** Tests whether a source file belongs to one structural or package focus. */
+/** An empty focus contains every file. */
 function isWithin(file: string, focus: string): boolean {
   return !focus || file === focus || file.startsWith(`${focus}/`);
 }
 
-/** Projects selected surfaces to one directly exposed module level. */
+/** Projects selected surfaces to one directly exposed module level; a defining module appears only under the first selected surface exposing it. */
 function projectExportSurfaces(
   candidates: ExportSurfaceCandidate[],
   source: SourceContext,
@@ -345,7 +344,7 @@ function immediateExportCapabilities(
     }));
 }
 
-/** Selects only data-derived upper outliers when one metric actually separates peers. */
+/** Selects values at least one sample standard deviation above the mean, and none when every value is equal. */
 function upperOutliers<T>(values: T[], read: (value: T) => number): T[] {
   if (values.length < 2) {
     return [];
@@ -398,7 +397,7 @@ function roleMatchedExportNames(label: string, names: string[]): string[] {
     .map((item) => item.name);
 }
 
-/** Splits paths, snake case, and camel case into lowercase comparison terms. */
+/** Splits paths, snake case, and camel case into lowercase comparison terms: `src/repo_map/buildSummary` → `src`, `repo`, `map`, `build`, `summary`. */
 function identifierTokens(value: string): string[] {
   return value
     .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
@@ -416,7 +415,7 @@ function commonPrefixLength(left: string, right: string): number {
   return length;
 }
 
-/** Collapses a defining module to one child of its public surface or owning package. */
+/** Collapses a defining module to one child of its public surface or owning package: from `src/index.ts`, `src/search/source.ts` → `search` and `src/cli.ts` → `cli`. Unresolved relative and test origins yield null. */
 function immediateCapabilityLabel(
   surface: string,
   origin: string,
@@ -451,7 +450,7 @@ function immediateCapabilityLabel(
   return moduleStem(path.posix.basename(origin));
 }
 
-/** Finds the deepest authored package containing one source file. */
+/** Finds the deepest authored package containing one source file, relying on `packages` arriving deepest first. */
 function owningSourcePackage(file: string, packages: SourcePackage[]): SourcePackage | null {
   return (
     packages.find((item) => !item.root || file === item.root || file.startsWith(`${item.root}/`)) ??
@@ -473,7 +472,7 @@ function exportGroups(resolvedNames: Map<string, string>): ExportGroup[] {
   return [...groups].map(([origin, names]) => ({ origin, names }));
 }
 
-/** Finds source entry surfaces declared by a root package manifest. */
+/** Maps each name `file` exports to its defining module, following resolvable re-exports with `visiting` guarding cycles. A named re-export from an unresolvable specifier maps to the specifier itself. */
 function resolvedExports(
   source: SourceContext,
   file: string,
@@ -532,7 +531,7 @@ function resolvedExports(
   return resolvedNames;
 }
 
-/** Resolves explicit Python package imports and local definitions to their owning modules. */
+/** Resolves explicit Python package imports and local definitions to their owning modules by line regex, so only single-line relative `from .x import a, b` statements count and parenthesized imports are skipped. */
 function pythonSurfaceExports(
   context: SourceContext,
   file: string,
@@ -592,7 +591,6 @@ function pythonSurfaceImportOrigin(
   );
 }
 
-/** Counts non-empty POSIX path segments for export-surface ranking. */
 function pathDepth(value: string): number {
   return value.split("/").filter(Boolean).length;
 }

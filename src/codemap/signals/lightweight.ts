@@ -1,4 +1,4 @@
-/** Builds lightweight signal payloads from scan rows when full analysis is unavailable. */
+/** Signals payload for trees above the detailed-analysis limit, parsing only the 100 largest eligible files. Coverage reports parsed versus eligible counts instead of claiming relationship or mention coverage. */
 import path from "node:path";
 
 import { describeNumbers } from "../math-utils.js";
@@ -30,7 +30,7 @@ type LightweightSignalPayloadOptions = {
 const LIGHTWEIGHT_SIGNAL_LANGUAGES = new Set(["javascript", "jsx", "python", "tsx", "typescript"]);
 /** Limits syntax parsing independently from final output budgeting. */
 const LIGHTWEIGHT_SIGNAL_PARSE_LIMIT = 100;
-/** Builds a compact signal payload when full analysis is absent. */
+/** Without `root`, nothing is parsed and every row carries only its line count. */
 export function buildLightweightSignalPayload(
   files: LightweightSignalFile[],
   { includeTests = false, root }: LightweightSignalPayloadOptions = {},
@@ -130,7 +130,6 @@ export function buildLightweightSignalPayload(
   };
 }
 
-/** Checks whether a file should appear in lightweight signal rows. */
 function isLightweightSignalFile(
   entry: LightweightSignalFile,
   { includeTests }: { includeTests: boolean },
@@ -147,7 +146,7 @@ function isLightweightSignalFile(
   return !isGeneratedPath(entry.path);
 }
 
-/** Builds one lightweight dense-file row, optionally adding bounded syntax details. */
+/** `total` counts lines here rather than signals, as `total_label` records. */
 function buildLightweightSignalRow(
   entry: LightweightSignalFile,
   metrics: FileMetrics | undefined,
@@ -169,7 +168,7 @@ function buildLightweightSignalRow(
   };
 }
 
-/** Parses a bounded set of the largest eligible files. */
+/** Parses only the leading files, so callers pass them largest first. */
 function scanLightweightFiles(
   files: LightweightSignalFile[],
   root: string | undefined,
@@ -193,7 +192,6 @@ function scanLightweightFiles(
   return metricsByPath;
 }
 
-/** Builds de-duplicated function rows from bounded syntax evidence. */
 function lightweightFunctionRows(
   scannedFiles: FileMetrics[],
   suffixes: Set<string>,

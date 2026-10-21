@@ -1,4 +1,4 @@
-/** Discovers project files while respecting generated, ignored, and gitignored paths. */
+/** Lists scan-eligible files through `rg --files`, which honors every ignore file. A sorted directory walk is the fallback. */
 import { spawnSync } from "node:child_process";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
@@ -20,7 +20,7 @@ export type IgnoreRule = {
   basenamePattern: RegExp | null;
 };
 
-/** Discovers scan-eligible files under a target path. */
+/** Falls back to the walk when ripgrep is unavailable, or when it finds nothing in a tree that has files but no `.git` of its own, as when a parent repository's ignore rules hide the whole tree. */
 export function discoverFiles(targetPath: string): string[] {
   if (isFile(targetPath)) {
     return shouldScanFile(targetPath) ? [targetPath] : [];
@@ -39,12 +39,11 @@ export function discoverFiles(targetPath: string): string[] {
   return rgFiles;
 }
 
-/** Walks scan-eligible files under a target path. */
+/** Honors only the root `.gitignore`, not nested ignore files or `.git/info/exclude`. */
 function walkFiles(targetPath: string): string[] {
   const ignoreRules = loadGitignoreRules(targetPath);
   const files: string[] = [];
 
-  /** Recursively walks directories while applying generated and ignore filters. */
   function visit(root: string): void {
     let entries = [];
     try {
@@ -89,7 +88,6 @@ function walkFiles(targetPath: string): string[] {
   return files;
 }
 
-/** Checks whether file discovery should enter a directory. */
 function shouldScanDir(name: string, { root = false }: { root?: boolean } = {}): boolean {
   if (IGNORED_DIR_NAMES.has(name) || (root && ROOT_IGNORED_DIR_NAMES.has(name))) {
     return false;
@@ -97,7 +95,6 @@ function shouldScanDir(name: string, { root = false }: { root?: boolean } = {}):
   return !name.startsWith(".") || KEPT_HIDDEN_DIR_NAMES.has(name);
 }
 
-/** Checks whether file discovery should include a file. */
 function shouldScanFile(filePath: string): boolean {
   const parsed = path.parse(filePath);
   if (SCAN_BASENAMES.has(parsed.base)) {
@@ -109,7 +106,7 @@ function shouldScanFile(filePath: string): boolean {
   return SCAN_SUFFIXES.has(parsed.ext);
 }
 
-/** Formats a path relative to a display root with POSIX separators. */
+/** Returns `.` for the root itself and `filePath` unchanged when it lies outside `displayRoot`. */
 export function relativePath(filePath: string, { displayRoot }: { displayRoot: string }): string {
   const relPath = path.relative(displayRoot, filePath);
   if (relPath === "") {
@@ -121,7 +118,6 @@ export function relativePath(filePath: string, { displayRoot }: { displayRoot: s
   return relPath;
 }
 
-/** Discovers files using ripgrep for search target expansion. */
 function discoverRipgrepFiles(targetPath: string): string[] | null {
   const result = spawnSync("rg", ["--files", "-0"], {
     cwd: targetPath,
@@ -149,7 +145,6 @@ function discoverRipgrepFiles(targetPath: string): string[] | null {
   return files.sort();
 }
 
-/** Loads ignore rules from the project gitignore file. */
 function loadGitignoreRules(targetPath: string): IgnoreRule[] {
   const gitignorePath = path.join(targetPath, ".gitignore");
   if (!isFile(gitignorePath)) {
@@ -179,7 +174,7 @@ function loadGitignoreRules(targetPath: string): IgnoreRule[] {
   return rules;
 }
 
-/** Compiles one gitignore line into an internal ignore rule. */
+/** Approximates gitignore: a leading `/` anchors at the root, a pattern without `/` matches basenames at any depth, and `*` also crosses `/`. */
 function compileGitignoreRule(
   pattern: string,
   { include }: { include: boolean },
@@ -213,12 +208,10 @@ function compileGitignoreRule(
   };
 }
 
-/** Compiles a glob pattern into a regular expression. */
 function compileGlob(pattern: string): RegExp {
   return new RegExp(`^${globToRegExpSource(pattern)}$`);
 }
 
-/** Checks whether a relative path matches any ignore rule. */
 function gitignoreMatches(
   filePath: string,
   root: string,
@@ -239,7 +232,6 @@ function gitignoreMatches(
   return ignored;
 }
 
-/** Checks whether one ignore rule matches a path. */
 function gitignoreRuleMatches(
   rule: IgnoreRule,
   relPath: string,
@@ -255,7 +247,6 @@ function gitignoreRuleMatches(
   return rule.pathPatterns.some((pattern) => pattern.test(relPath));
 }
 
-/** Checks whether a directory tree contains at least one file. */
 function hasAnyFile(targetPath: string): boolean {
   let entries = [];
   try {
@@ -275,7 +266,6 @@ function hasAnyFile(targetPath: string): boolean {
   return false;
 }
 
-/** Checks the file or dir condition used by source scanner discovery. */
 function isFileOrDir(filePath: string): boolean {
   try {
     const stats = statSync(filePath);
@@ -285,7 +275,6 @@ function isFileOrDir(filePath: string): boolean {
   }
 }
 
-/** Converts a glob pattern into regular-expression source. */
 function globToRegExpSource(pattern: string): string {
   let source = "";
   for (let index = 0; index < pattern.length; index += 1) {
@@ -312,16 +301,10 @@ function globToRegExpSource(pattern: string): string {
   return source;
 }
 
-/**
- * Escapes one already-classified literal glob character for the compiled pattern.
- *
- * Deliberately leaves `*`, `[`, and `]` unescaped: the caller translates those into regular expression syntax before reaching here, so the shared `escapeRegExp` would break glob semantics.
- */
 function escapeGlobLiteral(value: string): string {
   return value.replace(/[\\^$+?.()|{}]/g, "\\$&");
 }
 
-/** Normalizes discovered paths to slash-separated scan keys. */
 function toPosix(value: string): string {
   return value.split(path.sep).join("/");
 }

@@ -1,4 +1,4 @@
-/** Renders file, directory, symbol, and variable inspection profiles. */
+/** Markdown sections shared by every inspect profile, plus the lightweight file and directory profiles. */
 import path from "node:path";
 
 import { DETAILED_ANALYSIS_FILE_LIMIT, isDirectory } from "../common.js";
@@ -10,7 +10,6 @@ import { type FileMetrics, scanFile } from "../source/scanner/index.js";
 import { compareText, uniqueStrings } from "../text-utils.js";
 import { importBoundaryRows, type InspectMetrics, metricsForFiles } from "./graph.js";
 
-/** Renders one file directly from scanner evidence when full graphing is too broad. */
 export function renderLightweightFileInspection(
   root: string,
   target: string,
@@ -55,7 +54,6 @@ export function renderLightweightFileInspection(
   return lines.join("\n").trim();
 }
 
-/** Renders one directory directly from scan rows when full graphing is too broad. */
 export function renderLightweightDirectoryInspection(
   root: string,
   target: string,
@@ -87,7 +85,7 @@ export function renderLightweightDirectoryInspection(
   return lines.join("\n").trim();
 }
 
-/** Appends one titled bullet section, marking rows beyond the display limit. */
+/** Omits the section entirely when `rows` is empty and marks rows beyond `limit` with `- ...`. */
 export function appendListSection(
   lines: string[],
   title: string,
@@ -107,7 +105,6 @@ export function appendListSection(
   }
 }
 
-/** Appends likely-entry navigation context for inspected files. */
 export function appendLikelyEntryContext(lines: string[], entry: LikelyEntry | undefined): void {
   if (entry === undefined) {
     return;
@@ -119,7 +116,6 @@ export function appendLikelyEntryContext(lines: string[], entry: LikelyEntry | u
   lines.push(`- evidence: ${entry.description}`);
 }
 
-/** Appends one file's file-profile counters, preceded by its measured functions unless the caller omits that inventory. */
 export function appendFileProfile(
   lines: string[],
   metrics: InspectMetrics,
@@ -143,7 +139,7 @@ export function appendFileProfile(
   );
 }
 
-/** Appends one file-profile row to inspection output. */
+/** Renders only `rows[0]`. */
 export function appendFileProfileRow(lines: string[], rows: DenseFileRow[]): void {
   const profile = rows[0];
   if (profile === undefined) {
@@ -158,7 +154,6 @@ export function appendFileProfileRow(lines: string[], rows: DenseFileRow[]): voi
   }
 }
 
-/** Appends file and line-range facts for a function or class node. */
 export function appendSymbolProfile(lines: string[], node: GraphNode): void {
   if (node.type !== "function" && node.type !== "class") {
     return;
@@ -173,7 +168,6 @@ export function appendSymbolProfile(lines: string[], node: GraphNode): void {
   lines.push(`- ${parts.join(", ")}`);
 }
 
-/** Renders definitions and owning files for a requested variable symbol. */
 export function renderVariableProfile(
   target: string,
   metrics: InspectMetrics,
@@ -202,7 +196,7 @@ export function renderVariableProfile(
   return lines.join("\n").trim();
 }
 
-/** Renders file, import, export, and contained-node summaries for a directory. */
+/** Null when `target` is not a directory, so the caller can try symbol profiles. */
 export function renderDirectoryProfile(
   root: string,
   graph: GraphPayload,
@@ -246,7 +240,7 @@ export function renderDirectoryProfile(
   return lines.join("\n").trim();
 }
 
-/** Lists raw imports seen in one lightweight file inspection. */
+/** Unresolved import specifiers, since the lightweight profile skips import resolution. */
 function fileImportSpecs(metrics: FileMetrics): string[] {
   return uniqueStrings([
     ...metrics.pyImportTargets,
@@ -255,7 +249,6 @@ function fileImportSpecs(metrics: FileMetrics): string[] {
   ]);
 }
 
-/** Formats an inspected path relative to the display root. */
 function relativeTargetPath(root: string, target: string): string {
   const resolved = path.resolve(root, target);
   const relative = path.relative(root, resolved).split(path.sep).join("/");

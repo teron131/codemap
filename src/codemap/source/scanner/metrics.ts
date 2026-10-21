@@ -1,4 +1,5 @@
-/** Retains per-file measurements and declaration spans shared by inspection, signals, and graph extraction. */
+/** Per-file measurement record that both language scanners fill and inspection, signals, and graph extraction share. */
+/** `span` counts lines from `startLine`; `identifier` is `relPath::name`, with Python qualifying nested names by their scopes as in `a.py::Outer.inner`. */
 export type FunctionSpan = {
   name: string;
   identifier: string;
@@ -78,7 +79,6 @@ export type FileMetrics = {
   callSites: SourceCall[];
 };
 
-/** Starts one file metrics record with zeroed counters and empty samples. */
 export function createFileMetrics({
   path,
   relPath,
@@ -123,7 +123,7 @@ export function createFileMetrics({
   };
 }
 
-/** Counts newline-delimited lines in source text. */
+/** A trailing newline does not start a line: `"a\nb\n"` and `"a\nb"` both count 2. */
 export function sourceLineCount(source: string): number {
   if (!source) {
     return 0;
@@ -131,19 +131,16 @@ export function sourceLineCount(source: string): number {
   return source.split("\n").length - 1 + (source.endsWith("\n") ? 0 : 1);
 }
 
-/** Adds a bounded identifier sample to a file metrics row. */
 export function addSample(samples: string[], value: string): void {
   if (value && !samples.includes(value)) {
     samples.push(value);
   }
 }
 
-/** Builds the stable identifier for a scanned code signal. */
 export function codeSignalIdentifier(relPath: string, name: string): string {
   return `${relPath}::${name}`;
 }
 
-/** Records a variable-like definition and sample on file metrics. */
 export function addVariableSignal(
   metrics: FileMetrics,
   relPath: string,

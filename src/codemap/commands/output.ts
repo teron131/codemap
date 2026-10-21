@@ -21,7 +21,7 @@ type JsonArrayGroup = {
   target: unknown[];
 };
 
-/** Applies one conservative final-output budget while preserving JSON validity. */
+/** Text output keeps whole lines and carries its truncation footer inline; JSON output stays one valid value and reports truncation in `notice` for stderr, keeping stdout jq-compatible. */
 export function applyOutputBudget(output: string): OutputBudgetResult {
   if (fitsOutputBudget(output)) {
     return { output, notice: null };
@@ -33,7 +33,7 @@ export function applyOutputBudget(output: string): OutputBudgetResult {
   return boundedTextOutput(output);
 }
 
-/** Parses stdout only when the complete output is one JSON value. */
+/** Wraps the value so a stdout of `null` stays distinguishable from text that is not JSON. */
 function parseJsonOutput(output: string): ParsedJsonOutput | null {
   const value = output.trim();
   if (!value) {
@@ -46,7 +46,7 @@ function parseJsonOutput(output: string): ParsedJsonOutput | null {
   }
 }
 
-/** Keeps complete JSON array items in breadth-first order until the budget is full. */
+/** Fills every array one item per pass, so one large section cannot starve its siblings; if the result still overflows, strings shorten in steps and an empty container is the last resort. */
 function boundedJsonOutput(value: unknown): OutputBudgetResult {
   const groups: JsonArrayGroup[] = [];
   const target = jsonSkeleton(value, groups);
@@ -107,7 +107,7 @@ function boundedJsonOutput(value: unknown): OutputBudgetResult {
   };
 }
 
-/** Copies scalar JSON shape while turning arrays into incrementally filled groups. */
+/** Returns `value` with every array emptied and registers each non-empty one in `groups` (mutated) for later filling. */
 function jsonSkeleton(value: unknown, groups: JsonArrayGroup[]): unknown {
   if (Array.isArray(value)) {
     const target: unknown[] = [];
@@ -143,7 +143,6 @@ function countJsonArrayItems(value: unknown): number {
   return Object.values(value).reduce<number>((total, item) => total + countJsonArrayItems(item), 0);
 }
 
-/** Shortens oversized JSON string scalars without changing object or array shape. */
 function truncateJsonStrings(value: unknown, maxBytes: number): unknown {
   if (typeof value === "string") {
     if (Buffer.byteLength(value, "utf8") <= maxBytes) {
@@ -177,7 +176,6 @@ function utf8Prefix(value: string, maxBytes: number): string {
   return result;
 }
 
-/** Keeps complete text lines and appends visible truncation counts. */
 function boundedTextOutput(output: string): OutputBudgetResult {
   const lines = output.trimEnd().split(/\r?\n/);
   const shown: string[] = [];
@@ -199,12 +197,10 @@ function boundedTextOutput(output: string): OutputBudgetResult {
   };
 }
 
-/** Formats a text-output truncation footer without command-specific vocabulary. */
 function textBudgetFooter(shown: number, total: number): string {
   return `... output truncated: shown=${shown}, total=${total}, truncated=${Math.max(0, total - shown)}, token_limit=${OUTPUT_TOKEN_LIMIT}`;
 }
 
-/** Formats JSON truncation metadata on stderr so stdout stays jq-compatible. */
 function outputBudgetNotice({
   output,
   shown,
@@ -221,12 +217,10 @@ function outputBudgetNotice({
   return `codemap: output truncated: shown=${shown}, total=${total}, truncated=${truncated} items${valuesShortened ? ", values=shortened" : ""}, estimated_tokens=${estimatedTokens(output)}, token_limit=${OUTPUT_TOKEN_LIMIT}`;
 }
 
-/** Conservatively estimates tokens from final UTF-8 bytes. */
 function estimatedTokens(output: string): number {
   return Math.ceil(Buffer.byteLength(output, "utf8") / BYTES_PER_ESTIMATED_TOKEN);
 }
 
-/** Checks final UTF-8 bytes against the conservative token allowance. */
 function fitsOutputBudget(output: string): boolean {
   return Buffer.byteLength(output, "utf8") <= OUTPUT_BYTE_LIMIT;
 }

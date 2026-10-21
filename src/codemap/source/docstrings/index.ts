@@ -1,4 +1,4 @@
-/** Re-exports docstring extraction used by summary, inspect, and signals. */
+/** Syntax-based documentation reports for Python and TypeScript-family files, used by summary, inspect, and signals. */
 export { DOCSTRING_SUFFIXES, type FileReport } from "./models.js";
 export {
   buildDocstringsData,

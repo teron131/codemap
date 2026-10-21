@@ -1,4 +1,4 @@
-/** Defines CLI behavior for focused source inspection targets. */
+/** `inspect` command: path targets try the current tree first and other targets try Codebase Memory first. Either falls back to the other lane unless `--backend` or `--local` pins one. */
 import type { Command } from "commander";
 
 import { resolveProjectRoot } from "../common.js";
@@ -23,7 +23,6 @@ type InspectOptions = {
   local?: boolean;
 };
 
-/** Registers the inspect command and its output options. */
 export function addInspectParser(program: Command): void {
   const inspect = program
     .command("inspect")
@@ -38,7 +37,6 @@ export function addInspectParser(program: Command): void {
   addProjectRootArgument(inspect);
 }
 
-/** Runs focused inspection for a path, symbol, or directory target. */
 export function commandInspect(
   target: string,
   options: InspectOptions,

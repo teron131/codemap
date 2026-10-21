@@ -26,7 +26,7 @@ export function matchesTextFilter(
   }
 }
 
-/** Applies a small star-glob filter to source file paths. */
+/** Only `*` is special and it also crosses `/`, so `src/*.ts` matches `src/a/b.ts`; the pattern must cover the whole path. */
 export function matchesGlobFilter(value: string | null, filter: string | undefined): boolean {
   if (filter === undefined) {
     return true;
@@ -37,7 +37,6 @@ export function matchesGlobFilter(value: string | null, filter: string | undefin
   return globPatternRegex(filter).test(value);
 }
 
-/** Converts a star-glob pattern into a regular expression. */
 function globPatternRegex(pattern: string): RegExp {
   const source = pattern
     .split("*")

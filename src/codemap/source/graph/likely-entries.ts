@@ -1,4 +1,4 @@
-/** Builds likely-entry rows from graph relationship and path evidence. */
+/** Ranks up to eight likely navigation starts for inspect from import centrality and path conventions. Without a detailed graph, path conventions alone decide. */
 import path from "node:path";
 
 import { compareText } from "../../text-utils.js";
@@ -17,7 +17,6 @@ type LikelyEntryRole = {
   reason: string;
 };
 
-/** Builds likely entrypoint rows from graph node centrality. */
 export function buildLikelyEntries(nodes: GraphNode[], edges: GraphEdge[]): LikelyEntry[] {
   const candidates = likelyEntryCandidates(nodes);
   const fanIn = countBy(
@@ -43,7 +42,6 @@ export function buildLikelyEntries(nodes: GraphNode[], edges: GraphEdge[]): Like
   );
 }
 
-/** Builds path-ranked likely entrypoint rows when detailed graph edges were skipped. */
 export function buildPathRankedLikelyEntries(nodes: GraphNode[]): LikelyEntry[] {
   const scored = likelyEntryCandidates(nodes).toSorted(
     (left, right) =>
@@ -79,7 +77,6 @@ function likelyEntryCandidates(nodes: GraphNode[]): GraphNode[] {
   return generatedFilteredCandidates.length > 0 ? generatedFilteredCandidates : baseCandidates;
 }
 
-/** Builds one public likely-entry row. */
 function likelyEntryRow(
   node: GraphNode,
   { description, relationshipCount }: { description: string; relationshipCount?: number },
@@ -93,7 +90,6 @@ function likelyEntryRow(
   };
 }
 
-/** Describes why a likely-entry candidate was selected. */
 function likelyEntryDescription(
   node: GraphNode,
   fanIn: Map<string, number>,
@@ -110,12 +106,11 @@ function likelyEntryDescription(
   return `High-signal file with ${incoming} incoming and ${outgoing} outgoing import edges.`;
 }
 
-/** Formats an import edge count with singular/plural wording. */
 function importEdgeCountText(count: number, direction: string): string {
   return `${count} ${direction} import ${count === 1 ? "edge" : "edges"}`;
 }
 
-/** Keeps likely entries from being only package barrels. */
+/** Defers package surfaces beyond the first two, so barrels cannot crowd out implementation files. */
 function selectLikelyEntriesWithSurfaceCap(nodes: GraphNode[], limit: number): GraphNode[] {
   const selected: GraphNode[] = [];
   const deferredPackageSurfaces: GraphNode[] = [];
@@ -185,13 +180,11 @@ function isShallowEntrypoint(filePath: string): boolean {
   return parts.includes("src") && parts.length <= 5;
 }
 
-/** Checks for public package surfaces that are useful navigation starts. */
 function isPackageSurfacePath(filePath: string): boolean {
   const name = path.basename(filePath).toLowerCase();
   return name === "__init__.py" || name === "index.ts" || name === "index.js";
 }
 
-/** Checks for implementation files that commonly own important workflows. */
 function isImplementationSurfacePath(filePath: string): boolean {
   const name = path.basename(filePath).toLowerCase();
   return ["factory.py", "main.py", "run.py", "runner.py", "server.py", "cli.py"].includes(name);
@@ -232,7 +225,6 @@ function isSupportApiPath(filePath: string): boolean {
   return filePath.includes("/_api/");
 }
 
-/** Names the navigation role and concise rationale for one likely-entry row. */
 function likelyEntryRole(node: GraphNode, relationshipCount?: number): LikelyEntryRole {
   const filePath = node.filePath;
   if (isSupportApiPath(filePath)) {
@@ -289,7 +281,6 @@ function likelyEntryRole(node: GraphNode, relationshipCount?: number): LikelyEnt
   };
 }
 
-/** Checks for conventional CLI entry files. */
 function isCliEntryPath(filePath: string): boolean {
   const name = path.basename(filePath).toLowerCase();
   return (
@@ -298,7 +289,6 @@ function isCliEntryPath(filePath: string): boolean {
   );
 }
 
-/** Checks for conventional server or gateway entry files. */
 function isServerEntryPath(filePath: string): boolean {
   const parts = filePath.split("/");
   const name = path.basename(filePath).toLowerCase();
@@ -308,7 +298,6 @@ function isServerEntryPath(filePath: string): boolean {
   );
 }
 
-/** Ranks conventional entry filenames before generic code files. */
 function entryCandidateRank(node: GraphNode): number {
   return (node.tags ?? []).includes("entry-candidate") ? 0 : 1;
 }
@@ -341,7 +330,6 @@ function pathRoleRank(filePath: string): number {
   return 6;
 }
 
-/** Ranks true CLI entry files before ordinary command modules. */
 function cliPathRank(filePath: string): number {
   const name = path.basename(filePath).toLowerCase();
   if (
@@ -361,7 +349,6 @@ function cliPathRank(filePath: string): number {
   return 4;
 }
 
-/** Ranks true server/app entry files before ordinary server modules. */
 function serverPathRank(filePath: string): number {
   const name = path.basename(filePath).toLowerCase();
   if (
@@ -381,7 +368,6 @@ function serverPathRank(filePath: string): number {
   return 4;
 }
 
-/** Counts rows by a derived key. */
 function countBy<T>(items: T[], keyFor: (item: T) => string): Map<string, number> {
   const counts = new Map<string, number>();
   for (const item of items) {
@@ -391,7 +377,6 @@ function countBy<T>(items: T[], keyFor: (item: T) => string): Map<string, number
   return counts;
 }
 
-/** Counts path segments for shallow fallback ordering. */
 function pathDepth(filePath: string): number {
   return filePath.split("/").length;
 }

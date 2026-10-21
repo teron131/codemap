@@ -1,4 +1,4 @@
-/** Checks Python scanner edge cases. */
+/** Checks Python scanning of multiline imports, nested binders, call ownership, overload stubs, and supplied source. */
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 

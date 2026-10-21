@@ -1,4 +1,4 @@
-/** Classifies internal module roles, boundaries, flows, and compact directory outlines. */
+/** Derives the summary skeleton: package or feature boundaries, one winner per structural role, and compact outlines. */
 
 import path from "node:path";
 
@@ -32,7 +32,14 @@ export type StructuralSummary = {
   packages: SourcePackage[];
 };
 
-/** Derives role-based signals and compact nested shape from repository relationships. */
+/**
+ * Picks at most one boundary per structural role.
+ * 1. Aggregate backend and current-tree imports, plus dependencies between in-repo packages, into cross-boundary edges.
+ * 2. Entry: the declared boundary with the widest two-hop reach.
+ * 3. Coordination: the boundary importing the most others, at least two, unless that repeats the entry.
+ * 4. Foundation: the boundary imported by the most others, at least two; when it is also the coordinator, the two merge into one core role.
+ * A tie that relationship weight cannot break leaves its role out.
+ */
 export function structuralSummary(
   backendRelationships: RelationshipRow[],
   source: SourceContext,
@@ -174,7 +181,7 @@ export function currentTreeRelationshipRows(source: SourceContext): Relationship
   return relationships;
 }
 
-/** Finds the deepest source directory that contains a strict majority of eligible files. */
+/** Prefers a top-level Python package holding a strict majority of files, otherwise the deepest directory holding one. */
 function primarySourceRoot(files: string[]): string | null {
   if (files.length === 0) {
     return null;
@@ -289,7 +296,7 @@ function structuralBoundaries(
     );
 }
 
-/** Aggregates file-level graph facts into explicit cross-boundary relationships. */
+/** Aggregates file-level imports and in-repo package dependencies into weighted cross-boundary edges. */
 function boundaryEdges(
   relationships: RelationshipRow[],
   source: SourceContext,
@@ -344,7 +351,6 @@ function boundaryEdges(
   );
 }
 
-/** Adds one normalized relationship weight to the boundary graph. */
 function addBoundaryWeight(
   edgesByPair: Map<string, BoundaryEdge>,
   source: StructuralBoundary,
@@ -360,7 +366,7 @@ function addBoundaryWeight(
   });
 }
 
-/** Maps a source file to the deepest explicit package or barrel boundary that owns it. */
+/** Maps a source file to the deepest explicit package or barrel boundary that owns it, relying on `boundaries` arriving deepest first. */
 function owningBoundary(file: string, boundaries: StructuralBoundary[]): StructuralBoundary | null {
   return (
     boundaries.find(
@@ -509,7 +515,6 @@ function structuralOutlineItems(source: SourceContext, root: string): Structural
   return summarizeStructuralRoot(tree);
 }
 
-/** Resolves a boundary identifier that originated from a grouped edge map. */
 function boundaryLabel(boundaries: StructuralBoundary[], file: string): string {
   return boundaries.find((boundary) => boundary.file === file)?.label ?? file;
 }
@@ -526,12 +531,11 @@ function numericValue(value: unknown): number | null {
   return null;
 }
 
-/** Normalizes JavaScript and Python distribution names for manifest dependency matching. */
+/** Normalizes JavaScript and Python distribution names for manifest dependency matching, as in `My_Pkg.core` → `my-pkg-core`. */
 function normalizedPackageName(value: string): string {
   return value.toLowerCase().replace(/[_.]+/g, "-");
 }
 
-/** Counts non-empty POSIX path segments. */
 function pathDepth(value: string): number {
   return value.split("/").filter(Boolean).length;
 }
@@ -549,7 +553,6 @@ type StructuralPathTree = {
   children: Map<string, StructuralPathTree>;
 };
 
-/** Creates one empty node for a source-path hierarchy. */
 function emptyStructuralPathTree(): StructuralPathTree {
   return { files: new Set(), children: new Map() };
 }
@@ -598,7 +601,6 @@ function summarizeStructuralDirectory(
   return expanded.length > 0 ? expanded : [explicitStructuralReference(prefix)];
 }
 
-/** Creates one counted group with deterministic extent samples. */
 function compressedStructuralReference(label: string, members: string[]): StructuralReference {
   return {
     label,
@@ -613,7 +615,6 @@ function structuralReferenceBytes(references: StructuralReference[]): number {
   return Buffer.byteLength(rendered, "utf8");
 }
 
-/** Creates one uncompressed structural label. */
 function explicitStructuralReference(label: string): StructuralReference {
   return { label, count: null, examples: [] };
 }

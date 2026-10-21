@@ -18,7 +18,7 @@ export type CodebaseMemoryToolOptions = {
 const DEFAULT_COMMAND = "codebase-memory-mcp";
 const REQUEST_TIMEOUT_MS = 8_000;
 
-/** Calls one CodebaseMemory MCP tool through the configured stdio server command. */
+/** Blocks while a fresh supervisor child starts the provider, makes this one call, and exits; with `lock`, the child holds the lock until its provider has exited. */
 export function callTool(
   name: string,
   args: JsonObject,
@@ -38,6 +38,7 @@ export function callTool(
       String(process.pid),
     ],
     {
+      // Outside the project, so the provider's own watcher and auto-indexing cannot race the explicit refresh.
       cwd: homedir(),
       env: codebaseMemoryChildEnv(),
       input: JSON.stringify({ name, arguments: args }),
@@ -82,7 +83,7 @@ function codebaseMemoryCommand(): string {
   return command.includes("/") || command.includes("\\") ? path.resolve(command) : command;
 }
 
-/** Builds a child environment that avoids leaking launcher-specific argv hints. */
+/** Pins `CBM_CACHE_DIR` to the cache root chosen here, so the provider shares the lock's cache even after a fallback, and drops the launcher's `_` and `CODEMAP_*` variables. */
 function codebaseMemoryChildEnv(): NodeJS.ProcessEnv {
   const env = { ...process.env };
   env.CBM_CACHE_DIR = codebaseMemoryCacheRoot();
@@ -95,7 +96,7 @@ function codebaseMemoryChildEnv(): NodeJS.ProcessEnv {
   return env;
 }
 
-/** Extracts structured MCP output or JSON-decodes the first usable text block. */
+/** Prefers structured MCP output, then the first text block that decodes as JSON; a lone undecodable text block comes back as a string and anything else as the raw result. */
 function toolPayload(result: unknown): unknown {
   const record = recordValue(result);
   if (isRecord(record.structuredContent)) {
@@ -110,7 +111,6 @@ function toolPayload(result: unknown): unknown {
   return texts.length === 1 ? texts[0] : result;
 }
 
-/** Reads an MCP call-level error before feature-specific payload handling. */
 function toolResultError(result: unknown): string | null {
   const record = recordValue(result);
   if (record.isError !== true) {
@@ -119,14 +119,13 @@ function toolResultError(result: unknown): string | null {
   return toolTextBlocks(record)[0] ?? "tool error";
 }
 
-/** Collects nonempty text blocks from an MCP tool result. */
 function toolTextBlocks(result: JsonObject): string[] {
   return arrayValue(result.content)
     .map((item) => recordValue(item).text)
     .filter((value): value is string => typeof value === "string" && value.trim().length > 0);
 }
 
-/** Extracts a tool-level error from decoded MCP text payloads. */
+/** Catches failures that arrive without `isError`: plain error text or an `error` field. */
 function toolPayloadError(value: unknown): string | null {
   if (typeof value === "string" && codebaseMemoryErrorText(value)) {
     return value;
@@ -135,7 +134,7 @@ function toolPayloadError(value: unknown): string | null {
   return typeof error === "string" && error.length > 0 ? error : null;
 }
 
-/** Detects plain-text CodebaseMemory tool errors. */
+/** Keyword heuristic, so non-JSON success text containing a phrase such as `not found` also reads as a failure. */
 function codebaseMemoryErrorText(value: string): boolean {
   return (
     /^(error|failed|invalid|unknown)\b/i.test(value) ||

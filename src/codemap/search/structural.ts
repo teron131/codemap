@@ -1,4 +1,4 @@
-/** Runs explicit ast-grep pattern, call, and rule searches. */
+/** Explicit call-site and YAML-rule searches over `SyntaxSearch`, plus resolution of their CLI target paths. */
 import { existsSync } from "node:fs";
 import path from "node:path";
 
@@ -13,7 +13,7 @@ import { escapeRegExp } from "../text-utils.js";
 
 const CALL_TARGET_RE = /^[A-Za-z_$][A-Za-z0-9_$]*(\.[A-Za-z_$][A-Za-z0-9_$]*)*$/;
 
-/** Finds function or method call sites through structural search. */
+/** A bare `name` also matches method calls such as `x.name(...)`, while a dotted target matches only that chain; throws for names that are not identifier chains. */
 export function callMatches(
   search: SyntaxSearch,
   language: string,
@@ -31,7 +31,7 @@ export function callMatches(
   return matches === null ? null : uniqueCallMatches(matches);
 }
 
-/** Runs ast-grep YAML rule search for target paths with an already resolved rule file. */
+/** Expects an already resolved `rulePath`; null when the rule's language has no bundled parser. */
 export async function searchRuleMatches(
   root: string,
   rulePath: string,
@@ -44,7 +44,7 @@ export async function searchRuleMatches(
   );
 }
 
-/** Resolves CLI target paths while keeping them inside the project root. */
+/** Returns root-relative paths, reading a relative path against the root first and the working directory second; absolute paths outside the root throw. */
 export function resolveTargetPaths(root: string, paths: string[]): string[] {
   if (paths.length === 0) {
     return ["."];
@@ -67,7 +67,6 @@ export function resolveTargetPaths(root: string, paths: string[]): string[] {
   return resolved;
 }
 
-/** Validates and normalizes a function or dotted call target. */
 function callTarget(name: string): string {
   if (!CALL_TARGET_RE.test(name)) {
     throw new Error(`Invalid call target: ${name}`);
@@ -75,7 +74,6 @@ function callTarget(name: string): string {
   return name;
 }
 
-/** Resolves relative target paths from project root or the current directory. */
 function relativeTargetPath(root: string, rawPath: string): string {
   const rootPath = path.resolve(root, rawPath);
   if (existsSync(rootPath)) {
@@ -89,7 +87,7 @@ function relativeTargetPath(root: string, rawPath: string): string {
   return rawPath;
 }
 
-/** Builds a text prefilter for direct or receiver-qualified callees. */
+/** Builds the text prefilter, as in `log` → `/(^|[^A-Za-z0-9_$])log\s*\(/`, which still admits `x.log(` because `.` counts as a boundary. */
 function callTextPattern(target: string): RegExp {
   const parts = target.split(".").map((part) => escapeRegExp(part));
   const callPrefix = parts.length === 1 ? parts[0] : parts.join(String.raw`\s*\.\s*`);

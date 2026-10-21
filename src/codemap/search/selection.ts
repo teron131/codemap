@@ -1,4 +1,4 @@
-/** Owns current-tree candidate composition, coverage ranking, cohesion, anchors, and selection. */
+/** Answers multi-term queries from the current tree, ranking files by term coverage and where the terms meet. */
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
@@ -46,7 +46,11 @@ type SourceFallbackCandidate = Pick<FallbackCandidate, "filePath" | "matchedTerm
   anchors: FallbackAnchor[];
 };
 
-/** One current-tree fallback answer; a `truncated` scan status covers both a cut ripgrep collection and a partial ranking cut by its file bound. */
+/**
+ * `fullCoverage` marks the decisive answer described on `sourceFallbackMatches`, and `hasPathSupplementedCoverage` means some file covers every term only because its path supplies a term its content lacks.
+ *
+ * A `truncated` scan status covers both a cut ripgrep collection and a partial ranking cut by its file bound.
+ */
 export type SourceFallbackSearch = {
   candidates: SourceFallbackCandidate[];
   fullCoverage: boolean;
@@ -73,7 +77,13 @@ const FAST_PATH_CANDIDATE_LIMIT = 3;
 const MULTI_TERM_CANDIDATE_LIMIT = 8;
 const SINGLE_TERM_CANDIDATE_LIMIT = 2;
 
-/** Finds file-oriented partial candidates and detects complete multi-term source evidence. */
+/**
+ * Decides between a decisive current-tree answer and ranked partial candidates.
+ * 1. Collect the files containing each of the first eight terms, from implementation source unless none matches there.
+ * 2. Rank files by term coverage, counting terms their path supplies, then path usefulness, then content coverage.
+ * 3. Decisive answer: when a completed scan finds every term of a multi-term query of at most eight terms in some files' content, take the single file whose path also names every term, or up to three such files when no file relies on its path; each must hold its terms within a 50-line cohesive window.
+ * 4. Otherwise rank the strongest coverage tier by cohesion through `rankPartialCandidates`.
+ */
 export function sourceFallbackMatches(
   root: string,
   searchText: string,
@@ -179,7 +189,7 @@ export function sourceFallbackMatches(
 /**
  * Orders the strongest partial tier by local term co-occurrence without reading the whole tier.
  *
- * Coverage, path rank, and source-term count still lead, so only the leading candidate groups that can reach the display need their files read; within a group, a narrower cohesive window replaces alphabetical order. Groups whose content holds fewer than two query terms have no window and are read only for display anchors. A group cut by the file bound marks the ranking as a prefix.
+ * Coverage, path rank, and source-term count lead, so only the leading candidate groups that can reach the display need their files read, at most 1,000; within a group, the narrower cohesive window wins before the path tiebreak. Groups whose content holds fewer than two query terms have no window and are read only for display anchors. A group cut by the file bound marks the ranking as a prefix.
  */
 function rankPartialCandidates(
   root: string,
@@ -209,7 +219,6 @@ function rankPartialCandidates(
   return { candidates: inspected.sort(compareInspectedCandidates).slice(0, limit), bounded };
 }
 
-/** Collects the files containing each query term from one bounded ripgrep lane. */
 function collectFallbackFiles(
   root: string,
   terms: FallbackQueryTerm[],
@@ -336,7 +345,6 @@ function fallbackCohesionWindow(
   return narrowestWindow;
 }
 
-/** Finds at most two concrete source anchors for one file-oriented candidate. */
 function fallbackAnchors(
   lines: string[],
   terms: FallbackQueryTerm[],
@@ -365,7 +373,6 @@ function fallbackAnchors(
   );
 }
 
-/** Finds the first case-insensitive literal occurrence for one query term. */
 function firstFallbackAnchor(
   lines: string[],
   term: FallbackQueryTerm,
@@ -391,7 +398,6 @@ function firstFallbackAnchor(
   return null;
 }
 
-/** Checks whether one normalized term is represented by a candidate path. */
 function fallbackTermMatchesPath(filePath: string, term: FallbackQueryTerm): boolean {
   const lowerPath = filePath.toLowerCase();
   return term.variants.some((variant) => lowerPath.includes(variant));
@@ -406,7 +412,6 @@ function compareFallbackEvidence(left: FallbackCandidate, right: FallbackCandida
   );
 }
 
-/** Breaks evidence ties by the narrower cohesive window, then by path. */
 function compareInspectedCandidates(
   left: InspectedFallbackCandidate,
   right: InspectedFallbackCandidate,
@@ -418,7 +423,6 @@ function compareInspectedCandidates(
   );
 }
 
-/** Builds unique meaningful query terms while retaining simple inflection variants. */
 function fallbackQueryTerms(searchText: string): FallbackQueryTerm[] {
   const terms: FallbackQueryTerm[] = [];
   const seen = new Set<string>();
@@ -434,7 +438,7 @@ function fallbackQueryTerms(searchText: string): FallbackQueryTerm[] {
   return terms;
 }
 
-/** Expands one fallback term into simple source-search variants. */
+/** Crude plural stripping for substring search: `entries` → `entry`, `classes` → `class`, `files` → `file`. The first variant labels the term. */
 function fallbackTermVariants(token: string): string[] {
   const normalized = token.trim().toLowerCase();
   if (normalized.length < 3 || SEARCH_STOP_WORDS.has(normalized)) {

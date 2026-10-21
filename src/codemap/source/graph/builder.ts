@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { compareText } from "../../text-utils.js";
 import type { StructureEntry } from "../extraction/index.js";
-import { ENTRYPOINT_BASENAMES } from "../scanner/index.js";
+import { ENTRYPOINT_BASENAMES, isTestPath } from "../scanner/index.js";
 import type { GraphEdge, GraphNode } from "./schema.js";
 
 export type ScanLikeEntry = {
@@ -15,7 +15,6 @@ export type ScanLikeEntry = {
 
 type DefinitionSpan = { name: string; startLine: number; endLine: number };
 
-/** Classifies a scanned file with language, category, and role tags. */
 export function classifyTags(scanEntry: ScanLikeEntry): string[] {
   const filePath = String(scanEntry.path);
   const category = String(scanEntry.fileCategory ?? "code");
@@ -24,7 +23,7 @@ export function classifyTags(scanEntry: ScanLikeEntry): string[] {
   const lower = filePath.toLowerCase();
   const name = path.basename(filePath);
   const nameLower = name.toLowerCase();
-  if (lower.includes("test") || lower.includes("spec")) {
+  if (isTestPath(filePath)) {
     tags.add("test");
   }
   if (name === "README.md" || name === "readme.md") {
@@ -51,7 +50,6 @@ export function classifyTags(scanEntry: ScanLikeEntry): string[] {
   return [...tags].filter((tag) => tag && tag !== "unknown").sort();
 }
 
-/** Classifies a file graph node type from path and category. */
 function nodeTypeForFile(scanEntry: ScanLikeEntry): string {
   const category = String(scanEntry.fileCategory ?? "code");
   const language = String(scanEntry.language ?? "unknown");
@@ -82,7 +80,6 @@ function nodeTypeForFile(scanEntry: ScanLikeEntry): string {
   return "file";
 }
 
-/** Builds the short file summary used on graph file nodes. */
 function fileSummary(
   scanEntry: ScanLikeEntry,
   structure: StructureEntry | null,
@@ -106,7 +103,6 @@ function fileSummary(
   return `${filePath}: ${bits.join("; ")}.`;
 }
 
-/** Adds a graph edge while deduplicating source-target-type triples. */
 function addEdge(
   edges: GraphEdge[],
   seen: Set<string>,
@@ -122,7 +118,6 @@ function addEdge(
   edges.push({ source, target, type: edgeType });
 }
 
-/** Builds a graph node for one source file. */
 export function fileNode(
   relPath: string,
   scanEntry: ScanLikeEntry,
@@ -140,7 +135,6 @@ export function fileNode(
   };
 }
 
-/** Builds a graph node for one function or class definition. */
 function definitionNode(
   kind: "function" | "class",
   relPath: string,

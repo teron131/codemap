@@ -1,4 +1,4 @@
-/** Re-exports optional Codebase Memory MCP integration helpers. */
+/** Optional Codebase Memory backend behind a cross-process project lock. Each operation runs against a freshly rebuilt index and returns null, with a recorded reason, when the provider fails. */
 export {
   callCodebaseMemoryTool,
   codebaseMemoryFailureReason,

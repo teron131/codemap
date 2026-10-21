@@ -1,4 +1,4 @@
-/** Owns source-search lanes, symbol extraction, path matching, and result ranking policy. */
+/** Owns the current-tree path, definition, and exact-text search lanes and the path-affinity ranking they share. */
 import path from "node:path";
 
 import type { NapiConfig } from "@ast-grep/napi";
@@ -47,12 +47,11 @@ export type SourceMatch = {
   text: string;
 };
 
-/** Checks whether a match points to supported, non-generated implementation source. */
 export function isImplementationSourceMatch(match: SourceMatch): boolean {
   return isImplementationSourcePath(match.filePath);
 }
 
-/** Checks whether a path belongs to supported, non-generated implementation source. */
+/** Test files qualify; only unsupported suffixes and generated paths are excluded. */
 export function isImplementationSourcePath(filePath: string): boolean {
   const suffix = path.extname(filePath).toLowerCase();
   return (
@@ -79,7 +78,7 @@ export const SEARCH_STOP_WORDS = new Set([
   "with",
 ]);
 
-/** Finds exact definitions while retaining enough phrase candidates for callable filtering before display limits. */
+/** A multi-word phrase is searched as identifier forms of its terms and keeps only definitions that look callable; candidates are over-fetched so that filter runs before `limit`. */
 export function definitionMatches(
   root: string,
   searchText: string,
@@ -131,7 +130,6 @@ export function definitionMatches(
   return rankSourceMatches(matches, searchText).slice(0, limit);
 }
 
-/** Keeps phrase-derived definition intent on functions, methods, and classes instead of similarly named state. */
 function isCallableDefinition(match: SourceMatch, symbol: string): boolean {
   const escaped = escapeRegExp(symbol);
   const modifiers = String.raw`(?:(?:export|default|abstract|async|declare|public|protected|private|static|override|readonly)\s+)*`;
@@ -140,7 +138,7 @@ function isCallableDefinition(match: SourceMatch, symbol: string): boolean {
 }
 
 /**
- * Searches exact source text across target files.
+ * Literal, case-insensitive text search ranked by path affinity.
  *
  * Symbol definitions are not repeated here: every caller runs `definitionMatches` first and reaches text search only after it found no definition.
  */
@@ -173,7 +171,7 @@ export function sourceMatches(
   return matches;
 }
 
-/** Finds exact basenames and partial project paths for path-shaped queries. */
+/** Only queries with a separator, a known suffix, or a config basename count as paths; matching is case-insensitive, with exact paths first, then trailing-segment and substring matches. */
 export function pathMatches(
   root: string,
   searchText: string,
@@ -251,7 +249,6 @@ export function conceptPathMatches(
     }));
 }
 
-/** Checks whether a query carries a file suffix or path separator. */
 function pathLikeSearchText(searchText: string): boolean {
   const query = searchText.trim();
   if (/[/\\]/.test(query) || CONFIG_BASENAMES.has(query)) {
@@ -260,7 +257,6 @@ function pathLikeSearchText(searchText: string): boolean {
   return Object.hasOwn(LANGUAGE_BY_SUFFIX, path.extname(query).toLowerCase());
 }
 
-/** Ranks an exact path before basename and partial-path matches. */
 function pathExactness(filePath: string, queryLower: string): number {
   const lower = filePath.toLowerCase();
   if (lower === queryLower) {
@@ -272,12 +268,10 @@ function pathExactness(filePath: string, queryLower: string): number {
   return 2;
 }
 
-/** Ranks matches toward definitions and source code over config, docs, and tests. */
 function rankSourceMatches(matches: SourceMatch[], searchText: string): SourceMatch[] {
   return matches.slice().sort((left, right) => compareSourceMatches(left, right, searchText));
 }
 
-/** Applies the deterministic source-match tie breakers shared by normal and partial search. */
 function compareSourceMatches(left: SourceMatch, right: SourceMatch, searchText: string): number {
   const leftRank = sourceMatchRank(left, searchText);
   const rightRank = sourceMatchRank(right, searchText);
@@ -289,7 +283,7 @@ function compareSourceMatches(left: SourceMatch, right: SourceMatch, searchText:
   );
 }
 
-/** Scores one match by how useful it is as a next code-reading lead. */
+/** Lower sorts first: starting from `sourcePathRank`, definitions rise and lines mentioning `deprecated` sink. */
 function sourceMatchRank(match: SourceMatch, searchText: string): number {
   let rank = sourcePathRank(match.filePath, searchText);
   if (/\bdeprecated\b/i.test(match.text)) {
@@ -301,7 +295,7 @@ function sourceMatchRank(match: SourceMatch, searchText: string): number {
   return rank;
 }
 
-/** Scores a source path independently of match-row details. */
+/** Lower sorts first: up to three query terms in the path offset penalties for paths outside `src/`, tests, config and docs, and generated files. */
 export function sourcePathRank(filePath: string, searchText: string): number {
   const normalizedPath = filePath.replace(/^\.\//, "");
   const lower = normalizedPath.toLowerCase();
@@ -329,14 +323,14 @@ export function sourcePathRank(filePath: string, searchText: string): number {
   return rank;
 }
 
-/** Extracts useful lowercase query terms for path-affinity ranking. */
+/** Lowercase terms of at least three characters minus stop words: `how the CLI parses args` → `cli`, `parses`, `args`. */
 function searchTerms(searchText: string): string[] {
   return (searchText.match(/[A-Za-z0-9_$]+/g) ?? [])
     .map((term) => term.toLowerCase())
     .filter((term) => term.length >= 3 && !SEARCH_STOP_WORDS.has(term));
 }
 
-/** Converts a concise concept phrase into common source identifier forms. */
+/** Spells a phrase's terms as identifiers, as in `parse config` → `parseConfig`, `ParseConfig`, `parse_config`; a lone identifier passes through, and fewer than two terms yield none. */
 function definitionSymbols(searchText: string): string[] {
   if (IDENTIFIER_RE.test(searchText)) {
     return [searchText];
@@ -349,7 +343,7 @@ function definitionSymbols(searchText: string): string[] {
   return [`${terms[0]}${titleTerms.slice(1).join("")}`, titleTerms.join(""), terms.join("_")];
 }
 
-/** Evaluates identifier variants together without changing each variant's language order or candidate bound. */
+/** Parses each file once for all variants, while each variant keeps its own candidate bound. */
 function astGrepSymbolMatches(
   root: string,
   symbols: string[],
@@ -378,7 +372,6 @@ function astGrepSymbolMatches(
   return groups;
 }
 
-/** Builds ast-grep patterns for function, class, and export symbol queries. */
 function symbolMatchConfig(symbol: string, kinds: string[]): NapiConfig {
   const escaped = escapeRegExp(symbol);
   return {
@@ -404,7 +397,6 @@ function symbolMatchConfig(symbol: string, kinds: string[]): NapiConfig {
   };
 }
 
-/** Finds ast-grep pattern matches for one source string. */
 function astGrepMatch(match: SyntaxMatch): SourceMatch {
   return {
     engine: match.engine,
@@ -416,7 +408,6 @@ function astGrepMatch(match: SyntaxMatch): SourceMatch {
   };
 }
 
-/** Adds a source match once while respecting the result limit. */
 function appendMatch(
   matches: SourceMatch[],
   seen: Set<string>,

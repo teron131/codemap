@@ -1,7 +1,7 @@
 /**
  * Classifies source paths as test, generated, or supported implementation code.
  *
- * These predicates decide what counts as inspectable source across every capability: search hides generated and test matches, summary drops them from entry ranking, and signals excludes them from metrics. They work on path text alone so they can classify backend rows and current-tree paths with the same rule, without touching the filesystem.
+ * These predicates decide what counts as inspectable source across every capability: search hides generated and test matches, summary leaves them out of its source context, and signals excludes them from metrics. They work on path text alone so they can classify backend rows and current-tree paths with the same rule, without touching the filesystem.
  */
 import path from "node:path";
 
@@ -27,7 +27,6 @@ const TEST_DIR_NAMES = new Set([
 ]);
 const GENERATED_DIR_NAMES = new Set(["__generated__", ".generated", "generated"]);
 
-/** Checks whether a path looks like test code. */
 export function isTestPath(filePath: string): boolean {
   const parts = pathParts(filePath);
   const name = parts.at(-1) ?? filePath;
@@ -45,7 +44,7 @@ export function isTestPath(filePath: string): boolean {
   );
 }
 
-/** Checks whether a source path is likely generated or bundled output. */
+/** Besides `.min.`, `.bundle.`, and `.generated.` files and generated directories, treats every `import_map.py` and `import_map.ts` as generated. */
 export function isGeneratedPath(filePath: string): boolean {
   const parts = pathParts(filePath);
   const name = parts.at(-1) ?? "";
@@ -59,7 +58,7 @@ export function isGeneratedPath(filePath: string): boolean {
   );
 }
 
-/** Checks whether a path belongs to the supported, non-ignored implementation source surface. */
+/** Test files still qualify; ignored directories and hidden directories other than `.github` do not. */
 export function isSupportedSourcePath(filePath: string): boolean {
   const parts = pathParts(filePath);
   const directories = parts.slice(0, -1);
@@ -75,7 +74,6 @@ export function isSupportedSourcePath(filePath: string): boolean {
   );
 }
 
-/** Splits a path into lowercase path segments. */
 function pathParts(filePath: string): string[] {
   return filePath
     .split(/[\\/]+/)
@@ -83,7 +81,6 @@ function pathParts(filePath: string): string[] {
     .map((part) => part.toLowerCase());
 }
 
-/** Checks whether one path segment conventionally names a test directory. */
 function isTestDirectoryName(part: string): boolean {
   return (
     TEST_DIR_NAMES.has(part) ||

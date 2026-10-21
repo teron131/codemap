@@ -18,7 +18,6 @@ export const IDENTIFIER_RE = /\b[A-Za-z_][A-Za-z0-9_]*\b/g;
 
 type OccurrenceCounts = Map<string, number> | Record<string, unknown>;
 
-/** Builds a compact row of file-level source metrics. */
 export function fileProfileRow(metrics: FileMetrics): FileProfileRow {
   const total =
     metrics.defines +
@@ -44,7 +43,6 @@ export function fileProfileRow(metrics: FileMetrics): FileProfileRow {
   };
 }
 
-/** Classifies a file role from path and metrics. */
 function fileSignalRole(
   filePath: string,
   row: DenseFileRow,
@@ -82,7 +80,6 @@ function fileSignalRole(
   return "likely module";
 }
 
-/** Scores a file profile row for likely-entry ranking. */
 function fileSignalScore(
   filePath: string,
   row: DenseFileRow,
@@ -112,7 +109,7 @@ function fileSignalScore(
   return score;
 }
 
-/** Ranks source paths for focused documentation collection without carrying discarded profile details. */
+/** Orders files for the docstring-signals focus by a structural score, dropping files that score zero or below. */
 export function rankSignalFocusFiles(
   fileProfileRows: DenseFileRow[],
   { entrypoints }: { entrypoints: Set<string> },
@@ -133,12 +130,11 @@ export function rankSignalFocusFiles(
   return entries.map((entry) => entry.file);
 }
 
-/** Counts usage rows by lexical-mention bin. */
 export function usageBins(rows: DefinitionRow[]): Record<string, number> {
   return describeNumbers(rows.map((row) => numberValue(row.count))).bins;
 }
 
-/** Counts identifier occurrences across source files. */
+/** Counts every identifier-shaped token, including those inside comments and strings; unreadable files are skipped. */
 export function countIdentifierOccurrences(files: string[]): Map<string, number> {
   const counter = new Map<string, number>();
   for (const filePath of files) {
@@ -156,7 +152,6 @@ export function countIdentifierOccurrences(files: string[]): Map<string, number>
   return counter;
 }
 
-/** Builds name usage rows from occurrence counts. */
 export function usageRows(names: string[], occurrences: OccurrenceCounts): NameFrequencyRow[] {
   const uniqueNames = [...new Set(names.filter(Boolean))].sort();
   return uniqueNames.map((name) => ({
@@ -165,7 +160,7 @@ export function usageRows(names: string[], occurrences: OccurrenceCounts): NameF
   }));
 }
 
-/** Builds length and lexical-mention rows for function definitions. */
+/** Sorted fewest mentions first, then by identifier. */
 export function functionUsageRows(
   scannedFiles: FileMetrics[],
   suffixes: Set<string>,
@@ -199,7 +194,7 @@ export function functionUsageRows(
   return rows;
 }
 
-/** Builds lexical-mention rows for variable definitions. */
+/** Sorted fewest mentions first, then by identifier. */
 export function variableUsageRows(
   scannedFiles: FileMetrics[],
   suffixes: Set<string>,
@@ -239,7 +234,7 @@ export function variableUsageRows(
   return rows;
 }
 
-/** Builds long-function rows from function spans. */
+/** Longest first, with statistics over every unique span. */
 export function functionLengthSection(items: FunctionSpan[]): FunctionLengthSection {
   const rows = uniqueFunctionSpans(items).map((item) => ({
     identifier: item.identifier,
@@ -257,7 +252,7 @@ export function functionLengthSection(items: FunctionSpan[]): FunctionLengthSect
   };
 }
 
-/** Collapses repeated parser hits for the same function to the strongest span. */
+/** Collapses repeated parser hits for one identifier to the longest span, the earliest on ties. */
 function uniqueFunctionSpans(items: FunctionSpan[]): FunctionSpan[] {
   const byIdentifier = new Map<string, FunctionSpan>();
   for (const item of items) {
@@ -273,7 +268,6 @@ function uniqueFunctionSpans(items: FunctionSpan[]): FunctionSpan[] {
   return [...byIdentifier.values()];
 }
 
-/** Selects file rows with the highest relationship count for a key. */
 export function topHubs(
   fileProfileRows: DenseFileRow[],
   { key, limit = 3 }: { key: string; limit?: number },
@@ -290,7 +284,6 @@ export function topHubs(
   }));
 }
 
-/** Selects file rows with the highest inheritance activity. */
 export function topInheritanceHubs(fileProfileRows: DenseFileRow[], limit = 3): FileCountRow[] {
   const rows: FileCountRow[] = [];
   for (const row of fileProfileRows) {
@@ -307,7 +300,6 @@ export function topInheritanceHubs(fileProfileRows: DenseFileRow[], limit = 3): 
   return rows.slice(0, limit);
 }
 
-/** Reads a lexical-mention count for one identifier name. */
 function occurrenceCount(occurrences: OccurrenceCounts, name: string): number {
   if (occurrences instanceof Map) {
     return occurrences.get(name) ?? 0;

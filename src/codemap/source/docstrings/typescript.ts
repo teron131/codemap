@@ -1,4 +1,4 @@
-/** Extracts TypeScript-family documentation from syntax nodes while preserving Codemap's comment and report policies. */
+/** Reads TypeScript-family documentation from syntax. A declaration's docstring is its adjacent leading comment group, and the file docstring is the first leading comment that is not a tool directive. */
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
@@ -17,7 +17,7 @@ type Declaration = {
   children: Declaration[];
 };
 
-/** Builds current documentation without treating code examples or multiline types as declarations. */
+/** A variable or field reports as a function when it holds one, and a non-function variable reports too when a block comment documents it. Any syntax error yields `parseError` and no declarations. */
 export function buildTypescriptFileReport(
   filePath: string,
   { displayPath }: { displayPath: string },
@@ -196,7 +196,7 @@ function fileComment(root: SgNode): string | null {
   return null;
 }
 
-/** Normalizes comment delimiters while retaining the established readable documentation projection. */
+/** Strips comment markers and drops blank lines, so paragraph breaks do not survive. */
 function cleanComment(text: string): string {
   return text
     .replace(/^\/\*\*?/, "")

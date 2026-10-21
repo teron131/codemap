@@ -1,4 +1,4 @@
-/** Presents the combined repository summary as concise, tree-shaped text. */
+/** Renders the summary as Markdown in a fixed order: overview, structure, hotspots, clusters, then public API. */
 import path from "node:path";
 
 import type {
@@ -30,7 +30,6 @@ type PublicSurfaceNode = {
 
 const PUBLIC_API_LEVELS = 3;
 
-/** Renders one repository-orientation document from current-tree and graph facts. */
 export function renderSummaryText(summary: RepositorySummary): string {
   const lines = [`# ${summary.project}`];
   appendOverview(lines, summary.readme, summary.languages);
@@ -49,7 +48,6 @@ export function renderSummaryText(summary: RepositorySummary): string {
   return `${lines.join("\n")}\n`;
 }
 
-/** Adds only graph roles that reveal a repository's public module skeleton. */
 function appendStructuralSignals(
   lines: string[],
   signals: StructuralSignal[],
@@ -94,7 +92,7 @@ function appendStructuralSignals(
   }
 }
 
-/** Renders an explicit boundary or one counted same-parent compression group. */
+/** Counted groups render with their extent samples, as in `packages/* [5]: api, …, core, …, web`. */
 export function renderStructuralReference(reference: StructuralReference): string {
   if (reference.count === null) {
     return reference.label;
@@ -119,7 +117,6 @@ function renderStructuralExamples(reference: StructuralReference): string {
   return rendered.filter(Boolean).join(", ");
 }
 
-/** Adds README orientation and one GitHub-style authored-source language line. */
 function appendOverview(
   lines: string[],
   sections: ReadmeSection[],
@@ -148,7 +145,6 @@ function appendOverview(
   }
 }
 
-/** Adds selected public surfaces and at most one directly exposed module level. */
 function appendExportSurfaces(lines: string[], surfaces: ExportSurface[]): void {
   if (surfaces.length === 0) {
     return;
@@ -187,7 +183,6 @@ function publicApiTree(surfaces: ExportSurface[]): PublicApiNode[] {
     });
 }
 
-/** Adds directly exposed modules and descendant surfaces within the three-level view. */
 function populatePublicApiNode(
   targetNode: PublicApiNode,
   surfaceNode: PublicSurfaceNode,
@@ -219,7 +214,7 @@ function relativePublicSurfacePath(parentScope: string, child: PublicSurfaceNode
   return dirname === "." ? stem : `${dirname}/${stem}`;
 }
 
-/** Inserts a relative path while collapsing any tail that would exceed three levels. */
+/** Inserts a relative path while collapsing any tail that would exceed three levels; scoped names such as `@scope/pkg` stay one segment. */
 function insertPublicApiPath(
   parent: PublicApiNode,
   value: string,
@@ -252,7 +247,6 @@ function insertPublicApiPath(
   return { node, depth };
 }
 
-/** Creates one render-only public API tree node. */
 function publicApiNode(label: string, description: string | null): PublicApiNode {
   return { label, description, exports: [], inlineModules: [], children: [] };
 }
@@ -263,7 +257,6 @@ function publicSurfaceScope(file: string): string {
   return /^(?:index(?:\.d)?\.[^.]+|__init__\.py)$/.test(basename) ? path.posix.dirname(file) : file;
 }
 
-/** Renders one public API node without repeating the section's field labels. */
 function renderPublicApiNode(node: PublicApiNode): string {
   const details: string[] = [];
   if (node.description !== null) {
@@ -286,7 +279,6 @@ function appendPublicApiChildren(lines: string[], parent: PublicApiNode, prefix:
   }
 }
 
-/** Adds non-generic call hotspots as a share of the indexed call graph. */
 function appendHotspots(lines: string[], hotspots: HotspotSummary[]): void {
   if (hotspots.length === 0) {
     return;
@@ -300,7 +292,6 @@ function appendHotspots(lines: string[], hotspots: HotspotSummary[]): void {
   }
 }
 
-/** Adds call-graph communities with understandable size and boundary percentages. */
 function appendClusters(lines: string[], clusters: ClusterSummary[]): void {
   if (clusters.length === 0) {
     return;
@@ -318,7 +309,7 @@ function appendClusters(lines: string[], clusters: ClusterSummary[]): void {
   }
 }
 
-/** Formats a ratio as a compact human percentage. */
+/** Shows at most one decimal, as in `0.123` → `12.3%`, with `100%` from 99.95% up and `<0.1%` for tiny positive ratios. */
 function formatPercent(ratio: number): string {
   const percentage = ratio * 100;
   if (percentage >= 99.95) {

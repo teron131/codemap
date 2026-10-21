@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** Starts the codemap command-line program. */
+/** Installed `codemap` bin entry; parsing, dispatch, and output budgeting live in `commands/`. */
 
 import { run } from "./commands/index.js";
 

@@ -1,4 +1,4 @@
-/** Builds usage-signal tables from scanned source metrics. */
+/** Builds the `usage` section from mention counts of defined names. Mentions are identifier tokens across every file of the language, not resolved references. */
 import path from "node:path";
 
 import { type FileMetrics, PYTHON_SUFFIXES, TYPESCRIPT_SUFFIXES } from "../source/scanner/index.js";
@@ -20,7 +20,6 @@ type UsageLanguageRows = {
   variableDefinitions: DefinitionRow[];
 };
 
-/** Collects metric names for files matching a language suffix set. */
 function metricNames(
   scannedFiles: FileMetrics[],
   suffixes: Set<string>,
@@ -35,7 +34,6 @@ function metricNames(
   return names;
 }
 
-/** Builds usage bins and measured definition tables. */
 export function buildUsageSection(allFiles: string[], scannedFiles: FileMetrics[]): Row {
   const python = buildLanguageUsageRows(allFiles, scannedFiles, PYTHON_SUFFIXES);
   const typescript = buildLanguageUsageRows(allFiles, scannedFiles, TYPESCRIPT_SUFFIXES);
@@ -55,7 +53,6 @@ export function buildUsageSection(allFiles: string[], scannedFiles: FileMetrics[
   };
 }
 
-/** Builds frequency and definition rows for one source language. */
 function buildLanguageUsageRows(
   allFiles: string[],
   scannedFiles: FileMetrics[],

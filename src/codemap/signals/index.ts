@@ -1,4 +1,4 @@
-/** Re-exports signal view building, section vocabulary, and rendering. */
+/** Ranked source metrics for `signals` from the current tree, with Codebase Memory function metrics in `top` and `all`. */
 export { fileProfileRow, functionLengthSection } from "./analysis.js";
 export { selectPayloadSection } from "./payload.js";
 export type { DenseFileRow, FunctionLengthItem } from "./schema.js";

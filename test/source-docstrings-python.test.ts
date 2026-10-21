@@ -188,7 +188,6 @@ describe("Python documentation reports", () => {
   });
 });
 
-/** Exercises the supported report collection boundary for one current source file. */
 function reportFor(source: string) {
   const filePath = path.join(workDir, "sample.py");
   writeFileSync(filePath, source);
