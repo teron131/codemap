@@ -1,21 +1,10 @@
 /** Resolves structural-search targets inside the project root and infers their languages. Directory walks sort entries, skip symlinks, and honor the scanner's ignored directories but not `.gitignore`. */
-import { readdirSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 
-import { expandUser, isDirectory, isFile } from "../common.js";
-import { IGNORED_DIR_NAMES, ROOT_IGNORED_DIR_NAMES } from "../source/scanner/constants.js";
+import { expandUser, isDirectory, isFile } from "../path-utils.js";
+import { IGNORED_DIR_NAMES, ROOT_IGNORED_DIR_NAMES } from "../source/scanner/index.js";
 import { compareText } from "../text-utils.js";
-
-const LANGUAGE_ALIASES: Record<string, string> = {
-  javascript: "javascript",
-  js: "javascript",
-  jsx: "jsx",
-  py: "python",
-  python: "python",
-  ts: "typescript",
-  tsx: "tsx",
-  typescript: "typescript",
-};
 
 export const SYNTAX_SUFFIXES_BY_LANGUAGE: Record<string, Set<string>> = {
   javascript: new Set([".cjs", ".js", ".jsx", ".mjs"]),
@@ -32,10 +21,6 @@ const INFERRED_SYNTAX_LANGUAGES = [
   { language: "jsx", suffixes: new Set([".jsx"]) },
   { language: "python", suffixes: new Set([".py"]) },
 ];
-
-export function normalizeLanguage(lang: string): string {
-  return LANGUAGE_ALIASES[lang.toLowerCase()] ?? lang;
-}
 
 /** No paths means the whole root; paths that do not exist contribute no files, while paths outside the root throw. */
 export function targetFiles(root: string, paths: string[]): string[] {
@@ -114,4 +99,40 @@ export function languagesForFiles(files: string[]): string[] {
   return INFERRED_SYNTAX_LANGUAGES.filter((candidate) =>
     [...candidate.suffixes].some((suffix) => suffixes.has(suffix)),
   ).map((candidate) => candidate.language);
+}
+
+/** Returns root-relative paths, reading a relative path against the root first and the working directory second; absolute paths outside the root throw. */
+export function resolveTargetPaths(root: string, paths: string[]): string[] {
+  if (paths.length === 0) {
+    return ["."];
+  }
+  const resolved = [];
+  const rootResolved = path.resolve(root);
+  for (const rawPath of paths) {
+    const candidate = expandUser(rawPath);
+    if (path.isAbsolute(candidate)) {
+      const resolvedCandidate = path.resolve(candidate);
+      const relative = path.relative(rootResolved, resolvedCandidate);
+      if (relative.startsWith("..") || path.isAbsolute(relative)) {
+        throw new Error(`search path is outside project root: ${rawPath}`);
+      }
+      resolved.push(relative.split(path.sep).join("/"));
+    } else {
+      resolved.push(relativeTargetPath(rootResolved, candidate));
+    }
+  }
+  return resolved;
+}
+
+function relativeTargetPath(root: string, rawPath: string): string {
+  const rootPath = path.resolve(root, rawPath);
+  if (existsSync(rootPath)) {
+    return rawPath;
+  }
+  const cwdPath = path.resolve(process.cwd(), rawPath);
+  const relative = path.relative(root, cwdPath);
+  if (!relative.startsWith("..") && !path.isAbsolute(relative)) {
+    return relative.split(path.sep).join("/");
+  }
+  return rawPath;
 }

@@ -9,7 +9,7 @@ import {
   type FileReport,
   symbolDocstring,
 } from "../../source/docstrings/index.js";
-import { TypeScriptResolver } from "../../source/extraction/typescript-imports.js";
+import { ImportResolver } from "../../source/extraction/index.js";
 import {
   discoverFiles,
   type FileMetrics,
@@ -35,7 +35,7 @@ export type SourceContext = {
   filePaths: Set<string>;
   symbolsByName: Map<string, SourceSymbol[]>;
   reports: Map<string, FileReport | null>;
-  resolver: TypeScriptResolver;
+  resolver: ImportResolver;
 };
 
 /** Measures supported authored languages by source bytes, matching GitHub's basic convention. */
@@ -110,7 +110,7 @@ export function buildSourceContext(root: string): SourceContext {
     filePaths,
     symbolsByName,
     reports: new Map(),
-    resolver: new TypeScriptResolver(root, filePaths),
+    resolver: new ImportResolver(root, filePaths),
   };
 }
 
@@ -167,11 +167,11 @@ export function symbolDescription(
       name: symbol.name,
       line: symbol.line,
     });
-  return shortDescription(docstring) ?? filePreview(source, symbol.file);
+  return shortDescription(docstring) ?? fileDescription(source, symbol.file);
 }
 
 /** The first sentence of the file overview's first line; null without an overview. */
-export function filePreview(source: SourceContext, file: string): string | null {
+export function fileDescription(source: SourceContext, file: string): string | null {
   const report = fileReport(source, file);
   const preview = report === null ? null : docstringPreview(report.fileDocstring);
   return preview === "none" ? null : shortDescription(preview);

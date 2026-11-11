@@ -1,19 +1,19 @@
-/** Derives the summary skeleton: package or feature boundaries, one winner per structural role, and compact outlines. */
+/** Derives the summary skeleton: package or feature boundaries, one winner per structural role, and which boundaries get an outline. */
 
 import path from "node:path";
 
-import { stringField } from "../../json-utils.js";
-import { pythonImportTargets, pythonModuleIndex } from "../../source/extraction/python-imports.js";
-import { typescriptImportTargets } from "../../source/extraction/typescript-imports.js";
-import { compareText, extentSamples } from "../../text-utils.js";
-import { renderStructuralReference } from "../presentation.js";
-import type { StructuralOutline, StructuralReference, StructuralSignal } from "../schema.js";
+import { isWithinDirectory, pathDepth } from "../../path-utils.js";
+import { compareText } from "../../text-utils.js";
+import type { StructuralOutline, StructuralReference, StructuralRole } from "../schema.js";
+import { explicitReference, groupedReference } from "../structural-reference.js";
+import { structuralOutlines } from "./outlines.js";
 import { isConventionalSurface, type SourcePackage, sourcePackages } from "./packages.js";
 import type { RelationshipRow } from "./relationships.js";
 import type { SourceContext } from "./source-context.js";
 
+/** `id` is the boundary's entry file when it has one, and a `package:` or `module:` key otherwise. */
 type StructuralBoundary = {
-  file: string;
+  id: string;
   label: string;
   root: string;
   declared: boolean;
@@ -27,14 +27,14 @@ type BoundaryEdge = {
 };
 
 export type StructuralSummary = {
-  signals: StructuralSignal[];
+  roles: StructuralRole[];
   outlines: StructuralOutline[];
   packages: SourcePackage[];
 };
 
 /**
  * Picks at most one boundary per structural role.
- * 1. Aggregate backend and current-tree imports, plus dependencies between in-repo packages, into cross-boundary edges.
+ * 1. Aggregate backend and working-tree imports, plus dependencies between in-repo packages, into cross-boundary edges.
  * 2. Entry: the declared boundary with the widest two-hop reach.
  * 3. Coordination: the boundary importing the most others, at least two, unless that repeats the entry.
  * 4. Foundation: the boundary imported by the most others, at least two; when it is also the coordinator, the two merge into one core role.
@@ -43,34 +43,33 @@ export type StructuralSummary = {
 export function structuralSummary(
   backendRelationships: RelationshipRow[],
   source: SourceContext,
-  currentTreeRelationships: RelationshipRow[],
+  workingTreeRelationships: RelationshipRow[],
 ): StructuralSummary {
   const packages = sourcePackages(source);
-  const boundaries = structuralBoundaries(source, packages);
+  const primaryRoot = primarySourceRoot(source.files.map((metrics) => metrics.relPath));
+  const boundaries = structuralBoundaries(source, packages, primaryRoot);
   const edges = boundaryEdges(
-    [...backendRelationships, ...currentTreeRelationships],
+    [...backendRelationships, ...workingTreeRelationships],
     source,
     boundaries,
     packages,
   );
   if (edges.length === 0) {
-    return { signals: [], outlines: [], packages };
+    return { roles: [], outlines: [], packages };
   }
 
   const outgoing = groupedBoundaryEdges(edges, "source");
   const incoming = groupedBoundaryEdges(edges, "target");
-  const connectedBoundaries = new Set(
-    edges.flatMap((edge) => [edge.source.file, edge.target.file]),
-  );
-  const signals: StructuralSignal[] = [];
+  const connectedBoundaries = new Set(edges.flatMap((edge) => [edge.source.id, edge.target.id]));
+  const roles: StructuralRole[] = [];
 
   const entryCandidates = boundaries.filter(
-    (boundary) => boundary.declared && (outgoing.get(boundary.file)?.length ?? 0) > 0,
+    (boundary) => boundary.declared && (outgoing.get(boundary.id)?.length ?? 0) > 0,
   );
   const entryReach = entryCandidates.map((boundary) => ({
     boundary,
     reach: twoHopReach(boundary, outgoing),
-    weight: edgeWeight(outgoing.get(boundary.file) ?? []),
+    weight: edgeWeight(outgoing.get(boundary.id) ?? []),
   }));
   const entry = uniqueRoleWinner(
     entryReach,
@@ -78,76 +77,61 @@ export function structuralSummary(
     (candidate) => candidate.weight,
   );
   if (entry !== null) {
-    signals.push({
+    roles.push({
       kind: "entry",
-      source: entry.boundary.label,
-      targets: relatedReferences(outgoing.get(entry.boundary.file) ?? [], "target"),
+      boundary: entry.boundary.label,
+      related: relatedReferences(outgoing.get(entry.boundary.id) ?? [], "target"),
       share: null,
     });
   }
 
   const coordinators = [...outgoing]
     .filter(([, edges]) => edges.length >= 2)
-    .map(([file, edges]) => ({ file, edges, weight: edgeWeight(edges) }));
+    .map(([id, edges]) => ({ id, edges, weight: edgeWeight(edges) }));
   const coordinator = uniqueRoleWinner(
     coordinators,
     (candidate) => candidate.edges.length,
     (candidate) => candidate.weight,
   );
   if (coordinator !== null) {
-    const sourceLabel = boundaryLabel(boundaries, coordinator.file);
-    const targets = relatedReferences(coordinator.edges, "target");
+    const boundary = boundaryLabel(boundaries, coordinator.id);
+    const related = relatedReferences(coordinator.edges, "target");
     if (
-      !signals.some(
-        (signal) => signal.source === sourceLabel && sameReferences(signal.targets, targets),
-      )
+      !roles.some((role) => role.boundary === boundary && sameReferences(role.related, related))
     ) {
-      signals.push({
-        kind: "coordination",
-        source: sourceLabel,
-        targets,
-        share: null,
-      });
+      roles.push({ kind: "coordination", boundary, related, share: null });
     }
   }
 
   const foundations = [...incoming]
     .filter(([, edges]) => edges.length >= 2)
-    .map(([file, edges]) => ({ file, edges, weight: edgeWeight(edges) }));
+    .map(([id, edges]) => ({ id, edges, weight: edgeWeight(edges) }));
   const foundation = uniqueRoleWinner(
     foundations,
     (candidate) => candidate.edges.length,
     (candidate) => candidate.weight,
   );
   if (foundation !== null) {
-    const sourceLabel = boundaryLabel(boundaries, foundation.file);
-    const relatedModules = relatedReferences(foundation.edges, "source");
+    const boundary = boundaryLabel(boundaries, foundation.id);
+    const related = relatedReferences(foundation.edges, "source");
     const share =
       connectedBoundaries.size > 1
         ? foundation.edges.length / (connectedBoundaries.size - 1)
         : null;
-    const coordination = signals.find(
-      (signal) => signal.kind === "coordination" && signal.source === sourceLabel,
+    const coordination = roles.find(
+      (role) => role.kind === "coordination" && role.boundary === boundary,
     );
     if (coordination !== undefined) {
       coordination.kind = "core";
-      coordination.targets = uniqueStructuralReferences([
-        ...coordination.targets,
-        ...relatedModules,
-      ]);
+      coordination.related = uniqueStructuralReferences([...coordination.related, ...related]);
       coordination.share = share;
     } else {
-      signals.push({
-        kind: "foundation",
-        source: sourceLabel,
-        targets: relatedModules,
-        share,
-      });
+      roles.push({ kind: "foundation", boundary, related, share });
     }
   }
   return {
-    signals,
-    outlines: structuralOutlines(source, boundaries, signals),
+    roles,
+    outlines: structuralOutlines(source, outlinedBoundaries(boundaries, roles, primaryRoot)),
     packages,
   };
 }
@@ -165,22 +149,6 @@ function uniqueRoleWinner<T>(
   return winners.length === 1 ? (winners[0] ?? null) : null;
 }
 
-/** Builds complete current-tree import relationships from the source scan already owned by summary. */
-export function currentTreeRelationshipRows(source: SourceContext): RelationshipRow[] {
-  const relationships: RelationshipRow[] = [];
-  const pythonModules = pythonModuleIndex(source.filePaths);
-  for (const metrics of source.files) {
-    const targets =
-      metrics.suffix === ".py"
-        ? pythonImportTargets(metrics, source.filePaths, pythonModules)
-        : typescriptImportTargets(metrics.path, metrics, source.resolver);
-    for (const target of targets) {
-      relationships.push({ source: metrics.relPath, target, weight: 1 });
-    }
-  }
-  return relationships;
-}
-
 /** Prefers a top-level Python package holding a strict majority of files, otherwise the deepest directory holding one. */
 function primarySourceRoot(files: string[]): string | null {
   if (files.length === 0) {
@@ -195,8 +163,7 @@ function primarySourceRoot(files: string[]): string | null {
     .filter((root) => !initDirs.has(path.posix.dirname(root)))
     .map((root) => ({
       root,
-      files: files.filter((file) => file === `${root}/__init__.py` || file.startsWith(`${root}/`))
-        .length,
+      files: files.filter((file) => isWithinDirectory(file, root)).length,
     }))
     .filter((candidate) => candidate.files > files.length / 2)
     .sort(
@@ -235,11 +202,12 @@ function primarySourceRoot(files: string[]): string | null {
 function structuralBoundaries(
   source: SourceContext,
   packages: SourcePackage[],
+  primaryRoot: string | null,
 ): StructuralBoundary[] {
   if (packages.length > 1) {
     return packages
       .map((item) => ({
-        file: `package:${item.root || "."}`,
+        id: `package:${item.root || "."}`,
         label: item.root || item.names[0] || ".",
         root: item.root,
         declared: item.root === "" && item.declared,
@@ -247,11 +215,10 @@ function structuralBoundaries(
       }))
       .sort(
         (left, right) =>
-          pathDepth(right.root) - pathDepth(left.root) || compareText(left.file, right.file),
+          pathDepth(right.root) - pathDepth(left.root) || compareText(left.id, right.id),
       );
   }
 
-  const primaryRoot = primarySourceRoot(source.files.map((metrics) => metrics.relPath));
   if (primaryRoot === null) {
     return [];
   }
@@ -259,7 +226,7 @@ function structuralBoundaries(
   const childRoots = new Set<string>();
   let ownsRootFiles = false;
   for (const file of source.filePaths) {
-    if (file !== primaryRoot && !file.startsWith(`${primaryRoot}/`)) {
+    if (!isWithinDirectory(file, primaryRoot)) {
       continue;
     }
     const relative = path.posix.relative(primaryRoot, file);
@@ -281,18 +248,16 @@ function structuralBoundaries(
           path.posix.dirname(metrics.relPath) === root && isConventionalSurface(metrics.relPath),
       )?.relPath;
       return {
-        file: surface ?? `module:${root}`,
+        id: surface ?? `module:${root}`,
         label: root,
         root,
-        declared: [...declaredSurfaces].some(
-          (file) => file === root || file.startsWith(`${root}/`),
-        ),
+        declared: [...declaredSurfaces].some((file) => isWithinDirectory(file, root)),
         packageRoot: null,
       };
     })
     .sort(
       (left, right) =>
-        pathDepth(right.root) - pathDepth(left.root) || compareText(left.file, right.file),
+        pathDepth(right.root) - pathDepth(left.root) || compareText(left.id, right.id),
     );
 }
 
@@ -305,22 +270,15 @@ function boundaryEdges(
 ): BoundaryEdge[] {
   const edgesByPair = new Map<string, BoundaryEdge>();
   for (const row of relationships) {
-    const sourceFile = stringField(row.source);
-    const targetFile = stringField(row.target);
-    if (
-      sourceFile === null ||
-      targetFile === null ||
-      !source.filePaths.has(sourceFile) ||
-      !source.filePaths.has(targetFile)
-    ) {
+    if (!source.filePaths.has(row.source) || !source.filePaths.has(row.target)) {
       continue;
     }
-    const sourceBoundary = owningBoundary(sourceFile, boundaries);
-    const targetBoundary = owningBoundary(targetFile, boundaries);
+    const sourceBoundary = owningBoundary(row.source, boundaries);
+    const targetBoundary = owningBoundary(row.target, boundaries);
     if (sourceBoundary === null || targetBoundary === null || sourceBoundary === targetBoundary) {
       continue;
     }
-    addBoundaryWeight(edgesByPair, sourceBoundary, targetBoundary, numericValue(row.weight) ?? 1);
+    addBoundaryWeight(edgesByPair, sourceBoundary, targetBoundary, row.weight);
   }
   const packagesByName = new Map<string, SourcePackage>();
   for (const item of packages) {
@@ -357,7 +315,7 @@ function addBoundaryWeight(
   target: StructuralBoundary,
   weight: number,
 ): void {
-  const key = `${source.file}\0${target.file}`;
+  const key = `${source.id}\0${target.id}`;
   const existing = edgesByPair.get(key);
   edgesByPair.set(key, {
     source,
@@ -366,14 +324,9 @@ function addBoundaryWeight(
   });
 }
 
-/** Maps a source file to the deepest explicit package or barrel boundary that owns it, relying on `boundaries` arriving deepest first. */
+/** Maps a source file to the deepest boundary that contains it, relying on `boundaries` arriving deepest first. */
 function owningBoundary(file: string, boundaries: StructuralBoundary[]): StructuralBoundary | null {
-  return (
-    boundaries.find(
-      (boundary) =>
-        file === boundary.file || boundary.root === "" || file.startsWith(`${boundary.root}/`),
-    ) ?? null
-  );
+  return boundaries.find((boundary) => isWithinDirectory(file, boundary.root)) ?? null;
 }
 
 /** Groups boundary edges by the chosen endpoint while retaining importance order. */
@@ -383,10 +336,10 @@ function groupedBoundaryEdges(
 ): Map<string, BoundaryEdge[]> {
   const grouped = new Map<string, BoundaryEdge[]>();
   for (const edge of edges) {
-    const file = edge[endpoint].file;
-    const groupEdges = grouped.get(file) ?? [];
+    const id = edge[endpoint].id;
+    const groupEdges = grouped.get(id) ?? [];
     groupEdges.push(edge);
-    grouped.set(file, groupEdges);
+    grouped.set(id, groupEdges);
   }
   return grouped;
 }
@@ -402,10 +355,10 @@ function twoHopReach(
   outgoing: Map<string, BoundaryEdge[]>,
 ): Set<string> {
   const reached = new Set<string>();
-  for (const edge of outgoing.get(boundary.file) ?? []) {
-    reached.add(edge.target.file);
-    for (const nested of outgoing.get(edge.target.file) ?? []) {
-      reached.add(nested.target.file);
+  for (const edge of outgoing.get(boundary.id) ?? []) {
+    reached.add(edge.target.id);
+    for (const nested of outgoing.get(edge.target.id) ?? []) {
+      reached.add(nested.target.id);
     }
   }
   return reached;
@@ -437,7 +390,7 @@ function relatedReferences(
     )
     .sort((left, right) => right[1].length - left[1].length || compareText(left[0], right[0]))[0];
   if (dominantFamily === undefined) {
-    return edges.map((edge) => explicitStructuralReference(edge[endpoint].label));
+    return edges.map((edge) => explicitReference(edge[endpoint].label));
   }
   const [parent, familyEdges] = dominantFamily;
   const family = new Set(familyEdges);
@@ -448,96 +401,40 @@ function relatedReferences(
         const members = familyEdges
           .map((item) => path.posix.relative(parent, item[endpoint].label))
           .sort(compareText);
-        references.push({
-          label: `${parent}/*`,
-          count: members.length,
-          examples: extentSamples(members),
-        });
+        references.push(groupedReference(`${parent}/*`, members));
       }
     } else {
-      references.push(explicitStructuralReference(edge[endpoint].label));
+      references.push(explicitReference(edge[endpoint].label));
     }
   }
   return references;
 }
 
-/** Adds compact child shape only for selected single-package modules that benefit from grouping. */
-function structuralOutlines(
-  source: SourceContext,
+/** Outlines only feature boundaries a role names, never the primary root itself; package workspaces get none. */
+function outlinedBoundaries(
   boundaries: StructuralBoundary[],
-  signals: StructuralSignal[],
-): StructuralOutline[] {
+  roles: StructuralRole[],
+  primaryRoot: string | null,
+): StructuralBoundary[] {
   if (boundaries.some((boundary) => boundary.packageRoot !== null)) {
     return [];
   }
-  const sourceRoot = primarySourceRoot(source.files.map((metrics) => metrics.relPath));
   const selectedLabels = new Set([
-    ...signals.map((signal) => signal.source),
-    ...signals.flatMap((signal) => signal.targets.map((target) => target.label)),
+    ...roles.map((role) => role.boundary),
+    ...roles.flatMap((role) => role.related.map((reference) => reference.label)),
   ]);
-  const outlines: StructuralOutline[] = [];
-  for (const boundary of boundaries) {
-    if (boundary.root === sourceRoot || !selectedLabels.has(boundary.label)) {
-      continue;
-    }
-    const items = structuralOutlineItems(source, boundary.root);
-    if (!items.some((item) => item.count !== null)) {
-      continue;
-    }
-    outlines.push({ source: boundary.label, items });
-  }
-  return outlines.sort((left, right) => compareText(left.source, right.source));
+  return boundaries.filter(
+    (boundary) => boundary.root !== primaryRoot && selectedLabels.has(boundary.label),
+  );
 }
 
-/** Chooses the shortest hierarchical path description while preserving root-level files. */
-function structuralOutlineItems(source: SourceContext, root: string): StructuralReference[] {
-  const tree = emptyStructuralPathTree();
-  for (const metrics of source.files) {
-    if (!metrics.relPath.startsWith(`${root}/`)) {
-      continue;
-    }
-    const relative = path.posix.relative(root, metrics.relPath);
-    const parts = relative.split("/").filter(Boolean);
-    const file = parts.pop();
-    if (file === undefined) {
-      continue;
-    }
-    let node = tree;
-    for (const part of parts) {
-      const child = node.children.get(part) ?? emptyStructuralPathTree();
-      node.children.set(part, child);
-      node = child;
-    }
-    if (!isConventionalSurface(metrics.relPath)) {
-      node.files.add(file);
-    }
-  }
-  return summarizeStructuralRoot(tree);
-}
-
-function boundaryLabel(boundaries: StructuralBoundary[], file: string): string {
-  return boundaries.find((boundary) => boundary.file === file)?.label ?? file;
-}
-
-/** Accepts numeric aggregation strings returned by Codebase Memory query rows. */
-function numericValue(value: unknown): number | null {
-  if (typeof value === "number") {
-    return value;
-  }
-  if (typeof value === "string" && value.trim()) {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-  return null;
+function boundaryLabel(boundaries: StructuralBoundary[], id: string): string {
+  return boundaries.find((boundary) => boundary.id === id)?.label ?? id;
 }
 
 /** Normalizes JavaScript and Python distribution names for manifest dependency matching, as in `My_Pkg.core` → `my-pkg-core`. */
 function normalizedPackageName(value: string): string {
   return value.toLowerCase().replace(/[_.]+/g, "-");
-}
-
-function pathDepth(value: string): number {
-  return value.split("/").filter(Boolean).length;
 }
 
 /** Compares already ordered related-module lists for redundant role suppression. */
@@ -546,77 +443,6 @@ function sameReferences(left: StructuralReference[], right: StructuralReference[
     left.length === right.length &&
     left.every((value, index) => JSON.stringify(value) === JSON.stringify(right[index]))
   );
-}
-
-type StructuralPathTree = {
-  files: Set<string>;
-  children: Map<string, StructuralPathTree>;
-};
-
-function emptyStructuralPathTree(): StructuralPathTree {
-  return { files: new Set(), children: new Map() };
-}
-
-/** Keeps direct files while optionally collapsing a wide set of child directories. */
-function summarizeStructuralRoot(tree: StructuralPathTree): StructuralReference[] {
-  const direct = [...tree.files].sort(compareText).map((file) => explicitStructuralReference(file));
-  const childNames = [...tree.children.keys()].sort(compareText);
-  const expanded = childNames.flatMap((child) =>
-    summarizeStructuralDirectory(tree.children.get(child) ?? emptyStructuralPathTree(), child),
-  );
-  if (childNames.length > 3) {
-    const collapsed = compressedStructuralReference("*/", childNames);
-    if (structuralReferenceBytes([collapsed]) < structuralReferenceBytes(expanded)) {
-      return [...direct, collapsed];
-    }
-  }
-  return [...direct, ...expanded].sort((left, right) => compareText(left.label, right.label));
-}
-
-/** Recursively expands a directory only while doing so costs less than one counted group. */
-function summarizeStructuralDirectory(
-  tree: StructuralPathTree,
-  prefix: string,
-): StructuralReference[] {
-  const direct = [...tree.files]
-    .sort(compareText)
-    .map((file) => explicitStructuralReference(`${prefix}/${file}`));
-  const childNames = [...tree.children.keys()].sort(compareText);
-  const nested = childNames.flatMap((child) =>
-    summarizeStructuralDirectory(
-      tree.children.get(child) ?? emptyStructuralPathTree(),
-      `${prefix}/${child}`,
-    ),
-  );
-  const expanded = [...direct, ...nested].sort((left, right) =>
-    compareText(left.label, right.label),
-  );
-  const members = [...tree.files, ...childNames].sort(compareText);
-  if (members.length > 3) {
-    const collapsed = compressedStructuralReference(`${prefix}/*`, members);
-    if (structuralReferenceBytes([collapsed]) < structuralReferenceBytes(expanded)) {
-      return [collapsed];
-    }
-  }
-  return expanded.length > 0 ? expanded : [explicitStructuralReference(prefix)];
-}
-
-function compressedStructuralReference(label: string, members: string[]): StructuralReference {
-  return {
-    label,
-    count: members.length,
-    examples: extentSamples(members),
-  };
-}
-
-/** Measures the exact rendered payload used to choose between path representations. */
-function structuralReferenceBytes(references: StructuralReference[]): number {
-  const rendered = references.map(renderStructuralReference).join(", ");
-  return Buffer.byteLength(rendered, "utf8");
-}
-
-function explicitStructuralReference(label: string): StructuralReference {
-  return { label, count: null, examples: [] };
 }
 
 /** Deduplicates rendered structural references without discarding group evidence. */

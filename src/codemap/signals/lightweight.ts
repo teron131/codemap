@@ -2,6 +2,7 @@
 import path from "node:path";
 
 import { describeNumbers } from "../math-utils.js";
+import type { InventoryEntry } from "../source/extraction/index.js";
 import {
   ENTRYPOINT_BASENAMES,
   type FileMetrics,
@@ -12,37 +13,23 @@ import {
   TYPESCRIPT_SUFFIXES,
 } from "../source/scanner/index.js";
 import { compareText } from "../text-utils.js";
-import { fileProfileRow, functionLengthSection, functionUsageRows } from "./analysis.js";
+import { fileProfileRow } from "./file-profile.js";
+import { functionLengthsByLanguage } from "./function-lengths.js";
+import { rankFunctionRowsByLength } from "./payload.js";
 import type { DenseFileRow, SignalLanguage, SignalRow } from "./schema.js";
-
-export type LightweightSignalFile = {
-  path: string;
-  language: string;
-  fileCategory?: string;
-  sizeLines?: number | null;
-};
-
-type LightweightSignalPayloadOptions = {
-  includeTests?: boolean;
-  root?: string;
-};
+import { functionUsageRows } from "./usage.js";
 
 const LIGHTWEIGHT_SIGNAL_LANGUAGES = new Set(["javascript", "jsx", "python", "tsx", "typescript"]);
 /** Limits syntax parsing independently from final output budgeting. */
 const LIGHTWEIGHT_SIGNAL_PARSE_LIMIT = 100;
-/** Without `root`, nothing is parsed and every row carries only its line count. */
+
 export function buildLightweightSignalPayload(
-  files: LightweightSignalFile[],
-  { includeTests = false, root }: LightweightSignalPayloadOptions = {},
+  files: InventoryEntry[],
+  { includeTests, root }: { includeTests: boolean; root: string },
 ): SignalRow {
   const rankedFiles = files
     .filter((entry) => isLightweightSignalFile(entry, { includeTests }))
-    .slice()
-    .sort(
-      (left, right) =>
-        Number(right.sizeLines ?? 0) - Number(left.sizeLines ?? 0) ||
-        compareText(left.path, right.path),
-    );
+    .sort((left, right) => right.sizeLines - left.sizeLines || compareText(left.path, right.path));
   const metricsByPath = scanLightweightFiles(rankedFiles, root);
   const coverage = {
     mode: "bounded",
@@ -65,7 +52,7 @@ export function buildLightweightSignalPayload(
       compareText(String(left.identifier ?? ""), String(right.identifier ?? "")),
   );
   const stats = {
-    source: "currentTree",
+    source: "workingTree",
     ...(functionRows.length === 0
       ? {}
       : {
@@ -104,18 +91,7 @@ export function buildLightweightSignalPayload(
       top_inheritance_hubs: [],
     },
     files: denseFiles,
-    lengths: {
-      python: functionLengthSection(
-        scannedFiles
-          .filter((metrics) => PYTHON_SUFFIXES.has(metrics.suffix))
-          .flatMap((metrics) => metrics.functionSpans),
-      ),
-      typescript: functionLengthSection(
-        scannedFiles
-          .filter((metrics) => TYPESCRIPT_SUFFIXES.has(metrics.suffix))
-          .flatMap((metrics) => metrics.functionSpans),
-      ),
-    },
+    lengths: functionLengthsByLanguage(scannedFiles),
     usage: {
       bins: {},
     },
@@ -131,7 +107,7 @@ export function buildLightweightSignalPayload(
 }
 
 function isLightweightSignalFile(
-  entry: LightweightSignalFile,
+  entry: InventoryEntry,
   { includeTests }: { includeTests: boolean },
 ): boolean {
   if (entry.fileCategory !== "code") {
@@ -146,9 +122,9 @@ function isLightweightSignalFile(
   return !isGeneratedPath(entry.path);
 }
 
-/** `total` counts lines here rather than signals, as `total_label` records. */
+/** `total` counts lines here rather than declarations, as `total_label` records. */
 function buildLightweightSignalRow(
-  entry: LightweightSignalFile,
+  entry: InventoryEntry,
   metrics: FileMetrics | undefined,
 ): DenseFileRow {
   if (!metrics) {
@@ -158,25 +134,17 @@ function buildLightweightSignalRow(
       total_label: "lines",
     };
   }
-  const row = fileProfileRow(metrics);
-  const lineCount = entry.sizeLines ?? row.lines;
   return {
-    ...row,
-    total: lineCount,
+    ...fileProfileRow(metrics),
+    total: entry.sizeLines,
     total_label: "lines",
-    lines: lineCount,
+    lines: entry.sizeLines,
   };
 }
 
-/** Parses only the leading files, so callers pass them largest first. */
-function scanLightweightFiles(
-  files: LightweightSignalFile[],
-  root: string | undefined,
-): Map<string, FileMetrics> {
+/** Parses only the leading files, so callers pass them largest first; a file whose parse throws keeps its line-count row. */
+function scanLightweightFiles(files: InventoryEntry[], root: string): Map<string, FileMetrics> {
   const metricsByPath = new Map<string, FileMetrics>();
-  if (!root) {
-    return metricsByPath;
-  }
   for (const entry of files.slice(0, LIGHTWEIGHT_SIGNAL_PARSE_LIMIT)) {
     try {
       metricsByPath.set(
@@ -197,12 +165,15 @@ function lightweightFunctionRows(
   suffixes: Set<string>,
   language: SignalLanguage,
 ): SignalRow[] {
-  return functionUsageRows(scannedFiles, suffixes, new Map()).map((row) => ({
-    language,
-    name: row.name,
-    identifier: row.identifier,
-    file: row.file,
-    line: row.line,
-    lines: row.lines,
-  }));
+  // No mentions are counted on this path, so an empty count map leaves the ranking to length alone.
+  return rankFunctionRowsByLength(functionUsageRows(scannedFiles, suffixes, new Map())).map(
+    (row) => ({
+      language,
+      name: row.name,
+      identifier: row.identifier,
+      file: row.file,
+      line: row.line,
+      lines: row.lines,
+    }),
+  );
 }

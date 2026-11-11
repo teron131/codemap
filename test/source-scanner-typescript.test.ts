@@ -5,8 +5,9 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { collectReports } from "../src/codemap/source/docstrings/index.js";
-import { runImportMap, scanEntry } from "../src/codemap/source/extraction/index.js";
-import { classifyTags } from "../src/codemap/source/graph/index.js";
+import { runImportMap } from "../src/codemap/source/extraction/index.js";
+import { inventoryEntry } from "../src/codemap/source/extraction/inventory.js";
+import { classifyTags } from "../src/codemap/source/graph/builder.js";
 import { scanFile, scanTypescriptFile } from "../src/codemap/source/scanner/index.js";
 
 const workspaceRoot = process.cwd();
@@ -50,7 +51,7 @@ describe("TypeScript-family scanner", () => {
       const filePath = path.join(workDir, `module${suffix}`);
       writeFileSync(filePath, "export const value = 1;\n", "utf8");
 
-      expect(scanEntry(workDir, filePath)).toMatchObject({
+      expect(inventoryEntry(workDir, filePath)).toMatchObject({
         path: `module${suffix}`,
         language,
         fileCategory: "code",
@@ -66,6 +67,7 @@ describe("TypeScript-family scanner", () => {
           path: `src/app${suffix}`,
           language: "typescript",
           fileCategory: "code",
+          sizeLines: 1,
         }),
       ).toContain("entry-candidate");
     }
@@ -329,6 +331,6 @@ function writeResolutionSources(rows: Array<[string, string]>) {
     const file = path.join(workDir, relative);
     mkdirSync(path.dirname(file), { recursive: true });
     writeFileSync(file, source);
-    return scanEntry(workDir, file);
+    return inventoryEntry(workDir, file);
   });
 }

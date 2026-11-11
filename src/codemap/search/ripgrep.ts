@@ -2,11 +2,11 @@
 import { spawnSync } from "node:child_process";
 
 import { arrayValue, recordValue } from "../json-utils.js";
-import { ROOT_IGNORED_DIR_NAMES } from "../source/scanner/constants.js";
 import {
   IGNORED_DIR_NAMES,
   isTestPath,
   PYTHON_SUFFIXES,
+  ROOT_IGNORED_DIR_NAMES,
   TYPESCRIPT_SUFFIXES,
 } from "../source/scanner/index.js";
 import { escapeRegExp } from "../text-utils.js";
@@ -14,7 +14,6 @@ import type { SourceMatch } from "./source.js";
 
 const SOURCE_MATCH_TEXT_LIMIT = 240;
 const SOURCE_SEARCH_BUFFER_LIMIT = 16 * 1024 * 1024;
-const DEFINITION_SOURCE_GLOBS = ["*.js", "*.jsx", "*.py", "*.ts", "*.tsx"];
 const SOURCE_CODE_GLOBS = [...PYTHON_SUFFIXES, ...TYPESCRIPT_SUFFIXES].map(
   (suffix) => `*${suffix}`,
 );
@@ -54,7 +53,7 @@ export function ripgrepDefinitionMatches(
       "--column",
       "--max-count",
       "2",
-      ...DEFINITION_SOURCE_GLOBS.flatMap((glob) => ["--glob", glob]),
+      ...SOURCE_CODE_GLOBS.flatMap((glob) => ["--glob", glob]),
       ...ripgrepExcludeArgs(),
       "-e",
       declaration,
@@ -109,9 +108,9 @@ export function ripgrepFilesWithMatches(
   if (!result.stdout) {
     return { filePaths: [], scanStatus };
   }
-  const filePaths = [...new Set(result.stdout.split(/\r?\n/).filter(Boolean))].filter(
-    (filePath) => includeTests || !isTestPath(filePath),
-  );
+  const filePaths = [
+    ...new Set(result.stdout.split(/\r?\n/).filter(Boolean).map(projectRelativePath)),
+  ].filter((filePath) => includeTests || !isTestPath(filePath));
   return { filePaths, scanStatus };
 }
 
@@ -137,7 +136,7 @@ export function ripgrepMatches(
       "--max-count",
       "2",
       "--max-columns",
-      "240",
+      String(SOURCE_MATCH_TEXT_LIMIT),
       ...ripgrepExcludeArgs(),
       "--",
       searchText,
@@ -225,9 +224,14 @@ function ripgrepMatch(rgEvent: Record<string, unknown>): SourceMatch | null {
   return {
     engine: "rg",
     kind: "text",
-    filePath: String(pathText),
+    filePath: projectRelativePath(String(pathText)),
     line: Number(matchData.line_number ?? 0),
     column,
     text: compactSourceMatchText(String(lineText)),
   };
+}
+
+/** ripgrep prefixes every path with the `.` it was asked to search; rows carry project-relative paths like every other lane. */
+function projectRelativePath(rgPath: string): string {
+  return rgPath.startsWith("./") ? rgPath.slice(2) : rgPath;
 }

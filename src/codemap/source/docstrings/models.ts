@@ -1,5 +1,5 @@
 /** Language-neutral documentation report shapes. A non-null `parseError` marks documentation as incomplete rather than absent. */
-import { PYTHON_SUFFIXES, TYPESCRIPT_SUFFIXES } from "../scanner/constants.js";
+import { PYTHON_SUFFIXES, TYPESCRIPT_SUFFIXES } from "../scanner/index.js";
 
 export const DOCSTRING_SUFFIXES = new Set([...PYTHON_SUFFIXES, ...TYPESCRIPT_SUFFIXES]);
 

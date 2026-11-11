@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 
 import { recordValue, stringField } from "../../json-utils.js";
+import { isWithinDirectory, pathDepth } from "../../path-utils.js";
 import { isGeneratedPath, isTestPath } from "../../source/scanner/index.js";
 import { compareText, uniqueStrings } from "../../text-utils.js";
 import type { SourceContext } from "./source-context.js";
@@ -33,7 +34,7 @@ function collectManifestTargets(value: unknown, targets: Set<string>): void {
   }
 }
 
-/** Maps emitted manifest targets back to plausible current-tree source files: `./dist/cli.js` yields `dist/cli.js`, `src/cli.ts`, `src/cli/index.ts`, and the other source suffixes. */
+/** Maps emitted manifest targets back to plausible working-tree source files: `./dist/cli.js` yields `dist/cli.js`, `src/cli.ts`, `src/cli/index.ts`, and the other source suffixes. */
 function manifestSourceCandidates(target: string): string[] {
   const normalized = target.replace(/^\.\//, "").split(path.sep).join("/");
   const sourceBase = normalized.replace(/^(?:dist|build|lib)\//, "src/");
@@ -73,10 +74,7 @@ export function sourcePackages(source: SourceContext): SourcePackage[] {
       continue;
     }
     const root = path.posix.dirname(relative) === "." ? "" : path.posix.dirname(relative);
-    if (
-      root &&
-      ![...source.filePaths].some((file) => file === root || file.startsWith(`${root}/`))
-    ) {
+    if (root && ![...source.filePaths].some((file) => isWithinDirectory(file, root))) {
       continue;
     }
     const manifest = sourcePackageManifest(manifestPath, name);
@@ -194,8 +192,4 @@ function nonProductManifestPath(file: string): boolean {
         part,
       ),
     );
-}
-
-function pathDepth(value: string): number {
-  return value.split("/").filter(Boolean).length;
 }

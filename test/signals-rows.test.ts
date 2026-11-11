@@ -1,13 +1,9 @@
 /** Checks signal row helpers: mention bins, duplicate function-span collapse, and file-profile line counts. */
 import { describe, expect, it } from "vitest";
 
-import {
-  fileProfileRow,
-  functionLengthSection,
-  functionUsageRows,
-  usageBins,
-  usageRows,
-} from "../src/codemap/signals/analysis.js";
+import { fileProfileRow } from "../src/codemap/signals/file-profile.js";
+import { functionLengthSection } from "../src/codemap/signals/function-lengths.js";
+import { functionUsageRows, usageBins, usageRows } from "../src/codemap/signals/usage.js";
 import type { FileMetrics, FunctionSpan } from "../src/codemap/source/scanner/index.js";
 
 describe("signal analysis", () => {

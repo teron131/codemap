@@ -1,14 +1,13 @@
 /** `signals` command: validates the section and prints the signal view as text or `--json`. Analysis failures exit 1. */
 import type { Command } from "commander";
 
-import { resolveProjectRoot } from "../common.js";
 import {
   buildSignalView,
   isSignalSection,
   renderSignalText,
   SIGNAL_SECTION_CHOICES,
 } from "../signals/index.js";
-import { addProjectRootArgument, type ProjectRootOptions } from "./options.js";
+import { addProjectRootArgument, type ProjectRootOptions, resolveProjectRoot } from "./options.js";
 
 type SignalOptions = {
   projectRoot?: string;
@@ -19,7 +18,7 @@ type SignalOptions = {
 export function addSignalsParser(program: Command): void {
   const signals = program
     .command("signals")
-    .description("Print compact ranked metrics from the backend and current tree.")
+    .description("Print compact ranked metrics from the backend and working tree.")
     .argument("[section]", "Signal section to print.", "top")
     .option("--include-tests", "Include likely test files in file-specific signal rows.")
     .option("--json", "Print signal tables as JSON for jq, scripts, and agent pipelines.")
@@ -40,7 +39,7 @@ export function commandSignals(
     );
     return 2;
   }
-  const root = resolveProjectRoot(options.projectRoot ?? rootOptions.projectRoot);
+  const root = resolveProjectRoot(options, rootOptions);
   let selected: Record<string, unknown>;
   try {
     selected = buildSignalView(root, section, {

@@ -99,7 +99,7 @@ describe("summary CLI", () => {
     expect(result.stdout).toContain("    - Details");
     expect(result.stdout).not.toContain("Installation");
     expect(result.stdout).toContain(
-      "## Public API — entry position · import reach · implementation breadth",
+      "## Public API — selected by shallowest entry, most importers, most modules exposed",
     );
     expect(result.stdout).toContain("Defining exports shown where clear.");
     expect(result.stdout).toContain("src/index.ts");
@@ -161,7 +161,7 @@ describe("summary CLI", () => {
     const summary = buildRepositorySummary(workDir);
     const output = renderSummaryText(summary);
 
-    expect(summary.exportSurfaces.map((surface) => surface.file)).toEqual([
+    expect(summary.publicSurfaces.map((surface) => surface.file)).toEqual([
       "src/index.ts",
       "src/central.ts",
       "src/wide.ts",
@@ -307,18 +307,16 @@ describe("summary CLI", () => {
 
     const summary = buildRepositorySummary(workDir);
 
-    expect(summary.structuralSignals).toContainEqual({
+    expect(summary.structuralRoles).toContainEqual({
       kind: "foundation",
-      source: "packages/core",
-      targets: [
+      boundary: "packages/core",
+      related: [
         { label: "apps/cli", count: null, examples: [] },
         { label: "extensions/plugin", count: null, examples: [] },
       ],
       share: 1,
     });
-    expect(summary.structuralSignals).not.toContainEqual(
-      expect.objectContaining({ kind: "entry" }),
-    );
+    expect(summary.structuralRoles).not.toContainEqual(expect.objectContaining({ kind: "entry" }));
   });
 
   it("shows counted extent samples for compressed relationship families", () => {
@@ -338,13 +336,13 @@ describe("summary CLI", () => {
       writeFileSync(path.join(workDir, root, "index.ts"), "export const value = true;\n");
     }
 
-    const foundation = buildRepositorySummary(workDir).structuralSignals.find(
+    const foundation = buildRepositorySummary(workDir).structuralRoles.find(
       (signal) => signal.kind === "foundation",
     );
 
     expect(foundation).toMatchObject({
-      source: "packages/core",
-      targets: [
+      boundary: "packages/core",
+      related: [
         {
           label: "partners/*",
           count: 5,
@@ -381,7 +379,7 @@ describe("summary CLI", () => {
     }
 
     expect(buildRepositorySummary(workDir).structuralOutlines).toContainEqual({
-      source: "src/fixture/providers",
+      boundary: "src/fixture/providers",
       items: [
         { label: "common.py", count: null, examples: [] },
         {
@@ -420,7 +418,7 @@ describe("summary CLI", () => {
     }
 
     expect(buildRepositorySummary(workDir).structuralOutlines).toContainEqual({
-      source: "src/fixture/providers",
+      boundary: "src/fixture/providers",
       items: [
         { label: "common.py", count: null, examples: [] },
         { label: "utils.py", count: null, examples: [] },
@@ -441,34 +439,34 @@ describe("summary CLI", () => {
         { name: "TypeScript", share: 0.75 },
         { name: "JavaScript", share: 0.25 },
       ],
-      exportSurfaces: [
+      publicSurfaces: [
         {
           file: "src/index.ts",
           description: "Public API.",
-          capabilities: [{ label: "workflow", exports: ["Workflow"] }],
+          modules: [{ label: "workflow", exports: ["Workflow"] }],
         },
         {
           file: "src/workflow/index.ts",
           description: "Workflow surface.",
-          capabilities: [{ label: "execution", exports: ["execute"] }],
+          modules: [{ label: "execution", exports: ["execute"] }],
         },
         {
           file: "src/workflow/plugins/index.ts",
           description: null,
-          capabilities: [],
+          modules: [],
         },
       ],
-      structuralSignals: [
+      structuralRoles: [
         {
           kind: "entry",
-          source: "src/cli.ts",
-          targets: [{ label: "src/commands", count: null, examples: [] }],
+          boundary: "src/cli.ts",
+          related: [{ label: "src/commands", count: null, examples: [] }],
           share: null,
         },
         {
           kind: "coordination",
-          source: "src/commands",
-          targets: [
+          boundary: "src/commands",
+          related: [
             { label: "src/search", count: null, examples: [] },
             { label: "src/workflow", count: null, examples: [] },
           ],
@@ -476,8 +474,8 @@ describe("summary CLI", () => {
         },
         {
           kind: "foundation",
-          source: "src/core",
-          targets: [
+          boundary: "src/core",
+          related: [
             { label: "src/search", count: null, examples: [] },
             { label: "src/workflow", count: null, examples: [] },
           ],
@@ -485,8 +483,8 @@ describe("summary CLI", () => {
         },
         {
           kind: "core",
-          source: "src/runtime",
-          targets: [
+          boundary: "src/runtime",
+          related: [
             { label: "src/api", count: null, examples: [] },
             { label: "src/storage", count: null, examples: [] },
           ],
@@ -495,7 +493,7 @@ describe("summary CLI", () => {
       ],
       structuralOutlines: [
         {
-          source: "src/providers",
+          boundary: "src/providers",
           items: [
             { label: "common.ts", count: null, examples: [] },
             {
@@ -512,7 +510,7 @@ describe("summary CLI", () => {
           ],
         },
       ],
-      hotspots: [
+      mostCalled: [
         {
           name: "run",
           file: "src/run.ts",
@@ -524,7 +522,7 @@ describe("summary CLI", () => {
         {
           label: "src/workflow",
           description: "Owns workflow execution.",
-          codeShare: 0.4,
+          symbolShare: 0.4,
           internalCallShare: 0.75,
           topNodes: ["run", "stop"],
         },
@@ -537,11 +535,15 @@ describe("summary CLI", () => {
     expect(output).toContain("TypeScript 75% · JavaScript 25%");
     expect(output.indexOf("### README Outline")).toBeLessThan(output.indexOf("### Large Repo"));
     expect(output.indexOf("### Large Repo")).toBeLessThan(output.indexOf("### Languages"));
-    expect(output).toContain("## Structural Signals — role · flow · peer reach");
+    expect(output).toContain("## Structural Signals — role · imports");
     expect(output).toContain("entry · src/cli.ts → src/commands");
     expect(output).toContain("coordination · src/commands → src/search, src/workflow");
-    expect(output).toContain("foundation · src/search, src/workflow → src/core · 50%");
-    expect(output).toContain("core · src/runtime → src/api, src/storage · 75%");
+    expect(output).toContain(
+      "foundation · src/search, src/workflow → src/core · imported by 50% of modules",
+    );
+    expect(output).toContain(
+      "core · src/runtime ↔ src/api, src/storage · imported by 75% of modules",
+    );
     expect(output).toContain(
       [
         "inside src/providers",
@@ -550,7 +552,7 @@ describe("summary CLI", () => {
         "  └─ processors/* [4]: glue.ts, squad.ts, …, xnli.ts",
       ].join("\n"),
     );
-    expect(output).toContain("## Public API — entry position · import reach");
+    expect(output).toContain("## Public API — selected by shallowest entry");
     expect(output).toContain(
       [
         "src/index.ts — Public API.",
@@ -559,13 +561,15 @@ describe("summary CLI", () => {
         "   └─ plugins",
       ].join("\n"),
     );
-    expect(output).toContain("## Hotspots");
+    expect(output).toContain("## Most Called");
     expect(output).toContain("run · src/run.ts · 25%");
     expect(output).toContain("## Clusters");
     expect(output).toContain("src/workflow · 40% · 75%");
-    expect(output.indexOf("## Hotspots")).toBeLessThan(output.indexOf("## Public API —"));
+    expect(output.indexOf("## Most Called")).toBeLessThan(output.indexOf("## Public API —"));
     expect(output.indexOf("## Clusters")).toBeLessThan(output.indexOf("## Public API —"));
-    expect(output.indexOf("## Structural Signals")).toBeLessThan(output.indexOf("## Hotspots"));
+    expect(output.indexOf("## Structural Signals —")).toBeLessThan(
+      output.indexOf("## Most Called"),
+    );
     expect(output).not.toContain("Inventory");
     expect(output).not.toContain("nodes:");
   });

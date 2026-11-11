@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 
-import { isFile } from "../../common.js";
+import { isFile } from "../../path-utils.js";
 import {
   IGNORED_DIR_NAMES,
   IGNORED_FILE_SUFFIXES,
@@ -13,7 +13,7 @@ import {
   SCAN_SUFFIXES,
 } from "./constants.js";
 
-export type IgnoreRule = {
+type IgnoreRule = {
   include: boolean;
   directoryOnly: boolean;
   pathPatterns: RegExp[];

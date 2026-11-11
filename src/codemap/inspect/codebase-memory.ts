@@ -1,19 +1,19 @@
-/** Backend `inspect` lane for exactly one matching graph symbol with provider source. Other targets fall back to the current tree. */
+/** Backend `inspect` lane for exactly one matching graph symbol whose source the backend returns. Other targets fall back to the working tree. */
 import path from "node:path";
 
-import { canonicalPath } from "../codebase-memory/cache.js";
 import {
   callCodebaseMemoryTool,
   withFreshCodebaseMemoryProject,
-} from "../codebase-memory/client.js";
+} from "../codebase-memory/index.js";
 import { arrayValue, numberField, recordValue, stringField } from "../json-utils.js";
+import { canonicalPath } from "../path-utils.js";
 
 export type CodebaseMemoryInspectResult = {
   name: string;
   filePath: string | null;
   startLine: number | null;
   endLine: number | null;
-  signalFacts: string[];
+  metricFacts: string[];
   signature: string | null;
   source: string | null;
   callers: string[];
@@ -21,6 +21,7 @@ export type CodebaseMemoryInspectResult = {
 };
 
 const JSON_FORMAT = { format: "json" } as const;
+const TRACE_DEPTH = 2;
 
 export function codebaseMemoryInspect(
   root: string,
@@ -41,7 +42,7 @@ export function codebaseMemoryInspect(
     if (!searchResult.ok) {
       return null;
     }
-    const match = firstGraphMatch(searchResult.value, target);
+    const match = uniqueGraphMatch(searchResult.value, target);
     const qualifiedName = stringField(match.qualified_name);
     if (qualifiedName === null) {
       return null;
@@ -60,7 +61,7 @@ export function codebaseMemoryInspect(
       function_name: qualifiedName,
       mode: "calls",
       direction: "both",
-      depth: 2,
+      depth: TRACE_DEPTH,
       risk_labels: false,
       ...JSON_FORMAT,
     });
@@ -100,7 +101,7 @@ function inspectResultFromPayloads(
     filePath,
     startLine: numberField(snippet.start_line) ?? numberField(match.start_line),
     endLine: numberField(snippet.end_line) ?? numberField(match.end_line),
-    signalFacts: signalFacts({ ...match, ...snippet }),
+    metricFacts: metricFacts({ ...match, ...snippet }),
     signature: signatureText(snippet, name),
     source: stringField(snippet.source),
     callers: traceRows(trace.callers, excludedNames),
@@ -109,7 +110,7 @@ function inspectResultFromPayloads(
 }
 
 /** Returns `{}` unless exactly one qualified name matches the target by name, full qualified name, or `.target` suffix. */
-function firstGraphMatch(value: unknown, target: string): Record<string, unknown> {
+function uniqueGraphMatch(value: unknown, target: string): Record<string, unknown> {
   const record = recordValue(value);
   const candidates: Record<string, unknown>[] = [];
   for (const key of ["results", "semantic_results"]) {
@@ -138,9 +139,10 @@ function firstGraphMatch(value: unknown, target: string): Record<string, unknown
   return exact.size === 1 ? ([...exact.values()][0] ?? {}) : {};
 }
 
-function signalFacts(snippet: Record<string, unknown>): string[] {
+/** The backend stores cyclomatic complexity as `complexity`. */
+function metricFacts(snippet: Record<string, unknown>): string[] {
   return [
-    ["complexity", numberField(snippet.complexity)],
+    ["cyclomatic", numberField(snippet.complexity)],
     ["cognitive", numberField(snippet.cognitive)],
     ["lines", numberField(snippet.lines)],
     ["callers", numberField(snippet.callers)],
@@ -254,8 +256,8 @@ export function renderCodebaseMemoryInspect(
       `Source: ${result.filePath}${result.startLine !== null ? `:${result.startLine}` : ""}${result.endLine !== null && result.endLine !== result.startLine ? `-${result.endLine}` : ""}`,
     );
   }
-  if (result.signalFacts.length > 0) {
-    lines.push(`Signals: ${result.signalFacts.join(", ")}`);
+  if (result.metricFacts.length > 0) {
+    lines.push(`Metrics: ${result.metricFacts.join(", ")}`);
   }
   appendCode(lines, result, { limit });
   appendTrace(lines, result, { limit });
@@ -298,13 +300,13 @@ function appendTrace(
   }
   lines.push("", "## Calls");
   if (callers.length > 0) {
-    lines.push(`Inbound: ${callers.length}`);
+    lines.push(`Callers within ${TRACE_DEPTH} hops: ${result.callers.length}`);
     for (const item of callers) {
       lines.push(`- ${item}`);
     }
   }
   if (callees.length > 0) {
-    lines.push(`Outbound: ${callees.length}`);
+    lines.push(`Callees within ${TRACE_DEPTH} hops: ${result.callees.length}`);
     for (const item of callees) {
       lines.push(`- ${item}`);
     }

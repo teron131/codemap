@@ -9,7 +9,7 @@ import {
   TYPESCRIPT_LANG_BY_SUFFIX,
 } from "../scanner/index.js";
 
-export type ScanEntry = {
+export type InventoryEntry = {
   path: string;
   language: string;
   fileCategory: string;
@@ -67,11 +67,14 @@ export const CONFIG_BASENAMES = new Set([
 ]);
 
 /** Reads every file to count its lines but parses none. */
-export function runScan(root: string, filePaths: string[] = discoverFiles(root)): ScanEntry[] {
-  return filePaths.map((filePath) => scanEntry(root, filePath));
+export function buildInventory(
+  root: string,
+  filePaths: string[] = discoverFiles(root),
+): InventoryEntry[] {
+  return filePaths.map((filePath) => inventoryEntry(root, filePath));
 }
 
-export function scanEntry(root: string, filePath: string): ScanEntry {
+export function inventoryEntry(root: string, filePath: string): InventoryEntry {
   const relPath = relativePath(filePath, { displayRoot: root });
   const suffix = path.extname(filePath);
   return {

@@ -1,4 +1,4 @@
-/** Bridges synchronous feature calls to the SDK worker and normalizes provider payloads and errors. */
+/** Bridges synchronous feature calls to the SDK worker and normalizes backend payloads and errors. */
 import { spawnSync } from "node:child_process";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -18,7 +18,7 @@ export type CodebaseMemoryToolOptions = {
 const DEFAULT_COMMAND = "codebase-memory-mcp";
 const REQUEST_TIMEOUT_MS = 8_000;
 
-/** Blocks while a fresh supervisor child starts the provider, makes this one call, and exits; with `lock`, the child holds the lock until its provider has exited. */
+/** Blocks while a fresh supervisor child starts the backend, makes this one call, and exits; with `lock`, the child holds the lock until its backend has exited. */
 export function callTool(
   name: string,
   args: JsonObject,
@@ -38,7 +38,7 @@ export function callTool(
       String(process.pid),
     ],
     {
-      // Outside the project, so the provider's own watcher and auto-indexing cannot race the explicit refresh.
+      // Outside the project, so the backend's own watcher and auto-indexing cannot race the explicit refresh.
       cwd: homedir(),
       env: codebaseMemoryChildEnv(),
       input: JSON.stringify({ name, arguments: args }),
@@ -83,7 +83,7 @@ function codebaseMemoryCommand(): string {
   return command.includes("/") || command.includes("\\") ? path.resolve(command) : command;
 }
 
-/** Pins `CBM_CACHE_DIR` to the cache root chosen here, so the provider shares the lock's cache even after a fallback, and drops the launcher's `_` and `CODEMAP_*` variables. */
+/** Pins `CBM_CACHE_DIR` to the cache root chosen here, so the backend shares the lock's cache even after a fallback, and drops the launcher's `_` and `CODEMAP_*` variables. */
 function codebaseMemoryChildEnv(): NodeJS.ProcessEnv {
   const env = { ...process.env };
   env.CBM_CACHE_DIR = codebaseMemoryCacheRoot();

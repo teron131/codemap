@@ -1,7 +1,7 @@
 /**
  * Classifies source paths as test, generated, or supported implementation code.
  *
- * These predicates decide what counts as inspectable source across every capability: search hides generated and test matches, summary leaves them out of its source context, and signals excludes them from metrics. They work on path text alone so they can classify backend rows and current-tree paths with the same rule, without touching the filesystem.
+ * These predicates decide what counts as inspectable source across every capability: search hides generated and test matches, summary leaves them out of its source context, and signals excludes them from metrics. They work on path text alone so they can classify backend rows and working-tree paths with the same rule, without touching the filesystem.
  */
 import path from "node:path";
 

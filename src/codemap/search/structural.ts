@@ -1,15 +1,27 @@
-/** Explicit call-site and YAML-rule searches over `SyntaxSearch`, plus resolution of their CLI target paths. */
-import { existsSync } from "node:fs";
+/** Structural search over ast-grep parses: one target inventory and one parse per file shared by a group of rules, plus the call-site and YAML-rule searches built on it. Match positions are one-based. */
+import { readFileSync } from "node:fs";
 import path from "node:path";
 
-import {
-  loadRule,
-  matchConfigFromRule,
-  type SyntaxMatch,
-  SyntaxSearch,
-} from "../ast-grep/index.js";
-import { expandUser } from "../common.js";
+import type { NapiConfig } from "@ast-grep/napi";
+
+import { astGrepRoot, hasBundledParser, normalizeLanguage } from "../ast-grep.js";
 import { escapeRegExp } from "../text-utils.js";
+import {
+  languagesForFiles,
+  SYNTAX_SUFFIXES_BY_LANGUAGE,
+  targetFiles,
+} from "./structural-targets.js";
+
+export type SyntaxMatch = {
+  engine: "ast-grep";
+  filePath: string;
+  text: string;
+  line: number;
+  column: number;
+  endLine: number;
+  endColumn: number;
+  lines: string;
+};
 
 const CALL_TARGET_RE = /^[A-Za-z_$][A-Za-z0-9_$]*(\.[A-Za-z_$][A-Za-z0-9_$]*)*$/;
 
@@ -44,27 +56,124 @@ export async function searchRuleMatches(
   );
 }
 
-/** Returns root-relative paths, reading a relative path against the root first and the working directory second; absolute paths outside the root throw. */
-export function resolveTargetPaths(root: string, paths: string[]): string[] {
-  if (paths.length === 0) {
-    return ["."];
+/** Reuses one target inventory and one parse per language/file across a group of related rules. */
+export class SyntaxSearch {
+  private files: string[] | undefined;
+
+  constructor(
+    private readonly root: string,
+    private readonly paths: string[],
+  ) {}
+
+  languages(): string[] {
+    return languagesForFiles(this.targetFiles());
   }
-  const resolved = [];
-  const rootResolved = path.resolve(root);
-  for (const rawPath of paths) {
-    const candidate = expandUser(rawPath);
-    if (path.isAbsolute(candidate)) {
-      const resolvedCandidate = path.resolve(candidate);
-      const relative = path.relative(rootResolved, resolvedCandidate);
-      if (relative.startsWith("..") || path.isAbsolute(relative)) {
-        throw new Error(`search path is outside project root: ${rawPath}`);
+
+  /** Null when the language has no bundled parser; `prefilter` skips files whose text cannot match before parsing them. */
+  matches(
+    language: string,
+    config: NapiConfig,
+    { prefilter }: { prefilter?: RegExp } = {},
+  ): SyntaxMatch[] | null {
+    return this.matchRules(language, [{ config, limit: null }], prefilter)?.[0] ?? null;
+  }
+
+  /** Preserves a separate ordered limit for each rule while reading and parsing each file only once. */
+  matchRules(
+    lang: string,
+    rules: Array<{ config: NapiConfig; limit: number | null }>,
+    prefilter?: RegExp,
+  ): SyntaxMatch[][] | null {
+    const language = normalizeLanguage(lang);
+    if (!hasBundledParser(language)) {
+      return null;
+    }
+    const groups = rules.map((rule) => ({ ...rule, matches: [] as SyntaxMatch[] }));
+    const suffixes = SYNTAX_SUFFIXES_BY_LANGUAGE[language];
+    for (const filePath of this.targetFiles()) {
+      if (groups.every((group) => group.limit !== null && group.matches.length >= group.limit)) {
+        break;
       }
-      resolved.push(relative.split(path.sep).join("/"));
-    } else {
-      resolved.push(relativeTargetPath(rootResolved, candidate));
+      if (suffixes !== undefined && !suffixes.has(path.extname(filePath))) {
+        continue;
+      }
+      try {
+        const text = readFileSync(filePath, "utf8");
+        if (prefilter !== undefined && !prefilter.test(text)) {
+          continue;
+        }
+        const syntaxRoot = astGrepRoot(text, language);
+        if (syntaxRoot === null) {
+          continue;
+        }
+        const relPath = path.relative(this.root, filePath).split(path.sep).join("/");
+        const sourceLines = splitLines(text);
+        for (const { config, limit, matches } of groups) {
+          if (limit !== null && matches.length >= limit) {
+            continue;
+          }
+          for (const node of syntaxRoot.findAll(config)) {
+            if (limit !== null && matches.length >= limit) {
+              break;
+            }
+            const range = node.range();
+            matches.push({
+              engine: "ast-grep",
+              filePath: relPath,
+              text: node.text(),
+              line: range.start.line + 1,
+              column: range.start.column + 1,
+              endLine: range.end.line + 1,
+              endColumn: range.end.column + 1,
+              lines: contextLines(sourceLines, range.start.line, range.end.line),
+            });
+          }
+        }
+      } catch {}
+    }
+    return groups.map((group) => group.matches);
+  }
+
+  private targetFiles(): string[] {
+    return (this.files ??= targetFiles(this.root, this.paths));
+  }
+}
+
+/** Imports the YAML parser lazily because only rule searches need it. */
+async function loadRule(rulePath: string): Promise<Record<string, unknown>> {
+  const { parse: parseYaml } = await import("yaml");
+  const data: unknown = parseYaml(readFileSync(rulePath, "utf8"));
+  if (data === null || typeof data !== "object" || Array.isArray(data)) {
+    throw new Error(`Invalid ast-grep rule file: ${rulePath}`);
+  }
+  const rule = data as Record<string, unknown>;
+  if (rule.rule === null || typeof rule.rule !== "object" || Array.isArray(rule.rule)) {
+    throw new Error(`ast-grep rule file must contain a rule mapping: ${rulePath}`);
+  }
+  if (!rule.language) {
+    throw new Error(`ast-grep rule file must contain language: ${rulePath}`);
+  }
+  return rule;
+}
+
+function matchConfigFromRule(rule: Record<string, unknown>): NapiConfig {
+  const matchConfig: Record<string, unknown> = { rule: rule.rule };
+  for (const key of ["constraints", "utils", "transform"]) {
+    const value = rule[key];
+    if (value !== undefined && value !== null) {
+      matchConfig[key] = value;
     }
   }
-  return resolved;
+  return matchConfig as unknown as NapiConfig;
+}
+
+function contextLines(sourceLines: string[], startLine: number, endLine: number): string {
+  if (sourceLines.length === 0) {
+    return "";
+  }
+  const start = Math.max(0, startLine);
+  const end = Math.min(sourceLines.length, endLine + 1);
+  return sourceLines.slice(start, end).join("\n");
 }
 
 function callTarget(name: string): string {
@@ -72,19 +181,6 @@ function callTarget(name: string): string {
     throw new Error(`Invalid call target: ${name}`);
   }
   return name;
-}
-
-function relativeTargetPath(root: string, rawPath: string): string {
-  const rootPath = path.resolve(root, rawPath);
-  if (existsSync(rootPath)) {
-    return rawPath;
-  }
-  const cwdPath = path.resolve(process.cwd(), rawPath);
-  const relative = path.relative(root, cwdPath);
-  if (!relative.startsWith("..") && !path.isAbsolute(relative)) {
-    return relative.split(path.sep).join("/");
-  }
-  return rawPath;
 }
 
 /** Builds the text prefilter, as in `log` → `/(^|[^A-Za-z0-9_$])log\s*\(/`, which still admits `x.log(` because `.` counts as a boundary. */
@@ -106,4 +202,13 @@ function uniqueCallMatches(matches: SyntaxMatch[]): SyntaxMatch[] {
     seen.add(key);
     return true;
   });
+}
+
+function splitLines(text: string): string[] {
+  const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const lines = normalized.split("\n");
+  if (lines.at(-1) === "") {
+    lines.pop();
+  }
+  return lines;
 }

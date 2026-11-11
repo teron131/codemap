@@ -4,7 +4,8 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { runImportMap, scanEntry } from "../src/codemap/source/extraction/index.js";
+import { runImportMap } from "../src/codemap/source/extraction/index.js";
+import { inventoryEntry } from "../src/codemap/source/extraction/inventory.js";
 import { scanFile, scanPythonFile } from "../src/codemap/source/scanner/index.js";
 
 const workspaceRoot = process.cwd();
@@ -57,9 +58,8 @@ describe("Python scanner", () => {
       { caller: "run", callee: "nested", lineNumber: 12 },
     ]);
     expect(
-      runImportMap(workDir, [scanEntry(workDir, file), scanEntry(workDir, helper)]).importMap[
-        "main.py"
-      ],
+      runImportMap(workDir, [inventoryEntry(workDir, file), inventoryEntry(workDir, helper)])
+        .importMap["main.py"],
     ).toEqual(["helper.py"]);
   });
   it("uses supplied source for one scan without caching it across later scans", () => {

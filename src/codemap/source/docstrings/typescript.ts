@@ -4,8 +4,8 @@ import path from "node:path";
 
 import type { SgNode } from "@ast-grep/napi";
 
-import { astGrepRoot } from "../../ast-grep/adapter.js";
-import { TYPESCRIPT_LANG_BY_SUFFIX } from "../scanner/constants.js";
+import { astGrepRoot } from "../../ast-grep.js";
+import { TYPESCRIPT_LANG_BY_SUFFIX } from "../scanner/index.js";
 import type { ClassReport, FileReport, FunctionReport } from "./models.js";
 
 type Declaration = {

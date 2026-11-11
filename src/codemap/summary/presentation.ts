@@ -1,17 +1,17 @@
-/** Renders the summary as Markdown in a fixed order: overview, structure, hotspots, clusters, then public API. */
+/** Renders the summary as Markdown in a fixed order: overview, structure, most-called symbols, clusters, then public API. */
 import path from "node:path";
 
 import type {
   ClusterSummary,
-  ExportSurface,
-  HotspotSummary,
   LanguageSummary,
+  MostCalledSymbol,
+  PublicSurface,
   ReadmeSection,
   RepositorySummary,
   StructuralOutline,
-  StructuralReference,
-  StructuralSignal,
+  StructuralRole,
 } from "./schema.js";
+import { renderStructuralReference } from "./structural-reference.js";
 
 type PublicApiNode = {
   label: string;
@@ -22,7 +22,7 @@ type PublicApiNode = {
 };
 
 type PublicSurfaceNode = {
-  surface: ExportSurface;
+  surface: PublicSurface;
   scope: string;
   parent: PublicSurfaceNode | null;
   children: PublicSurfaceNode[];
@@ -33,8 +33,8 @@ const PUBLIC_API_LEVELS = 3;
 export function renderSummaryText(summary: RepositorySummary): string {
   const lines = [`# ${summary.project}`];
   appendOverview(lines, summary.readme, summary.languages);
-  appendStructuralSignals(lines, summary.structuralSignals, summary.structuralOutlines);
-  appendHotspots(lines, summary.hotspots);
+  appendStructure(lines, summary.structuralRoles, summary.structuralOutlines);
+  appendMostCalled(lines, summary.mostCalled);
   appendClusters(lines, summary.clusters);
   if (!summary.relationshipEvidenceAvailable) {
     const reason = summary.relationshipEvidenceFailureReason
@@ -42,42 +42,45 @@ export function renderSummaryText(summary: RepositorySummary): string {
       .trim()
       .replace(/\.$/, "");
     const explanation = reason ? ` Reason: ${reason}.` : "";
-    lines.push("", `_Codebase Memory unavailable; hotspots and clusters omitted.${explanation}_`);
+    lines.push(
+      "",
+      `_Codebase Memory unavailable; most-called symbols and clusters omitted.${explanation}_`,
+    );
   }
-  appendExportSurfaces(lines, summary.exportSurfaces);
+  appendPublicApi(lines, summary.publicSurfaces);
   return `${lines.join("\n")}\n`;
 }
 
-function appendStructuralSignals(
+function appendStructure(
   lines: string[],
-  signals: StructuralSignal[],
+  roles: StructuralRole[],
   outlines: StructuralOutline[],
 ): void {
-  if (signals.length === 0 && outlines.length === 0) {
+  if (roles.length === 0 && outlines.length === 0) {
     return;
   }
-  lines.push("", "## Structural Signals — role · flow · peer reach");
-  for (const signal of signals) {
-    const sourceLabel = signal.source;
-    const targets = signal.targets.map(renderStructuralReference).join(", ");
-    if (signal.kind === "entry") {
-      lines.push(`- entry · ${sourceLabel} → ${targets}`);
+  lines.push("", "## Structural Signals — role · imports");
+  for (const role of roles) {
+    const boundary = role.boundary;
+    const related = role.related.map(renderStructuralReference).join(", ");
+    if (role.kind === "entry") {
+      lines.push(`- entry · ${boundary} → ${related}`);
       continue;
     }
-    if (signal.kind === "coordination") {
-      lines.push(`- coordination · ${sourceLabel} → ${targets}`);
+    if (role.kind === "coordination") {
+      lines.push(`- coordination · ${boundary} → ${related}`);
       continue;
     }
-    if (signal.kind === "core") {
-      const share = signal.share === null ? "" : ` · ${formatPercent(signal.share)}`;
-      lines.push(`- core · ${sourceLabel} → ${targets}${share}`);
+    const importedBy =
+      role.share === null ? "" : ` · imported by ${formatPercent(role.share)} of modules`;
+    if (role.kind === "core") {
+      lines.push(`- core · ${boundary} ↔ ${related}${importedBy}`);
       continue;
     }
-    const share = signal.share === null ? "" : ` · ${formatPercent(signal.share)}`;
-    lines.push(`- foundation · ${targets} → ${sourceLabel}${share}`);
+    lines.push(`- foundation · ${related} → ${boundary}${importedBy}`);
   }
   for (const outline of outlines) {
-    lines.push(`- inside ${outline.source}`);
+    lines.push(`- inside ${outline.boundary}`);
     const directItems = outline.items.filter((item) => item.count === null);
     const renderedChildren: string[] = [];
     if (directItems.length > 0) {
@@ -90,31 +93,6 @@ function appendStructuralSignals(
       lines.push(`  ${index === renderedChildren.length - 1 ? "└─" : "├─"} ${child}`);
     }
   }
-}
-
-/** Counted groups render with their extent samples, as in `packages/* [5]: api, …, core, …, web`. */
-export function renderStructuralReference(reference: StructuralReference): string {
-  if (reference.count === null) {
-    return reference.label;
-  }
-  return `${reference.label} [${reference.count}]: ${renderStructuralExamples(reference)}`;
-}
-
-/** Marks only real gaps between sorted first, middle, and last extent samples. */
-function renderStructuralExamples(reference: StructuralReference): string {
-  const examples = reference.examples;
-  if (reference.count === null || reference.count <= examples.length || examples.length !== 3) {
-    return examples.join(", ");
-  }
-  const positions = [0, Math.floor((reference.count - 1) / 2), reference.count - 1];
-  const rendered = [examples[0] ?? ""];
-  for (let index = 1; index < examples.length; index += 1) {
-    if ((positions[index] ?? 0) - (positions[index - 1] ?? 0) > 1) {
-      rendered.push("…");
-    }
-    rendered.push(examples[index] ?? "");
-  }
-  return rendered.filter(Boolean).join(", ");
 }
 
 function appendOverview(
@@ -145,11 +123,14 @@ function appendOverview(
   }
 }
 
-function appendExportSurfaces(lines: string[], surfaces: ExportSurface[]): void {
+function appendPublicApi(lines: string[], surfaces: PublicSurface[]): void {
   if (surfaces.length === 0) {
     return;
   }
-  lines.push("", "## Public API — entry position · import reach · implementation breadth");
+  lines.push(
+    "",
+    "## Public API — selected by shallowest entry, most importers, most modules exposed",
+  );
   lines.push("Defining exports shown where clear.");
   for (const node of publicApiTree(surfaces)) {
     lines.push(renderPublicApiNode(node));
@@ -158,7 +139,7 @@ function appendExportSurfaces(lines: string[], surfaces: ExportSurface[]): void 
 }
 
 /** Nests the selected surfaces without collecting additional API entries. */
-function publicApiTree(surfaces: ExportSurface[]): PublicApiNode[] {
+function publicApiTree(surfaces: PublicSurface[]): PublicApiNode[] {
   const sourceNodes: PublicSurfaceNode[] = surfaces.map((surface) => ({
     surface,
     scope: publicSurfaceScope(surface.file),
@@ -188,7 +169,7 @@ function populatePublicApiNode(
   surfaceNode: PublicSurfaceNode,
   depth: number,
 ): void {
-  for (const capability of surfaceNode.surface.capabilities) {
+  for (const capability of surfaceNode.surface.modules) {
     const inserted = insertPublicApiPath(targetNode, capability.label, depth);
     inserted.node.exports = [...new Set([...inserted.node.exports, ...capability.exports])];
   }
@@ -279,16 +260,16 @@ function appendPublicApiChildren(lines: string[], parent: PublicApiNode, prefix:
   }
 }
 
-function appendHotspots(lines: string[], hotspots: HotspotSummary[]): void {
-  if (hotspots.length === 0) {
+function appendMostCalled(lines: string[], symbols: MostCalledSymbol[]): void {
+  if (symbols.length === 0) {
     return;
   }
-  lines.push("", "## Hotspots — symbol · location · indexed call share");
-  for (const hotspot of hotspots) {
-    const location = hotspot.file ?? "—";
-    const share = hotspot.callShare === null ? "frequent" : formatPercent(hotspot.callShare);
-    const description = hotspot.description === null ? "" : ` · ${hotspot.description}`;
-    lines.push(`- ${hotspot.name} · ${location} · ${share}${description}`);
+  lines.push("", "## Most Called — symbol · location · share of all calls");
+  for (const symbol of symbols) {
+    const location = symbol.file ?? "—";
+    const share = symbol.callShare === null ? "frequent" : formatPercent(symbol.callShare);
+    const description = symbol.description === null ? "" : ` · ${symbol.description}`;
+    lines.push(`- ${symbol.name} · ${location} · ${share}${description}`);
   }
 }
 
@@ -296,12 +277,12 @@ function appendClusters(lines: string[], clusters: ClusterSummary[]): void {
   if (clusters.length === 0) {
     return;
   }
-  lines.push("", "## Clusters — label · symbol share · internal calls");
+  lines.push("", "## Clusters — label · share of symbols · internal calls");
   for (const cluster of clusters) {
-    const codeShare = cluster.codeShare === null ? "—" : formatPercent(cluster.codeShare);
+    const symbolShare = cluster.symbolShare === null ? "—" : formatPercent(cluster.symbolShare);
     const internalCalls =
       cluster.internalCallShare === null ? "—" : formatPercent(cluster.internalCallShare);
-    lines.push(`- ${cluster.label} · ${codeShare} · ${internalCalls}`);
+    lines.push(`- ${cluster.label} · ${symbolShare} · ${internalCalls}`);
     const detail = cluster.description ?? cluster.topNodes.join(", ");
     if (detail) {
       lines.push(`  └─ ${detail}`);

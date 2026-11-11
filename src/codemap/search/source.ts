@@ -1,9 +1,8 @@
-/** Owns the current-tree path, definition, and exact-text search lanes and the path-affinity ranking they share. */
+/** Owns the working-tree path, definition, and exact-text search lanes and the path-affinity ranking they share. */
 import path from "node:path";
 
 import type { NapiConfig } from "@ast-grep/napi";
 
-import { type SyntaxMatch, SyntaxSearch } from "../ast-grep/index.js";
 import {
   categoryForPath,
   CONFIG_BASENAMES,
@@ -19,6 +18,7 @@ import {
 } from "../source/scanner/index.js";
 import { compareText, escapeRegExp } from "../text-utils.js";
 import { compactSourceMatchText, ripgrepDefinitionMatches, ripgrepMatches } from "./ripgrep.js";
+import { type SyntaxMatch, SyntaxSearch } from "./structural.js";
 
 const IDENTIFIER_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 const SOURCE_CANDIDATE_LIMIT = 1_000;
@@ -59,7 +59,7 @@ export function isImplementationSourcePath(filePath: string): boolean {
   );
 }
 
-export const SEARCH_STOP_WORDS = new Set([
+const SEARCH_STOP_WORDS = new Set([
   "about",
   "and",
   "are",
@@ -103,19 +103,19 @@ export function definitionMatches(
   for (const [index, symbol] of symbols.entries()) {
     const syntaxMatches = symbolGroups[index] ?? [];
     const syntaxLines = new Set(
-      syntaxMatches.map((match) => JSON.stringify([path.normalize(match.filePath), match.line])),
+      syntaxMatches.map((match) => JSON.stringify([match.filePath, match.line])),
     );
     const candidates = [
       ...syntaxMatches,
       ...ripgrepDefinitionMatches(root, symbol, { limit: candidateLimit }).filter(
-        (match) => !syntaxLines.has(JSON.stringify([path.normalize(match.filePath), match.line])),
+        (match) => !syntaxLines.has(JSON.stringify([match.filePath, match.line])),
       ),
     ];
     for (const match of candidates) {
       if (matches.length >= candidateLimit) {
         break;
       }
-      const location = JSON.stringify([path.normalize(match.filePath), match.line, match.column]);
+      const location = JSON.stringify([match.filePath, match.line, match.column]);
       if (
         (!includeTests && isTestPath(match.filePath)) ||
         (phraseIntent && !isCallableDefinition(match, symbol)) ||
@@ -142,7 +142,7 @@ function isCallableDefinition(match: SourceMatch, symbol: string): boolean {
  *
  * Symbol definitions are not repeated here: every caller runs `definitionMatches` first and reaches text search only after it found no definition.
  */
-export function sourceMatches(
+export function textMatches(
   root: string,
   searchText: string,
   {
@@ -153,22 +153,13 @@ export function sourceMatches(
     limit: number;
   },
 ): SourceMatch[] {
-  const matches: SourceMatch[] = [];
-  const seen = new Set<string>();
-  const textMatches = rankSourceMatches(
+  return rankSourceMatches(
     ripgrepMatches(root, searchText, {
       includeTests,
       limit: includeTests ? limit : Math.max(limit, SOURCE_CANDIDATE_LIMIT),
     }),
     searchText,
-  );
-  for (const sourceMatch of textMatches) {
-    appendMatch(matches, seen, sourceMatch, { limit });
-    if (matches.length >= limit) {
-      break;
-    }
-  }
-  return matches;
+  ).slice(0, Math.max(0, limit));
 }
 
 /** Only queries with a separator, a known suffix, or a config basename count as paths; matching is case-insensitive, with exact paths first, then trailing-segment and substring matches. */
@@ -297,13 +288,12 @@ function sourceMatchRank(match: SourceMatch, searchText: string): number {
 
 /** Lower sorts first: up to three query terms in the path offset penalties for paths outside `src/`, tests, config and docs, and generated files. */
 export function sourcePathRank(filePath: string, searchText: string): number {
-  const normalizedPath = filePath.replace(/^\.\//, "");
-  const lower = normalizedPath.toLowerCase();
+  const lower = filePath.toLowerCase();
   let rank = 0;
   if (!lower.startsWith("src/")) {
     rank += 4;
   }
-  if (lower.includes("/test") || lower.includes(".test.") || lower.includes("_test.")) {
+  if (isTestPath(filePath)) {
     rank += 3;
   }
   if (
@@ -315,7 +305,7 @@ export function sourcePathRank(filePath: string, searchText: string): number {
   ) {
     rank += 5;
   }
-  if (isGeneratedPath(normalizedPath)) {
+  if (isGeneratedPath(filePath)) {
     rank += 8;
   }
   const pathTermMatches = searchTerms(searchText).filter((term) => lower.includes(term)).length;
@@ -324,7 +314,7 @@ export function sourcePathRank(filePath: string, searchText: string): number {
 }
 
 /** Lowercase terms of at least three characters minus stop words: `how the CLI parses args` → `cli`, `parses`, `args`. */
-function searchTerms(searchText: string): string[] {
+export function searchTerms(searchText: string): string[] {
   return (searchText.match(/[A-Za-z0-9_$]+/g) ?? [])
     .map((term) => term.toLowerCase())
     .filter((term) => term.length >= 3 && !SEARCH_STOP_WORDS.has(term));
@@ -406,21 +396,4 @@ function astGrepMatch(match: SyntaxMatch): SourceMatch {
     column: match.column,
     text: compactSourceMatchText(match.lines || match.text),
   };
-}
-
-function appendMatch(
-  matches: SourceMatch[],
-  seen: Set<string>,
-  sourceMatch: SourceMatch,
-  { limit }: { limit: number },
-): void {
-  if (matches.length >= limit) {
-    return;
-  }
-  const key = JSON.stringify([sourceMatch.filePath, sourceMatch.line, sourceMatch.text]);
-  if (seen.has(key)) {
-    return;
-  }
-  seen.add(key);
-  matches.push(sourceMatch);
 }

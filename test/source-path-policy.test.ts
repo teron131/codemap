@@ -42,7 +42,7 @@ describe("source path policy", () => {
     expect(isGeneratedPath("src/generatedness/api.ts")).toBe(false);
   });
 
-  it("matches backend metric paths to the supported current-tree source surface", () => {
+  it("matches backend metric paths to the supported working-tree source surface", () => {
     expect(isSupportedSourcePath("src/app.ts")).toBe(true);
     expect(isSupportedSourcePath("src/app.py")).toBe(true);
     expect(isSupportedSourcePath("src/product/target/system.ts")).toBe(true);

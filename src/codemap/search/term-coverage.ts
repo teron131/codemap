@@ -1,4 +1,4 @@
-/** Answers multi-term queries from the current tree, ranking files by term coverage and where the terms meet. */
+/** Answers multi-term queries from the working tree, ranking files by term coverage and where the terms meet. */
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
@@ -11,48 +11,48 @@ import {
 } from "./ripgrep.js";
 import {
   isImplementationSourcePath,
-  SEARCH_STOP_WORDS,
+  searchTerms,
   type SourceMatch,
   sourcePathRank,
 } from "./source.js";
 
-type FallbackCandidate = {
+type Candidate = {
   filePath: string;
   matchedTerms: string[];
   sourceMatchedTerms: string[];
   pathRank: number;
 };
 
-type FallbackAnchor = Pick<SourceMatch, "column" | "line" | "text">;
+type Anchor = Pick<SourceMatch, "column" | "line" | "text">;
 
 /** Read evidence for one candidate; `span` counts lines in its narrowest cohesive window and is infinite without one. */
-type InspectedFallbackCandidate = {
-  candidate: FallbackCandidate;
-  anchors: FallbackAnchor[];
+type InspectedCandidate = {
+  candidate: Candidate;
+  anchors: Anchor[];
   span: number;
 };
 
 type PartialCandidateRanking = {
-  candidates: InspectedFallbackCandidate[];
+  candidates: InspectedCandidate[];
   bounded: boolean;
 };
 
-type FallbackLineWindow = {
+type LineWindow = {
   endIndex: number;
   startIndex: number;
 };
 
-type SourceFallbackCandidate = Pick<FallbackCandidate, "filePath" | "matchedTerms"> & {
-  anchors: FallbackAnchor[];
+type ShownCandidate = Pick<Candidate, "filePath" | "matchedTerms"> & {
+  anchors: Anchor[];
 };
 
 /**
- * `fullCoverage` marks the decisive answer described on `sourceFallbackMatches`, and `hasPathSupplementedCoverage` means some file covers every term only because its path supplies a term its content lacks.
+ * `fullCoverage` marks the decisive answer described on `termCoverageSearch`, and `hasPathSupplementedCoverage` means some file covers every term only because its path supplies a term its content lacks.
  *
  * A `truncated` scan status covers both a cut ripgrep collection and a partial ranking cut by its file bound.
  */
-export type SourceFallbackSearch = {
-  candidates: SourceFallbackCandidate[];
+export type TermCoverageSearch = {
+  candidates: ShownCandidate[];
   fullCoverage: boolean;
   hasPathSupplementedCoverage: boolean;
   queryTerms: string[];
@@ -60,31 +60,31 @@ export type SourceFallbackSearch = {
   totalCandidates: number;
 };
 
-type FallbackQueryTerm = {
+type QueryTerm = {
   label: string;
   variants: string[];
 };
 
-type FallbackTermCollection = RipgrepFileCollection & {
-  term: FallbackQueryTerm;
+type TermCollection = RipgrepFileCollection & {
+  term: QueryTerm;
 };
 
-const FALLBACK_TERM_LIMIT = 8;
-const FALLBACK_ANCHORS_PER_CANDIDATE = 2;
-const FALLBACK_COHESION_LINE_LIMIT = 50;
-const FALLBACK_RANKED_FILE_LIMIT = 1_000;
+const TERM_LIMIT = 8;
+const ANCHORS_PER_CANDIDATE = 2;
+const COHESION_LINE_LIMIT = 50;
+const RANKED_FILE_LIMIT = 1_000;
 const FAST_PATH_CANDIDATE_LIMIT = 3;
 const MULTI_TERM_CANDIDATE_LIMIT = 8;
 const SINGLE_TERM_CANDIDATE_LIMIT = 2;
 
 /**
- * Decides between a decisive current-tree answer and ranked partial candidates.
+ * Decides between a decisive working-tree answer and ranked partial candidates.
  * 1. Collect the files containing each of the first eight terms, from implementation source unless none matches there.
  * 2. Rank files by term coverage, counting terms their path supplies, then path usefulness, then content coverage.
  * 3. Decisive answer: when a completed scan finds every term of a multi-term query of at most eight terms in some files' content, take the single file whose path also names every term, or up to three such files when no file relies on its path; each must hold its terms within a 50-line cohesive window.
  * 4. Otherwise rank the strongest coverage tier by cohesion through `rankPartialCandidates`.
  */
-export function sourceFallbackMatches(
+export function termCoverageSearch(
   root: string,
   searchText: string,
   {
@@ -94,9 +94,9 @@ export function sourceFallbackMatches(
     includeTests?: boolean;
     limit: number;
   },
-): SourceFallbackSearch {
-  const queryTerms = fallbackQueryTerms(searchText);
-  const scannedTerms = queryTerms.slice(0, FALLBACK_TERM_LIMIT);
+): TermCoverageSearch {
+  const queryTerms = parseQueryTerms(searchText);
+  const scannedTerms = queryTerms.slice(0, TERM_LIMIT);
   if (scannedTerms.length === 0 || limit <= 0) {
     return {
       candidates: [],
@@ -107,7 +107,7 @@ export function sourceFallbackMatches(
       totalCandidates: 0,
     };
   }
-  const implementationCollections = collectFallbackFiles(root, scannedTerms, {
+  const implementationCollections = collectTermFiles(root, scannedTerms, {
     includeTests,
     sourceOnly: true,
   });
@@ -116,7 +116,7 @@ export function sourceFallbackMatches(
   );
   const collections = hasImplementationCandidate
     ? implementationCollections
-    : collectFallbackFiles(root, scannedTerms, {
+    : collectTermFiles(root, scannedTerms, {
         includeTests,
         sourceOnly: false,
       });
@@ -125,7 +125,7 @@ export function sourceFallbackMatches(
     : collections.some((collection) => collection.scanStatus === "truncated")
       ? "truncated"
       : "complete";
-  const allCandidates = fallbackCandidates(scannedTerms, collections, searchText);
+  const allCandidates = coverageCandidates(scannedTerms, collections, searchText);
   const strongestCoverage = allCandidates[0]?.matchedTerms.length ?? 0;
   const strongestCandidates = allCandidates.filter(
     (candidate) => candidate.matchedTerms.length === strongestCoverage,
@@ -145,10 +145,10 @@ export function sourceFallbackMatches(
     completeSourceCandidates.length > 0;
   const pathAlignedSourceCandidates = hasCompleteSourceCoverage
     ? completeSourceCandidates.filter((candidate) =>
-        scannedTerms.every((term) => fallbackTermMatchesPath(candidate.filePath, term)),
+        scannedTerms.every((term) => termMatchesPath(candidate.filePath, term)),
       )
     : [];
-  let fastPathCandidates: FallbackCandidate[] = [];
+  let fastPathCandidates: Candidate[] = [];
   if (pathAlignedSourceCandidates.length === 1) {
     fastPathCandidates = pathAlignedSourceCandidates;
   } else if (
@@ -162,8 +162,8 @@ export function sourceFallbackMatches(
     scannedTerms.length === 1
       ? Math.min(limit, SINGLE_TERM_CANDIDATE_LIMIT)
       : Math.min(limit, MULTI_TERM_CANDIDATE_LIMIT);
-  const cohesiveCandidates = inspectFallbackCandidates(root, fastPathCandidates, scannedTerms)
-    .filter((inspected) => inspected.span <= FALLBACK_COHESION_LINE_LIMIT)
+  const cohesiveCandidates = inspectCandidates(root, fastPathCandidates, scannedTerms)
+    .filter((inspected) => inspected.span <= COHESION_LINE_LIMIT)
     .sort(compareInspectedCandidates);
   const fullCoverage = cohesiveCandidates.length > 0;
   const selection = fullCoverage
@@ -193,35 +193,32 @@ export function sourceFallbackMatches(
  */
 function rankPartialCandidates(
   root: string,
-  candidates: FallbackCandidate[],
-  terms: FallbackQueryTerm[],
+  candidates: Candidate[],
+  terms: QueryTerm[],
   limit: number,
 ): PartialCandidateRanking {
-  const inspected: InspectedFallbackCandidate[] = [];
+  const inspected: InspectedCandidate[] = [];
   let bounded = false;
   let groupStart = 0;
   while (groupStart < candidates.length && inspected.length < limit && !bounded) {
     const first = candidates[groupStart]!;
     let groupEnd = groupStart + 1;
-    while (
-      groupEnd < candidates.length &&
-      compareFallbackEvidence(first, candidates[groupEnd]!) === 0
-    ) {
+    while (groupEnd < candidates.length && compareCoverage(first, candidates[groupEnd]!) === 0) {
       groupEnd += 1;
     }
     const group = candidates.slice(groupStart, groupEnd);
     const rankable = first.sourceMatchedTerms.length >= 2;
-    const readLimit = (rankable ? FALLBACK_RANKED_FILE_LIMIT : limit) - inspected.length;
+    const readLimit = (rankable ? RANKED_FILE_LIMIT : limit) - inspected.length;
     bounded = rankable && group.length > readLimit;
-    inspected.push(...inspectFallbackCandidates(root, group.slice(0, readLimit), terms));
+    inspected.push(...inspectCandidates(root, group.slice(0, readLimit), terms));
     groupStart = groupEnd;
   }
   return { candidates: inspected.sort(compareInspectedCandidates).slice(0, limit), bounded };
 }
 
-function collectFallbackFiles(
+function collectTermFiles(
   root: string,
-  terms: FallbackQueryTerm[],
+  terms: QueryTerm[],
   {
     includeTests,
     sourceOnly,
@@ -229,7 +226,7 @@ function collectFallbackFiles(
     includeTests: boolean;
     sourceOnly: boolean;
   },
-): FallbackTermCollection[] {
+): TermCollection[] {
   return terms.map((term) => {
     const collection = ripgrepFilesWithMatches(root, term.variants, {
       includeTests,
@@ -246,11 +243,11 @@ function collectFallbackFiles(
 }
 
 /** Composes and ranks file candidates from per-term path collections without reading their content. */
-function fallbackCandidates(
-  terms: FallbackQueryTerm[],
-  collections: FallbackTermCollection[],
+function coverageCandidates(
+  terms: QueryTerm[],
+  collections: TermCollection[],
   searchText: string,
-): FallbackCandidate[] {
+): Candidate[] {
   const termLabelsByFile = new Map<string, Set<string>>();
   for (const { filePaths, term } of collections) {
     for (const filePath of filePaths) {
@@ -265,7 +262,7 @@ function fallbackCandidates(
         .filter((term) => matchedLabels.has(term.label))
         .map((term) => term.label);
       const matchedTerms = terms
-        .filter((term) => matchedLabels.has(term.label) || fallbackTermMatchesPath(filePath, term))
+        .filter((term) => matchedLabels.has(term.label) || termMatchesPath(filePath, term))
         .map((term) => term.label);
       return {
         filePath,
@@ -275,17 +272,16 @@ function fallbackCandidates(
       };
     })
     .sort(
-      (left, right) =>
-        compareFallbackEvidence(left, right) || compareText(left.filePath, right.filePath),
+      (left, right) => compareCoverage(left, right) || compareText(left.filePath, right.filePath),
     );
 }
 
 /** Reads each candidate once for its narrowest cohesive window and the display anchors inside it. */
-function inspectFallbackCandidates(
+function inspectCandidates(
   root: string,
-  candidates: FallbackCandidate[],
-  terms: FallbackQueryTerm[],
-): InspectedFallbackCandidate[] {
+  candidates: Candidate[],
+  terms: QueryTerm[],
+): InspectedCandidate[] {
   return candidates.map((candidate) => {
     let source: string;
     try {
@@ -295,28 +291,28 @@ function inspectFallbackCandidates(
     }
     const lines = source.split(/\r?\n/);
     const matchedLabels = new Set(candidate.sourceMatchedTerms);
-    const window = fallbackCohesionWindow(lines, terms, matchedLabels);
+    const window = cohesionWindow(lines, terms, matchedLabels);
     return {
       candidate,
-      anchors: fallbackAnchors(lines, terms, matchedLabels, window ?? undefined),
+      anchors: candidateAnchors(lines, terms, matchedLabels, window ?? undefined),
       span: window === null ? Number.POSITIVE_INFINITY : window.endIndex - window.startIndex + 1,
     };
   });
 }
 
 /** Finds the narrowest source window holding every matched term where at least two terms share a line. */
-function fallbackCohesionWindow(
+function cohesionWindow(
   lines: string[],
-  terms: FallbackQueryTerm[],
+  terms: QueryTerm[],
   matchedLabels: Set<string>,
-): FallbackLineWindow | null {
+): LineWindow | null {
   const matchedTerms = terms.filter((term) => matchedLabels.has(term.label));
   if (matchedTerms.length < 2) {
     return null;
   }
   const lastSeenLines = new Array<number>(matchedTerms.length).fill(-1);
   let latestDenseLine = -1;
-  let narrowestWindow: FallbackLineWindow | null = null;
+  let narrowestWindow: LineWindow | null = null;
   for (const [lineIndex, line] of lines.entries()) {
     const lowerLine = line.toLowerCase();
     let lineTermCount = 0;
@@ -345,25 +341,25 @@ function fallbackCohesionWindow(
   return narrowestWindow;
 }
 
-function fallbackAnchors(
+function candidateAnchors(
   lines: string[],
-  terms: FallbackQueryTerm[],
+  terms: QueryTerm[],
   matchedLabels: Set<string>,
-  window?: FallbackLineWindow,
-): FallbackAnchor[] {
-  const anchors: FallbackAnchor[] = [];
+  window?: LineWindow,
+): Anchor[] {
+  const anchors: Anchor[] = [];
   const seenLines = new Set<number>();
   for (const term of terms) {
     if (!matchedLabels.has(term.label)) {
       continue;
     }
-    const anchor = firstFallbackAnchor(lines, term, window);
+    const anchor = firstAnchor(lines, term, window);
     if (anchor === null || seenLines.has(anchor.line)) {
       continue;
     }
     anchors.push(anchor);
     seenLines.add(anchor.line);
-    if (anchors.length >= FALLBACK_ANCHORS_PER_CANDIDATE) {
+    if (anchors.length >= ANCHORS_PER_CANDIDATE) {
       break;
     }
   }
@@ -373,11 +369,7 @@ function fallbackAnchors(
   );
 }
 
-function firstFallbackAnchor(
-  lines: string[],
-  term: FallbackQueryTerm,
-  window?: FallbackLineWindow,
-): FallbackAnchor | null {
+function firstAnchor(lines: string[], term: QueryTerm, window?: LineWindow): Anchor | null {
   const startIndex = window?.startIndex ?? 0;
   const endIndex = Math.min(window?.endIndex ?? lines.length - 1, lines.length - 1);
   for (let index = startIndex; index <= endIndex; index += 1) {
@@ -398,13 +390,13 @@ function firstFallbackAnchor(
   return null;
 }
 
-function fallbackTermMatchesPath(filePath: string, term: FallbackQueryTerm): boolean {
+function termMatchesPath(filePath: string, term: QueryTerm): boolean {
   const lowerPath = filePath.toLowerCase();
   return term.variants.some((variant) => lowerPath.includes(variant));
 }
 
 /** Ranks broader term coverage before ordinary source usefulness and content-backed coverage. */
-function compareFallbackEvidence(left: FallbackCandidate, right: FallbackCandidate): number {
+function compareCoverage(left: Candidate, right: Candidate): number {
   return (
     right.matchedTerms.length - left.matchedTerms.length ||
     left.pathRank - right.pathRank ||
@@ -412,52 +404,42 @@ function compareFallbackEvidence(left: FallbackCandidate, right: FallbackCandida
   );
 }
 
-function compareInspectedCandidates(
-  left: InspectedFallbackCandidate,
-  right: InspectedFallbackCandidate,
-): number {
+function compareInspectedCandidates(left: InspectedCandidate, right: InspectedCandidate): number {
   return (
-    compareFallbackEvidence(left.candidate, right.candidate) ||
+    compareCoverage(left.candidate, right.candidate) ||
     (left.span === right.span ? 0 : left.span < right.span ? -1 : 1) ||
     compareText(left.candidate.filePath, right.candidate.filePath)
   );
 }
 
-function fallbackQueryTerms(searchText: string): FallbackQueryTerm[] {
-  const terms: FallbackQueryTerm[] = [];
-  const seen = new Set<string>();
-  for (const token of searchText.match(/[A-Za-z0-9_$]+/g) ?? []) {
-    const variants = fallbackTermVariants(token);
+function parseQueryTerms(searchText: string): QueryTerm[] {
+  const terms = new Map<string, QueryTerm>();
+  for (const term of searchTerms(searchText)) {
+    const variants = termVariants(term);
     const label = variants[0];
-    if (label === undefined || seen.has(label)) {
-      continue;
+    if (!terms.has(label)) {
+      terms.set(label, { label, variants });
     }
-    seen.add(label);
-    terms.push({ label, variants });
   }
-  return terms;
+  return [...terms.values()];
 }
 
 /** Crude plural stripping for substring search: `entries` → `entry`, `classes` → `class`, `files` → `file`. The first variant labels the term. */
-function fallbackTermVariants(token: string): string[] {
-  const normalized = token.trim().toLowerCase();
-  if (normalized.length < 3 || SEARCH_STOP_WORDS.has(normalized)) {
-    return [];
+function termVariants(term: string): [string, ...string[]] {
+  if (term.endsWith("ies") && term.length > 4) {
+    return [`${term.slice(0, -3)}y`, term];
   }
-  if (normalized.endsWith("ies") && normalized.length > 4) {
-    return [`${normalized.slice(0, -3)}y`, normalized];
-  }
-  if (/[cs]hes$|xes$|zes$|ses$/.test(normalized) && normalized.length > 4) {
-    return [normalized.slice(0, -2), normalized];
+  if (/[cs]hes$|xes$|zes$|ses$/.test(term) && term.length > 4) {
+    return [term.slice(0, -2), term];
   }
   if (
-    normalized.endsWith("s") &&
-    !normalized.endsWith("ss") &&
-    !normalized.endsWith("is") &&
-    !normalized.endsWith("us") &&
-    normalized.length > 4
+    term.endsWith("s") &&
+    !term.endsWith("ss") &&
+    !term.endsWith("is") &&
+    !term.endsWith("us") &&
+    term.length > 4
   ) {
-    return [normalized.slice(0, -1), normalized];
+    return [term.slice(0, -1), term];
   }
-  return [normalized];
+  return [term];
 }

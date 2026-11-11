@@ -1,14 +1,14 @@
-/** Builds current-tree graph and scanner evidence used by inspection profiles. */
+/** Builds working-tree graph and scanner evidence used by inspection profiles. */
 import path from "node:path";
 
 import {
-  type DenseFileRow,
   fileProfileRow,
+  type FileProfileRow,
   type FunctionLengthItem,
   functionLengthSection,
 } from "../signals/index.js";
-import { runImportMap, type ScanEntry } from "../source/extraction/index.js";
-import { buildCurrentTreeGraph, type GraphNode, type GraphPayload } from "../source/graph/index.js";
+import { type InventoryEntry, runImportMap } from "../source/extraction/index.js";
+import { buildWorkingTreeGraph, type GraphNode, type GraphPayload } from "../source/graph/index.js";
 import { type FileMetrics, scanFile } from "../source/scanner/index.js";
 import { uniqueStrings } from "../text-utils.js";
 import { inspectEmitPaths } from "./targets.js";
@@ -24,27 +24,28 @@ export type VariableDefinitionRow = {
 /** Scanner rows for the files one inspection emits, ranked once and filtered per rendered file. */
 export type InspectMetrics = {
   functionLengths: FunctionLengthItem[];
-  fileProfiles: DenseFileRow[];
+  fileProfiles: FileProfileRow[];
   variableDefinitions: VariableDefinitionRow[];
 };
 
-export function currentTreeInspectGraph(
+/** Takes a normalized target. */
+export function workingTreeInspectGraph(
   root: string,
-  rawTarget: string,
-  scan: ScanEntry[],
+  target: string,
+  inventory: InventoryEntry[],
 ): [GraphPayload, InspectMetrics] {
-  const importResult = runImportMap(root, scan);
+  const importResult = runImportMap(root, inventory);
   const fileMetricsByPath = importResult.fileMetrics;
   const emitPaths = inspectEmitPaths(
     root,
-    rawTarget,
-    scan,
+    target,
+    inventory,
     importResult.importMap,
     fileMetricsByPath,
   );
   const structureFiles =
-    emitPaths === null ? scan : scan.filter((item) => emitPaths.has(item.path));
-  const graph = buildCurrentTreeGraph(root, scan, importResult, { emitPaths });
+    emitPaths === null ? inventory : inventory.filter((item) => emitPaths.has(item.path));
+  const graph = buildWorkingTreeGraph(root, inventory, importResult, { emitPaths });
   return [graph, metricsForFiles(root, structureFiles, fileMetricsByPath)];
 }
 
@@ -72,10 +73,10 @@ export function importBoundaryRows(
   return [uniqueStrings(incoming).slice(0, limit), uniqueStrings(outgoing).slice(0, limit)];
 }
 
-/** Fills a zero `lines` count from the scan entry, mutating the cached metrics record. */
+/** Fills a zero `lines` count from the inventory entry, mutating the cached metrics record. */
 export function metricsForFiles(
   root: string,
-  files: ScanEntry[],
+  files: InventoryEntry[],
   fileMetricsByPath: Record<string, FileMetrics | undefined>,
 ): InspectMetrics {
   const scanned = files.map((item) => {
@@ -91,7 +92,7 @@ export function metricsForFiles(
       .items,
     fileProfiles: scanned.map((metrics) => fileProfileRow(metrics)),
     variableDefinitions: scanned.flatMap((metrics) =>
-      metrics.variableSignals.map((variable) => ({
+      metrics.variableDefinitions.map((variable) => ({
         name: variable.name,
         identifier: variable.identifier,
         file: metrics.relPath,

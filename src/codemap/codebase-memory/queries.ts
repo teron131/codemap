@@ -1,4 +1,4 @@
-/** Backend diagnostics and Cypher queries. Each operation rebuilds the project index first and returns null when the provider fails. */
+/** Backend diagnostics and Cypher queries. Each operation rebuilds the project index first and returns null when the backend fails. */
 import { performance } from "node:perf_hooks";
 
 import { arrayValue, recordValue } from "../json-utils.js";
@@ -62,7 +62,7 @@ export function codebaseMemoryQuery(
   return codebaseMemoryQueryWithProject(root, query, maxRows)?.value ?? null;
 }
 
-/** Retries once when the provider times out or returns no response; `freshness` is `partial` when indexing skipped files. */
+/** Retries once when the backend times out or returns no response; `freshness` is `partial` when indexing skipped files. */
 export function codebaseMemoryQueryWithProject(
   root: string,
   query: string,
@@ -91,7 +91,7 @@ export function codebaseMemoryQueryWithProject(
   });
 }
 
-/** Null when the payload is not tabular or lacks a required column, so callers can tell a provider mismatch from an empty result. */
+/** Null when the payload is not tabular or lacks a required column, so callers can tell a backend mismatch from an empty result. */
 export function codebaseMemoryQueryRows(
   value: unknown,
   requiredColumns: string[] = [],

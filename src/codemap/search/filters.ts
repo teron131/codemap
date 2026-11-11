@@ -1,4 +1,36 @@
-/** Owns shared text and glob filter semantics for search output paths. */
+/** The `--graph` filter set and the text and glob matching both graph lanes apply to it. */
+
+/** Filters the backend graph lane and its working-tree fallback both honor. */
+export type GraphSearchFilters = {
+  label?: string;
+  namePattern?: string;
+  qnPattern?: string;
+  filePattern?: string;
+  relationship?: string;
+  minDegree?: number;
+  maxDegree?: number;
+  excludeEntryPoints?: boolean;
+  offset?: number;
+};
+
+export type GraphSearchOptions = GraphSearchFilters & { includeTests?: boolean };
+
+const GRAPH_FILTER_KEYS = [
+  "label",
+  "namePattern",
+  "qnPattern",
+  "filePattern",
+  "relationship",
+  "minDegree",
+  "maxDegree",
+  "excludeEntryPoints",
+  "offset",
+] as const satisfies readonly (keyof GraphSearchFilters)[];
+
+/** An unset flag and an explicit `false` both count as no filter. */
+export function hasGraphFilters(filters: GraphSearchFilters): boolean {
+  return GRAPH_FILTER_KEYS.some((key) => filters[key] !== undefined && filters[key] !== false);
+}
 
 export type TextFilterOptions = {
   exact?: boolean;

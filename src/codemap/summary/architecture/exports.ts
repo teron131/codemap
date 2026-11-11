@@ -1,30 +1,25 @@
 /** Selects and compresses the public export surfaces that best reveal repository capabilities. */
 
-import { readFileSync } from "node:fs";
 import path from "node:path";
 
-import { stringField } from "../../json-utils.js";
-import { type FileMetrics, isTestPath } from "../../source/scanner/index.js";
+import { isWithinDirectory, pathDepth } from "../../path-utils.js";
+import { isTestPath } from "../../source/scanner/index.js";
 import { compareText, extentSamples, uniqueStrings } from "../../text-utils.js";
-import type { ExportSurface } from "../schema.js";
+import type { ExposedModule, PublicSurface } from "../schema.js";
+import { type ExportGroup, exportGroups } from "./export-resolution.js";
 import { isConventionalSurface, type SourcePackage } from "./packages.js";
 import type { RelationshipRow } from "./relationships.js";
-import { filePreview, type SourceContext } from "./source-context.js";
+import { fileDescription, type SourceContext } from "./source-context.js";
 import type { StructuralSummary } from "./structure.js";
 
-type ExportGroup = {
-  origin: string;
-  names: string[];
-};
-
-type ExportSurfaceCandidate = {
+type SurfaceCandidate = {
   file: string;
   groups: ExportGroup[];
   declared: boolean;
   fanIn: number;
 };
 
-type ExportCapabilityCandidate = {
+type ExposedModuleCandidate = {
   label: string;
   origins: Set<string>;
   names: Set<string>;
@@ -36,14 +31,14 @@ type ExportCapabilityCandidate = {
 /**
  * Selects the public surfaces the summary presents and resolves their directly exposed modules.
  *
- * Structural signal targets focus the selection; without them, sampled package roots stand in, and the repository root is the last resort.
+ * Structural role targets focus the selection; without them, sampled package roots stand in, and the repository root is the last resort.
  * Each focus contributes at most its entry, most-imported, and broadest surface, so wide workspaces stay bounded without enumerating every barrel.
  */
 export function publicExportSurfaces(
   source: SourceContext,
   structural: StructuralSummary,
   relationships: RelationshipRow[],
-): ExportSurface[] {
+): PublicSurface[] {
   const declared = new Set(structural.packages.flatMap((sourcePackage) => sourcePackage.surfaces));
   const surfaces = new Set(declared);
   for (const metrics of source.files) {
@@ -53,9 +48,9 @@ export function publicExportSurfaces(
   }
   const fanIn = importFanIn(relationships);
   const candidates = [...surfaces]
-    .map((file): ExportSurfaceCandidate => ({
+    .map((file): SurfaceCandidate => ({
       file,
-      groups: exportGroups(resolvedExports(source, file, new Set())),
+      groups: exportGroups(source, file),
       declared: declared.has(file),
       fanIn: fanIn.get(file) ?? 0,
     }))
@@ -65,25 +60,22 @@ export function publicExportSurfaces(
   const focusPaths = structuralFocus.length > 0 ? structuralFocus : fallbackFocus;
   const selectedCandidates = selectExportSurfaceCandidates(
     candidates,
-    focusPaths.some((focus) => candidates.some((candidate) => isWithin(candidate.file, focus)))
+    focusPaths.some((focus) =>
+      candidates.some((candidate) => isWithinDirectory(candidate.file, focus)),
+    )
       ? focusPaths
       : [""],
   );
   return projectExportSurfaces(selectedCandidates, source, fanIn, structural.packages);
 }
 
-/** Counts how many current-tree source files import each public module. */
+/** Counts how many working-tree source files import each public module. */
 function importFanIn(relationships: RelationshipRow[]): Map<string, number> {
   const importers = new Map<string, Set<string>>();
   for (const row of relationships) {
-    const source = stringField(row.source);
-    const target = stringField(row.target);
-    if (source === null || target === null) {
-      continue;
-    }
-    const importerFiles = importers.get(target) ?? new Set<string>();
-    importerFiles.add(source);
-    importers.set(target, importerFiles);
+    const importerFiles = importers.get(row.target) ?? new Set<string>();
+    importerFiles.add(row.source);
+    importers.set(row.target, importerFiles);
   }
   return new Map([...importers].map(([file, importerFiles]) => [file, importerFiles.size]));
 }
@@ -91,9 +83,9 @@ function importFanIn(relationships: RelationshipRow[]): Map<string, number> {
 /** Expands the structural skeleton's counted examples into concrete public-API focus paths. */
 function exportFocusPaths(structural: StructuralSummary): string[] {
   const paths: string[] = [];
-  for (const signal of structural.signals) {
-    paths.push(signal.source);
-    for (const target of signal.targets) {
+  for (const role of structural.roles) {
+    paths.push(role.boundary);
+    for (const target of role.related) {
       if (target.count === null) {
         paths.push(target.label);
         continue;
@@ -102,7 +94,7 @@ function exportFocusPaths(structural: StructuralSummary): string[] {
       paths.push(...target.examples.map((example) => `${parent}/${example}`));
     }
   }
-  paths.push(...structural.outlines.map((outline) => outline.source));
+  paths.push(...structural.outlines.map((outline) => outline.boundary));
   return uniqueStrings(paths);
 }
 
@@ -132,19 +124,19 @@ function sampledPackageRoots(packages: SourcePackage[]): string[] {
 
 /** Chooses role winners within each structural focus instead of enumerating every surface. */
 function selectExportSurfaceCandidates(
-  candidates: ExportSurfaceCandidate[],
+  candidates: SurfaceCandidate[],
   focusPaths: string[],
-): ExportSurfaceCandidate[] {
-  const selectedCandidates: ExportSurfaceCandidate[] = [];
+): SurfaceCandidate[] {
+  const selectedCandidates: SurfaceCandidate[] = [];
   const seen = new Set<string>();
-  const add = (candidate: ExportSurfaceCandidate | undefined): void => {
+  const add = (candidate: SurfaceCandidate | undefined): void => {
     if (candidate !== undefined && !seen.has(candidate.file)) {
       seen.add(candidate.file);
       selectedCandidates.push(candidate);
     }
   };
   for (const focus of focusPaths) {
-    const scoped = candidates.filter((candidate) => isWithin(candidate.file, focus));
+    const scoped = candidates.filter((candidate) => isWithinDirectory(candidate.file, focus));
     if (scoped.length === 0) {
       continue;
     }
@@ -155,22 +147,14 @@ function selectExportSurfaceCandidates(
     }
     add(shallowBroadSurface(scoped, focus));
   }
-  if (selectedCandidates.length === 0 && candidates.length > 0) {
-    add([...candidates].sort((left, right) => compareEntrySurface(left, right, ""))[0]);
-    const central = [...candidates].sort(compareCentralSurface)[0];
-    if ((central?.fanIn ?? 0) > 0) {
-      add(central);
-    }
-    add(shallowBroadSurface(candidates, ""));
-  }
   return selectedCandidates;
 }
 
 /** Keeps aggregation near the entry layer rather than a deep utility barrel. */
 function shallowBroadSurface(
-  candidates: ExportSurfaceCandidate[],
+  candidates: SurfaceCandidate[],
   focus: string,
-): ExportSurfaceCandidate | undefined {
+): SurfaceCandidate | undefined {
   const shallowest = Math.min(
     ...candidates.map((candidate) => relativePathDepth(candidate.file, focus)),
   );
@@ -181,8 +165,8 @@ function shallowBroadSurface(
 
 /** Prefers the shallowest declared surface as the focus's natural entry. */
 function compareEntrySurface(
-  left: ExportSurfaceCandidate,
-  right: ExportSurfaceCandidate,
+  left: SurfaceCandidate,
+  right: SurfaceCandidate,
   focus: string,
 ): number {
   return (
@@ -193,11 +177,8 @@ function compareEntrySurface(
   );
 }
 
-/** Prefers the surface imported by the widest set of current-tree files. */
-function compareCentralSurface(
-  left: ExportSurfaceCandidate,
-  right: ExportSurfaceCandidate,
-): number {
+/** Prefers the surface imported by the widest set of working-tree files. */
+function compareCentralSurface(left: SurfaceCandidate, right: SurfaceCandidate): number {
   return (
     right.fanIn - left.fanIn ||
     Number(!left.declared) - Number(!right.declared) ||
@@ -207,7 +188,7 @@ function compareCentralSurface(
 }
 
 /** Prefers the surface aggregating the most distinct defining modules, then public names. */
-function compareBroadSurface(left: ExportSurfaceCandidate, right: ExportSurfaceCandidate): number {
+function compareBroadSurface(left: SurfaceCandidate, right: SurfaceCandidate): number {
   return (
     right.groups.length - left.groups.length ||
     exportNameCount(right) - exportNameCount(left) ||
@@ -218,7 +199,7 @@ function compareBroadSurface(left: ExportSurfaceCandidate, right: ExportSurfaceC
 }
 
 /** Counts resolved names only as a tie-break for equally broad origin coverage. */
-function exportNameCount(surface: ExportSurfaceCandidate): number {
+function exportNameCount(surface: SurfaceCandidate): number {
   return surface.groups.reduce((total, group) => total + group.names.length, 0);
 }
 
@@ -226,20 +207,15 @@ function relativePathDepth(file: string, focus: string): number {
   return pathDepth(focus ? path.posix.relative(focus, file) : file);
 }
 
-/** An empty focus contains every file. */
-function isWithin(file: string, focus: string): boolean {
-  return !focus || file === focus || file.startsWith(`${focus}/`);
-}
-
 /** Projects selected surfaces to one directly exposed module level; a defining module appears only under the first selected surface exposing it. */
 function projectExportSurfaces(
-  candidates: ExportSurfaceCandidate[],
+  candidates: SurfaceCandidate[],
   source: SourceContext,
   fanIn: Map<string, number>,
   packages: SourcePackage[],
-): ExportSurface[] {
+): PublicSurface[] {
   const seenOrigins = new Set<string>();
-  const surfaces: ExportSurface[] = [];
+  const surfaces: PublicSurface[] = [];
   for (const candidate of candidates) {
     const groups = candidate.groups.filter((group) => {
       if (group.origin === candidate.file || seenOrigins.has(group.origin)) {
@@ -248,33 +224,26 @@ function projectExportSurfaces(
       seenOrigins.add(group.origin);
       return true;
     });
-    const capabilities = immediateExportCapabilities(
-      candidate.file,
-      groups.filter((group) => group.origin !== candidate.file),
-      source,
-      fanIn,
-      packages,
-    );
     surfaces.push({
       file: candidate.file,
-      description: filePreview(source, candidate.file),
-      capabilities,
+      description: fileDescription(source, candidate.file),
+      modules: exposedModules(candidate.file, groups, source, fanIn, packages),
     });
   }
   return surfaces;
 }
 
 /** Selects directly exposed module groups on the structural Pareto frontier. */
-function immediateExportCapabilities(
+function exposedModules(
   surface: string,
   groups: ExportGroup[],
   source: SourceContext,
   fanIn: Map<string, number>,
   packages: SourcePackage[],
-): ExportSurface["capabilities"] {
-  const candidates = new Map<string, ExportCapabilityCandidate>();
+): ExposedModule[] {
+  const candidates = new Map<string, ExposedModuleCandidate>();
   for (const group of groups) {
-    const label = immediateCapabilityLabel(surface, group.origin, source.filePaths, packages);
+    const label = exposedModuleLabel(surface, group.origin, source.filePaths, packages);
     if (label === null) {
       continue;
     }
@@ -298,16 +267,16 @@ function immediateExportCapabilities(
     );
     candidates.set(label, existing);
   }
-  const capabilityCandidates = [...candidates.values()];
+  const moduleCandidates = [...candidates.values()];
   const definingExports = new Map(
-    capabilityCandidates.map((candidate) => [
+    moduleCandidates.map((candidate) => [
       candidate,
       candidate.origins.size === 1
         ? roleMatchedExportNames(candidate.label, [...candidate.names])
         : [],
     ]),
   );
-  const namedCandidates = capabilityCandidates.filter(
+  const namedCandidates = moduleCandidates.filter(
     (candidate) =>
       candidate.origins.size === 1 && (definingExports.get(candidate)?.length ?? 0) > 0,
   );
@@ -315,10 +284,10 @@ function immediateExportCapabilities(
     ...upperOutliers(namedCandidates, (candidate) => candidate.fanIn),
     ...upperOutliers(namedCandidates, (candidate) => candidate.implementation),
   ]);
-  const selectedCandidates = capabilityCandidates.filter(
+  const selectedCandidates = moduleCandidates.filter(
     (candidate) =>
       roleOutliers.has(candidate) ||
-      !capabilityCandidates.some(
+      !moduleCandidates.some(
         (other) =>
           other !== candidate &&
           other.fanIn >= candidate.fanIn &&
@@ -416,7 +385,7 @@ function commonPrefixLength(left: string, right: string): number {
 }
 
 /** Collapses a defining module to one child of its public surface or owning package: from `src/index.ts`, `src/search/source.ts` → `search` and `src/cli.ts` → `cli`. Unresolved relative and test origins yield null. */
-function immediateCapabilityLabel(
+function exposedModuleLabel(
   surface: string,
   origin: string,
   filePaths: Set<string>,
@@ -452,145 +421,10 @@ function immediateCapabilityLabel(
 
 /** Finds the deepest authored package containing one source file, relying on `packages` arriving deepest first. */
 function owningSourcePackage(file: string, packages: SourcePackage[]): SourcePackage | null {
-  return (
-    packages.find((item) => !item.root || file === item.root || file.startsWith(`${item.root}/`)) ??
-    null
-  );
+  return packages.find((item) => isWithinDirectory(file, item.root)) ?? null;
 }
 
 /** Removes source and declaration suffixes from one immediate module label. */
 function moduleStem(value: string): string {
   return value.replace(/\.d\.[^.]+$/, "").replace(/\.[^.]+$/, "");
-}
-
-/** Groups resolved public names by defining module while preserving discovery order. */
-function exportGroups(resolvedNames: Map<string, string>): ExportGroup[] {
-  const groups = new Map<string, string[]>();
-  for (const [name, origin] of resolvedNames) {
-    groups.set(origin, [...(groups.get(origin) ?? []), name]);
-  }
-  return [...groups].map(([origin, names]) => ({ origin, names }));
-}
-
-/** Maps each name `file` exports to its defining module, following resolvable re-exports with `visiting` guarding cycles. A named re-export from an unresolvable specifier maps to the specifier itself. */
-function resolvedExports(
-  source: SourceContext,
-  file: string,
-  visiting: Set<string>,
-): Map<string, string> {
-  if (visiting.has(file)) {
-    return new Map();
-  }
-  const metrics = source.filesByPath.get(file);
-  if (metrics === undefined) {
-    return new Map();
-  }
-  visiting.add(file);
-  const resolvedNames = new Map<string, string>();
-  const namedReexports = new Set(
-    metrics.typescriptReexports.flatMap(
-      (reexport) => reexport.bindings?.map((binding) => binding.exported) ?? [],
-    ),
-  );
-  for (const name of metrics.exportedNames) {
-    if (!namedReexports.has(name)) {
-      resolvedNames.set(name, file);
-    }
-  }
-  if (file.endsWith("__init__.py")) {
-    for (const [name, origin] of pythonSurfaceExports(source, file, metrics)) {
-      resolvedNames.set(name, origin);
-    }
-  }
-  for (const reexport of metrics.typescriptReexports) {
-    const targets = source.resolver.resolve(path.join(source.root, file), reexport.target);
-    if (targets.length === 0 && reexport.bindings !== null) {
-      for (const binding of reexport.bindings) {
-        resolvedNames.set(binding.exported, reexport.target);
-      }
-      continue;
-    }
-    for (const target of targets) {
-      const nested = resolvedExports(source, target, visiting);
-      if (reexport.bindings === null) {
-        for (const [name, origin] of nested) {
-          if (!resolvedNames.has(name)) {
-            resolvedNames.set(name, origin);
-          }
-        }
-        continue;
-      }
-      for (const binding of reexport.bindings) {
-        const origin =
-          binding.imported === null ? target : (nested.get(binding.imported) ?? target);
-        resolvedNames.set(binding.exported, origin);
-      }
-    }
-  }
-  visiting.delete(file);
-  return resolvedNames;
-}
-
-/** Resolves explicit Python package imports and local definitions to their owning modules by line regex, so only single-line relative `from .x import a, b` statements count and parenthesized imports are skipped. */
-function pythonSurfaceExports(
-  context: SourceContext,
-  file: string,
-  metrics: FileMetrics,
-): Map<string, string> {
-  const filePath = path.join(context.root, file);
-  const resolvedNames = new Map<string, string>();
-  if (metrics.exportedNames.length > 0) {
-    for (const name of metrics.exportedNames) {
-      resolvedNames.set(name, file);
-    }
-  }
-  let source: string;
-  try {
-    source = readFileSync(filePath, "utf8");
-  } catch {
-    return resolvedNames;
-  }
-  for (const match of source.matchAll(/^\s*from\s+(\.[\w.]*)\s+import\s+([^\n]+)/gm)) {
-    const origin = pythonSurfaceImportOrigin(file, match[1] ?? "", context.filePaths);
-    if (origin === null || (match[2] ?? "").trim().startsWith("(")) {
-      continue;
-    }
-    for (const item of (match[2] ?? "").split(",")) {
-      const bindingParts = item.trim().split(/\s+as\s+/);
-      const name = (bindingParts[1] ?? bindingParts[0] ?? "").trim();
-      if (name && name !== "*" && !name.startsWith("_")) {
-        resolvedNames.set(name, origin);
-      }
-    }
-  }
-  for (const match of source.matchAll(/^(?:async\s+def|def|class)\s+([A-Za-z_]\w*)/gm)) {
-    const name = match[1] ?? "";
-    if (name && !name.startsWith("_")) {
-      resolvedNames.set(name, file);
-    }
-  }
-  return resolvedNames;
-}
-
-/** Resolves one relative Python import module to an authored source file. */
-function pythonSurfaceImportOrigin(
-  file: string,
-  rawModule: string,
-  filePaths: Set<string>,
-): string | null {
-  const level = rawModule.match(/^\.+/)?.[0].length ?? 0;
-  if (level === 0) {
-    return null;
-  }
-  const packageParts = path.posix.dirname(file).split("/").filter(Boolean);
-  const moduleParts = rawModule.slice(level).split(".").filter(Boolean);
-  const baseParts = packageParts.slice(0, Math.max(0, packageParts.length - level + 1));
-  const modulePath = [...baseParts, ...moduleParts].join("/");
-  return (
-    [`${modulePath}.py`, `${modulePath}/__init__.py`].find((item) => filePaths.has(item)) ?? null
-  );
-}
-
-function pathDepth(value: string): number {
-  return value.split("/").filter(Boolean).length;
 }

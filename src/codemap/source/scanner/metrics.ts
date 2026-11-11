@@ -13,7 +13,7 @@ type ClassSpan = {
   startLine: number;
 };
 
-export type VariableSignal = {
+export type VariableDefinition = {
   name: string;
   identifier: string;
   startLine: number;
@@ -62,18 +62,13 @@ export type FileMetrics = {
   exportedNames: string[];
   entrypointHint: boolean;
   typescriptImports: TypeScriptImport[];
-  typescriptLocalImportTargets: string[];
   typescriptReexportTargets: string[];
-  typescriptLocalReexportTargets: string[];
   typescriptReexports: TypeScriptReexport[];
-  typescriptExtendsBases: string[];
-  pyImportTargets: string[];
+  pythonImportTargets: string[];
   pythonImports: PythonImport[];
-  pyLocalImportTargets: string[];
-  pyBases: string[];
   functionNames: string[];
   variableNames: string[];
-  variableSignals: VariableSignal[];
+  variableDefinitions: VariableDefinition[];
   functionSpans: FunctionSpan[];
   classSpans: ClassSpan[];
   callSites: SourceCall[];
@@ -105,18 +100,13 @@ export function createFileMetrics({
     exportedNames: [],
     entrypointHint: false,
     typescriptImports: [],
-    typescriptLocalImportTargets: [],
     typescriptReexportTargets: [],
-    typescriptLocalReexportTargets: [],
     typescriptReexports: [],
-    typescriptExtendsBases: [],
-    pyImportTargets: [],
+    pythonImportTargets: [],
     pythonImports: [],
-    pyLocalImportTargets: [],
-    pyBases: [],
     functionNames: [],
     variableNames: [],
-    variableSignals: [],
+    variableDefinitions: [],
     functionSpans: [],
     classSpans: [],
     callSites: [],
@@ -137,11 +127,11 @@ export function addSample(samples: string[], value: string): void {
   }
 }
 
-export function codeSignalIdentifier(relPath: string, name: string): string {
+export function definitionIdentifier(relPath: string, name: string): string {
   return `${relPath}::${name}`;
 }
 
-export function addVariableSignal(
+export function addVariableDefinition(
   metrics: FileMetrics,
   relPath: string,
   name: string,
@@ -156,9 +146,9 @@ export function addVariableSignal(
   if (!name) {
     return;
   }
-  metrics.variableSignals.push({
+  metrics.variableDefinitions.push({
     name,
-    identifier: codeSignalIdentifier(relPath, name),
+    identifier: definitionIdentifier(relPath, name),
     startLine,
     moduleLevel,
   });

@@ -14,7 +14,7 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { canonicalPath, projectLockPath } from "../src/codemap/codebase-memory/cache.js";
+import { projectLockPath } from "../src/codemap/codebase-memory/cache.js";
 import {
   callCodebaseMemoryTool,
   codebaseMemoryFailureReason,
@@ -40,6 +40,7 @@ import {
   codebaseMemoryInspect,
   renderCodebaseMemoryInspect,
 } from "../src/codemap/inspect/index.js";
+import { canonicalPath } from "../src/codemap/path-utils.js";
 import {
   printCodebaseMemoryGraphSearch,
   printCodebaseMemorySearch,
@@ -92,7 +93,7 @@ describe("Codebase Memory integration", () => {
     expect(codebaseMemoryQueryRows({ message: "ok" })).toBeNull();
   });
 
-  it("reads tool payloads outside upstream session discovery", () => {
+  it("reads tool payloads outside backend session discovery", () => {
     const result = callCodebaseMemoryTool("list_projects", {});
     if (!result.ok) {
       throw new Error(result.reason);
@@ -108,20 +109,20 @@ describe("Codebase Memory integration", () => {
     expect(readChildCwds()).toEqual([homedir()]);
   });
 
-  it("retains the provider failure when restoring the lock also fails", () => {
+  it("retains the backend failure when restoring the lock also fails", () => {
     vi.stubEnv("CODEBASE_MEMORY_MOCK_LOSE_LOCK_RPC_ERROR", projectLockPath(canonicalPath(workDir)));
     const result = withFreshCodebaseMemoryProject(workDir, () =>
       callCodebaseMemoryTool("get_graph_schema", {}),
     );
     expect(result?.ok).toBe(false);
     if (result?.ok === false) {
-      expect(result.reason).toContain("provider failed deliberately");
+      expect(result.reason).toContain("backend failed deliberately");
       expect(result.reason).toContain("cache lock ownership was lost after launch");
     }
   });
 
-  it("reaps a timed-out provider before returning control and permits the next refresh", () => {
-    const pidLog = path.join(workDir, "provider-pids.jsonl");
+  it("reaps a timed-out backend before returning control and permits the next refresh", () => {
+    const pidLog = path.join(workDir, "backend-pids.jsonl");
     vi.stubEnv("CODEBASE_MEMORY_MOCK_PID_LOG", pidLog);
     vi.stubEnv("CODEBASE_MEMORY_MOCK_OPERATION_ID", "deadline");
     vi.stubEnv("CODEBASE_MEMORY_MOCK_QUERY_DELAY_MS", "500");
@@ -198,7 +199,7 @@ describe("Codebase Memory integration", () => {
           invoked = true;
         }),
       ),
-    ).toThrow("CodebaseMemory project operations must be synchronous");
+    ).toThrow("Codebase Memory project operations must be synchronous");
     expect(invoked).toBe(false);
     expect(readDeleteCalls()).toHaveLength(1);
     expect(readIndexCalls()).toHaveLength(1);
@@ -209,8 +210,8 @@ describe("Codebase Memory integration", () => {
 
     expect(first).toMatchObject({ status: 0 });
     expect(second).toMatchObject({ status: 0 });
-    expect(first.stdout).toContain("CodebaseMemory schema");
-    expect(second.stdout).toContain("CodebaseMemory schema");
+    expect(first.stdout).toContain("Codebase Memory schema");
+    expect(second.stdout).toContain("Codebase Memory schema");
     const starts = readOperationEvents().filter((event) => event.phase === "start");
     const operationOrder = starts
       .map((event) => event.operationId)
@@ -316,7 +317,7 @@ describe("Codebase Memory integration", () => {
     });
   });
 
-  it("lets backend rendering fall back when a CodebaseMemory tool returns an error payload", () => {
+  it("lets backend rendering fall back when a Codebase Memory tool returns an error payload", () => {
     vi.stubEnv("CODEBASE_MEMORY_MOCK_ERROR_TOOL", "search_code");
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     try {
@@ -327,7 +328,7 @@ describe("Codebase Memory integration", () => {
     }
   });
 
-  it("lets backend rendering fall back when CodebaseMemory search returns no matches", () => {
+  it("lets backend rendering fall back when Codebase Memory search returns no matches", () => {
     vi.stubEnv("CODEBASE_MEMORY_MOCK_EMPTY_SEARCH", "1");
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     try {
@@ -355,7 +356,7 @@ describe("Codebase Memory integration", () => {
       expect(printCodebaseMemorySearch(workDir, "needle", 1)).toBe(true);
       const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
 
-      expect(output).toContain("CodebaseMemory code matches:");
+      expect(output).toContain("Codebase Memory code matches:");
       expect(output).toContain("results: 1");
       expect(output).toContain("- needle");
       expect(output).not.toContain('"results"');
@@ -382,14 +383,14 @@ describe("Codebase Memory integration", () => {
 
       const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
       expect(output).toContain("README.md");
-      expect(output).not.toContain("CodebaseMemory code matches:");
+      expect(output).not.toContain("Codebase Memory code matches:");
       expect(readIndexCalls()).toHaveLength(1);
     } finally {
       logSpy.mockRestore();
     }
   });
 
-  it("keeps backend priority when current-tree query terms are scattered", async () => {
+  it("keeps backend priority when working-tree query terms are scattered", async () => {
     mkdirSync(path.join(workDir, "src"), { recursive: true });
     writeFileSync(
       path.join(workDir, "src", "approval-policy.ts"),
@@ -411,7 +412,7 @@ describe("Codebase Memory integration", () => {
       ).resolves.toBe(0);
 
       const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
-      expect(output).toContain("CodebaseMemory code matches:");
+      expect(output).toContain("Codebase Memory code matches:");
       expect(output).toContain("- needle");
       expect(output).not.toContain("src/approval-policy.ts");
       expect(output).not.toContain("src/command.ts");
@@ -421,7 +422,7 @@ describe("Codebase Memory integration", () => {
     }
   });
 
-  it("uses complete current-tree term coverage before backend search", async () => {
+  it("uses complete working-tree term coverage before backend search", async () => {
     mkdirSync(path.join(workDir, "src"), { recursive: true });
     writeFileSync(
       path.join(workDir, "src", "cohesive.ts"),
@@ -442,13 +443,13 @@ describe("Codebase Memory integration", () => {
       ).resolves.toBe(0);
 
       const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
-      expect(output).toContain("Current-tree source candidates:");
+      expect(output).toContain("Working-tree source candidates:");
       expect(output).toContain("src/cohesive.ts");
       expect(output).toContain("[terms 3/3: command, approval, policy]");
       expect(output).toContain("1:14 export const command = true;");
       expect(output).toContain("50:14 export const approvalPolicy = true;");
       expect(output.indexOf("1:14")).toBeLessThan(output.indexOf("50:14"));
-      expect(output).not.toContain("CodebaseMemory code matches:");
+      expect(output).not.toContain("Codebase Memory code matches:");
       expect(readIndexCalls()).toHaveLength(0);
     } finally {
       logSpy.mockRestore();
@@ -474,7 +475,7 @@ describe("Codebase Memory integration", () => {
       ).resolves.toBe(0);
 
       const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
-      expect(output).toContain("Current-tree source candidates:");
+      expect(output).toContain("Working-tree source candidates:");
       expect(output.match(/\[terms 3\/3: command, approval, policy]/g)).toHaveLength(1);
       expect(output).toContain("... 2 more candidates");
       expect(readIndexCalls()).toHaveLength(0);
@@ -512,7 +513,7 @@ describe("Codebase Memory integration", () => {
       ).resolves.toBe(0);
 
       const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
-      expect(output).toContain("Current-tree source candidates:");
+      expect(output).toContain("Working-tree source candidates:");
       expect(output).toContain("src/tool/retry/middleware.ts");
       expect(output).not.toContain("src/generic-");
       expect(output).toContain("... 4 more candidates");
@@ -548,7 +549,7 @@ describe("Codebase Memory integration", () => {
       const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
       expect(output).toContain("Source matches:");
       expect(output).toContain("src/exact.ts");
-      expect(output).not.toContain("Current-tree source candidates:");
+      expect(output).not.toContain("Working-tree source candidates:");
       expect(readIndexCalls()).toHaveLength(0);
     } finally {
       logSpy.mockRestore();
@@ -578,7 +579,7 @@ describe("Codebase Memory integration", () => {
       ).resolves.toBe(0);
 
       const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
-      expect(output).toContain("Current-tree source candidates:");
+      expect(output).toContain("Working-tree source candidates:");
       expect(output).toContain("60:14 export const commandApprovalPolicy = true;");
       expect(output).not.toContain("1:14 export const command = true;");
       expect(readIndexCalls()).toHaveLength(0);
@@ -604,8 +605,8 @@ describe("Codebase Memory integration", () => {
       ).resolves.toBe(0);
 
       const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
-      expect(output).toContain("CodebaseMemory code matches:");
-      expect(output).not.toContain("Current-tree source candidates:");
+      expect(output).toContain("Codebase Memory code matches:");
+      expect(output).not.toContain("Working-tree source candidates:");
       expect(readIndexCalls()).toHaveLength(1);
     } finally {
       logSpy.mockRestore();
@@ -632,8 +633,8 @@ describe("Codebase Memory integration", () => {
       ).resolves.toBe(0);
 
       const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
-      expect(output).toContain("CodebaseMemory code matches:");
-      expect(output).not.toContain("Current-tree source candidates:");
+      expect(output).toContain("Codebase Memory code matches:");
+      expect(output).not.toContain("Working-tree source candidates:");
       expect(readIndexCalls()).toHaveLength(1);
     } finally {
       logSpy.mockRestore();
@@ -659,8 +660,8 @@ describe("Codebase Memory integration", () => {
       ).resolves.toBe(0);
 
       const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
-      expect(output).toContain("CodebaseMemory code matches:");
-      expect(output).not.toContain("Current-tree source candidates:");
+      expect(output).toContain("Codebase Memory code matches:");
+      expect(output).not.toContain("Working-tree source candidates:");
       expect(readIndexCalls()).toHaveLength(1);
     } finally {
       logSpy.mockRestore();
@@ -716,8 +717,8 @@ describe("Codebase Memory integration", () => {
       ).resolves.toBe(0);
 
       const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
-      expect(output).toContain("CodebaseMemory code matches:");
-      expect(output).not.toContain("Current-tree source candidates:");
+      expect(output).toContain("Codebase Memory code matches:");
+      expect(output).not.toContain("Working-tree source candidates:");
       expect(readIndexCalls()).toHaveLength(1);
     } finally {
       logSpy.mockRestore();
@@ -744,15 +745,15 @@ describe("Codebase Memory integration", () => {
       ).resolves.toBe(0);
 
       const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
-      expect(output).toContain("CodebaseMemory code matches:");
-      expect(output).not.toContain("Current-tree source candidates:");
+      expect(output).toContain("Codebase Memory code matches:");
+      expect(output).not.toContain("Working-tree source candidates:");
       expect(readIndexCalls()).toHaveLength(1);
     } finally {
       logSpy.mockRestore();
     }
   });
 
-  it("keeps backend priority when the current-tree scan fails with partial output", async () => {
+  it("keeps backend priority when the working-tree scan fails with partial output", async () => {
     mkdirSync(path.join(workDir, "src"), { recursive: true });
     writeFileSync(
       path.join(workDir, "src", "partial.ts"),
@@ -781,8 +782,8 @@ describe("Codebase Memory integration", () => {
       ).resolves.toBe(0);
 
       const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
-      expect(output).toContain("CodebaseMemory code matches:");
-      expect(output).not.toContain("Current-tree source candidates:");
+      expect(output).toContain("Codebase Memory code matches:");
+      expect(output).not.toContain("Working-tree source candidates:");
       expect(readIndexCalls()).toHaveLength(1);
     } finally {
       logSpy.mockRestore();
@@ -849,7 +850,7 @@ describe("Codebase Memory integration", () => {
     }
   });
 
-  it("lets graph rendering fall back when CodebaseMemory graph search returns no matches", () => {
+  it("lets graph rendering fall back when Codebase Memory graph search returns no matches", () => {
     vi.stubEnv("CODEBASE_MEMORY_MOCK_EMPTY_GRAPH", "1");
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     try {
@@ -867,7 +868,7 @@ describe("Codebase Memory integration", () => {
       expect(printCodebaseMemoryGraphSearch(workDir, "needle", 1)).toBe(true);
       const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
 
-      expect(output).toContain("CodebaseMemory graph matches:");
+      expect(output).toContain("Codebase Memory graph matches:");
       expect(output).toContain("mode: graph");
       expect(output).toContain("results: 1");
       expect(output).toContain("- needle");
@@ -979,7 +980,7 @@ describe("Codebase Memory integration", () => {
       const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
 
       expect(output).toContain(`# ${path.basename(workDir)}`);
-      expect(output).toContain("## Hotspots");
+      expect(output).toContain("## Most Called");
       expect(output).toContain("needle · src/needle.ts · 33.3%");
       expect(output).toContain("## Clusters");
       expect(output).toContain("core · 57.1% · 75%");
@@ -1002,7 +1003,7 @@ describe("Codebase Memory integration", () => {
       expect(commandSummary({ projectRoot: workDir })).toBe(0);
       const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
 
-      expect(output).toContain("## Hotspots");
+      expect(output).toContain("## Most Called");
       expect(output).not.toContain("Codebase Memory unavailable");
     } finally {
       logSpy.mockRestore();
@@ -1016,7 +1017,9 @@ describe("Codebase Memory integration", () => {
       expect(commandSummary({ projectRoot: workDir })).toBe(0);
       const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
 
-      expect(output).toContain("Codebase Memory unavailable; hotspots and clusters omitted.");
+      expect(output).toContain(
+        "Codebase Memory unavailable; most-called symbols and clusters omitted.",
+      );
       expect(output).toContain("Reason: project not found or not indexed.");
     } finally {
       logSpy.mockRestore();
@@ -1033,7 +1036,7 @@ describe("Codebase Memory integration", () => {
       expect(output).toContain(`# ${path.basename(workDir)}`);
       expect(output).not.toContain("File 12");
       expect(output).not.toContain("Module 12");
-      expect(output).not.toContain("## Hotspots");
+      expect(output).not.toContain("## Most Called");
       expect(output).not.toContain("## Clusters");
       expect(output).not.toContain("Codebase Memory unavailable");
     } finally {
@@ -1047,7 +1050,7 @@ describe("Codebase Memory integration", () => {
       expect(printCodebaseMemorySemanticSearch(workDir, "needle", 2)).toBe(true);
       const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
 
-      expect(output).toContain("CodebaseMemory semantic matches:");
+      expect(output).toContain("Codebase Memory semantic matches:");
       expect(output).toContain("mode: semantic");
       expect(output).toContain("semantic results: 1");
       expect(output).toContain("- semanticNeedle");
@@ -1108,13 +1111,15 @@ describe("Codebase Memory integration", () => {
       expect(commandSummary({ projectRoot: workDir })).toBe(0);
       const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
       expect(output).toContain("# codebase-memory-integration-");
-      expect(output).toContain("Codebase Memory unavailable; hotspots and clusters omitted.");
+      expect(output).toContain(
+        "Codebase Memory unavailable; most-called symbols and clusters omitted.",
+      );
     } finally {
       logSpy.mockRestore();
     }
   });
 
-  it("treats plain-text CodebaseMemory validation failures as failed tool calls", () => {
+  it("treats plain-text Codebase Memory validation failures as failed tool calls", () => {
     expect(
       callCodebaseMemoryTool("search_graph", {
         project: "mock-project",
@@ -1127,13 +1132,13 @@ describe("Codebase Memory integration", () => {
     });
   });
 
-  it("normalizes CodebaseMemory inspect payloads behind the query adapter", () => {
+  it("normalizes Codebase Memory inspect payloads behind the query adapter", () => {
     expect(codebaseMemoryInspect(workDir, "needle", 2)).toMatchObject({
       name: "needle",
       filePath: "src/needle.ts",
       startLine: 4,
       endLine: 8,
-      signalFacts: ["complexity=2", "cognitive=3", "lines=5"],
+      metricFacts: ["cyclomatic=2", "cognitive=3", "lines=5"],
       signature: "function needle(): string",
       source: "export function needle() {\n  return 'needle';\n}",
       callers: ["callerOne"],
@@ -1155,7 +1160,7 @@ describe("Codebase Memory integration", () => {
     expect(codebaseMemoryInspect(workDir, "needle", 2)).toBeNull();
   });
 
-  it("renders compact CodebaseMemory inspect output without graph internals", () => {
+  it("renders compact Codebase Memory inspect output without graph internals", () => {
     const result = codebaseMemoryInspect(workDir, "needle", 2);
 
     if (result === null) {
@@ -1164,7 +1169,7 @@ describe("Codebase Memory integration", () => {
     const output = renderCodebaseMemoryInspect(result, { limit: 2 });
 
     expect(output).toContain("Source: src/needle.ts:4-8");
-    expect(output).toContain("Signals: complexity=2, cognitive=3, lines=5");
+    expect(output).toContain("Metrics: cyclomatic=2, cognitive=3, lines=5");
     expect(output).toContain("## Calls");
     expect(output).not.toContain("Qualified:");
     expect(output).not.toContain("Match:");
@@ -1254,7 +1259,7 @@ describe("Codebase Memory integration", () => {
       expect(commandBackendStatus({ projectRoot: workDir })).toBe(0);
       const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
 
-      expect(output).toContain("CodebaseMemory index: mock-project");
+      expect(output).toContain("Codebase Memory index: mock-project");
       expect(output).toContain("status: ready");
       expect(readIndexCalls()).toHaveLength(1);
     } finally {
@@ -1268,7 +1273,7 @@ describe("Codebase Memory integration", () => {
       expect(commandBackendProjects({ projectRoot: workDir })).toBe(0);
       const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
 
-      expect(output).toContain("CodebaseMemory projects: 11 (hidden work: 1)");
+      expect(output).toContain("Codebase Memory projects: 11 (hidden work: 1)");
       expect(output).toContain("current: mock-project");
       expect(output).toContain("nodes=12");
       expect(output).toContain("other projects:");
@@ -1301,7 +1306,7 @@ describe("Codebase Memory integration", () => {
       expect(commandBackendSchema({ projectRoot: workDir })).toBe(0);
       const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
 
-      expect(output).toContain("CodebaseMemory schema: 1 node labels, 1 edge types");
+      expect(output).toContain("Codebase Memory schema: 1 node labels, 1 edge types");
       expect(output).toContain("- node: Function (7)");
       expect(output).toContain("- edge: CALLS (9)");
       expect(readIndexCalls()).toHaveLength(1);
@@ -1321,7 +1326,7 @@ describe("Codebase Memory integration", () => {
       ).toBe(0);
       const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
 
-      expect(output).toContain("CodebaseMemory query rows: 1");
+      expect(output).toContain("Codebase Memory query rows: 1");
       expect(output).toContain("mock-project.src.needle");
       expect(readIndexCalls()).toHaveLength(1);
     } finally {
@@ -1329,7 +1334,7 @@ describe("Codebase Memory integration", () => {
     }
   });
 
-  it("prints nested provider failures from backend commands", () => {
+  it("prints nested backend failures from backend commands", () => {
     vi.stubEnv("CODEBASE_MEMORY_MOCK_ERROR_TOOL", "query_graph");
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     try {
@@ -1395,7 +1400,7 @@ describe("Codebase Memory integration", () => {
       ).toBe(0);
       const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
 
-      expect(output).toContain("CodebaseMemory query rows: 3 (hidden duplicates: 1)");
+      expect(output).toContain("Codebase Memory query rows: 3 (hidden duplicates: 1)");
       expect(output.match(/- Variable \| hashes/g)).toHaveLength(1);
       expect(output).toContain("- File | app.ts");
     } finally {
@@ -1432,7 +1437,7 @@ describe("Codebase Memory integration", () => {
       ).toBe(0);
       const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
 
-      expect(output).toContain("CodebaseMemory changed-code impact:");
+      expect(output).toContain("Codebase Memory changed-code impact:");
       expect(output).toContain("src/needle.ts");
       expect(readIndexCalls()).toHaveLength(1);
     } finally {
@@ -1452,7 +1457,7 @@ describe("Codebase Memory integration", () => {
       ).toBe(0);
       const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
 
-      expect(output).toContain("CodebaseMemory changed-code impact:");
+      expect(output).toContain("Codebase Memory changed-code impact:");
       expect(output).toContain("none");
       expect(output).toContain("depth: 2");
       expect(output).not.toContain('"changed_files"');
@@ -1467,16 +1472,16 @@ describe("Codebase Memory integration", () => {
       expect(commandIndex({ projectRoot: workDir })).toBe(0);
       const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
 
-      expect(output).toContain("CodebaseMemory refresh complete");
+      expect(output).toContain("Codebase Memory refresh complete");
       expect(output).toContain("elapsed:");
-      expect(output).toContain("CodebaseMemory index: mock-project");
+      expect(output).toContain("Codebase Memory index: mock-project");
       expect(readIndexCalls()).toHaveLength(1);
     } finally {
       logSpy.mockRestore();
     }
   });
 
-  it("prints the provider reason when an index refresh fails", () => {
+  it("prints the backend reason when an index refresh fails", () => {
     vi.stubEnv("CODEBASE_MEMORY_MOCK_ERROR_TOOL", "index_repository");
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     try {
@@ -1767,7 +1772,7 @@ function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-/** Builds a tiny newline JSON-RPC server for CodebaseMemory tool calls. */
+/** Builds a tiny newline JSON-RPC server for Codebase Memory tool calls. */
 function mockServerSource(): string {
   return `#!/usr/bin/env node
 const fs = require("node:fs");
@@ -1791,7 +1796,7 @@ if (toolName === "get_graph_schema" && process.env.CODEBASE_MEMORY_MOCK_LOSE_LOC
   const lockPath = process.env.CODEBASE_MEMORY_MOCK_LOSE_LOCK_RPC_ERROR;
   const owner = JSON.parse(fs.readFileSync(lockPath, "utf8"));
   fs.writeFileSync(lockPath, JSON.stringify({ ...owner, token: "replacement-owner" }));
-  console.log(JSON.stringify({ jsonrpc: "2.0", id: toolCall.id, error: { code: -32603, message: "provider failed deliberately" } }));
+  console.log(JSON.stringify({ jsonrpc: "2.0", id: toolCall.id, error: { code: -32603, message: "backend failed deliberately" } }));
   return;
 }
 

@@ -4,8 +4,7 @@ import path from "node:path";
 
 import { type NapiResolveOptions, ResolverFactory } from "oxc-resolver";
 
-import { TYPESCRIPT_SUFFIXES } from "../scanner/constants.js";
-import type { FileMetrics, TypeScriptImport } from "../scanner/metrics.js";
+import { type FileMetrics, TYPESCRIPT_SUFFIXES, type TypeScriptImport } from "../scanner/index.js";
 
 /** Owns one operation's resolution caches and keeps runtime package targets outside the inspected source inventory. */
 export class TypeScriptResolver {
@@ -64,18 +63,17 @@ export class TypeScriptResolver {
 
 /** Preserves import/require conditions while combining resolved import and re-export edges. */
 export function typescriptImportTargets(
-  filePath: string,
   metrics: FileMetrics,
   resolver: TypeScriptResolver,
 ): string[] {
   const targets = new Set<string>();
   for (const { target, kind } of metrics.typescriptImports) {
-    for (const resolved of resolver.resolve(filePath, target, kind)) {
+    for (const resolved of resolver.resolve(metrics.path, target, kind)) {
       targets.add(resolved);
     }
   }
   for (const target of metrics.typescriptReexportTargets) {
-    for (const resolved of resolver.resolve(filePath, target)) {
+    for (const resolved of resolver.resolve(metrics.path, target)) {
       targets.add(resolved);
     }
   }

@@ -42,7 +42,7 @@ export type DenseFileRow = SignalRow &
   FileSignalCounters & {
     file: string;
     total: number | null | undefined;
-    total_label?: "signals" | "lines";
+    total_label?: "declarations" | "lines";
     lines?: number | null;
     samples?: string[];
   };
@@ -54,22 +54,21 @@ export type FileProfileRow = DenseFileRow &
     samples: string[];
   };
 
+/** One defined function or variable; `count` is its mention count, and `lines` is set for functions while `moduleLevel` is set for variables. */
 export type DefinitionRow = SignalRow & {
-  name?: string;
-  identifier?: string;
-  file?: string;
-  count?: number;
+  name: string;
+  identifier: string;
+  file: string;
+  count: number;
+  line: number;
+  exported: boolean;
   lines?: number;
-  line?: number;
-  exported?: boolean;
   moduleLevel?: boolean;
-  language?: SignalLanguage;
 };
 
-export type NameFrequencyRow = SignalRow & {
+export type NameFrequencyRow = {
   name: string;
   count: number;
-  language?: SignalLanguage;
 };
 
 export type FunctionLengthItem = SignalRow & {
@@ -81,7 +80,21 @@ export type FunctionLengthSection<TItem extends SignalRow = FunctionLengthItem> 
   items: TItem[];
 };
 
-export type FileCountRow = SignalRow & {
-  file: unknown;
+export type FileCountRow = {
+  file: string;
   count: number;
+};
+
+export type UsageSection = {
+  bins: Record<
+    "typescript_functions" | "typescript_variables" | "python_functions" | "python_variables",
+    Record<string, number>
+  >;
+  tables: Record<
+    | "typescript_function_definitions"
+    | "typescript_variable_definitions"
+    | "python_function_definitions"
+    | "python_variable_definitions",
+    DefinitionRow[]
+  >;
 };

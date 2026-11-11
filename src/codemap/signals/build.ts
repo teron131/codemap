@@ -1,16 +1,13 @@
-/** Computes only the requested detailed signal sections from one scan of the discovered files. A `docstrings`-only request skips source scanning. */
+/** Computes only the requested working-tree signal sections from one scan of the discovered files. */
 import path from "node:path";
 
-import { isDirectory, isFile } from "../common.js";
 import {
-  buildDocstringsData,
   buildDocstringSignals,
   DOCSTRING_SUFFIXES,
+  type DocstringSignals,
 } from "../source/docstrings/index.js";
 import {
-  discoverFiles,
   type FileMetrics,
-  type FunctionSpan,
   PYTHON_SUFFIXES,
   relativePath,
   scanFile,
@@ -19,161 +16,131 @@ import {
 import { compareText } from "../text-utils.js";
 import {
   fileProfileRow,
-  functionLengthSection,
   rankSignalFocusFiles,
-  topHubs,
   topInheritanceHubs,
-} from "./analysis.js";
-import type { DenseFileRow, SignalRow } from "./schema.js";
+  topLocalImportHubs,
+} from "./file-profile.js";
+import { functionLengthsByLanguage } from "./function-lengths.js";
+import type {
+  FileProfileRow,
+  FunctionLengthSection,
+  SignalLanguage,
+  SignalRow,
+  UsageSection,
+} from "./schema.js";
 import { buildUsageSection } from "./usage.js";
 
-type Row = SignalRow;
+/** A section is absent when it was not requested. */
+export type SignalSections = {
+  relationships?: SignalRow;
+  usage?: UsageSection;
+  functionLengths?: Record<SignalLanguage, FunctionLengthSection>;
+  fileProfiles?: FileProfileRow[];
+  docstringSignals?: DocstringSignals;
+};
 
-export type SignalExportSection =
-  | "relationships"
-  | "usage"
-  | "function-lengths"
-  | "file-profiles"
-  | "docstring-signals"
-  | "docstrings";
+export type SignalSectionName = keyof SignalSections;
 
-function buildRelationshipsSection(
-  displayFiles: string[],
-  scannedFiles: FileMetrics[],
-  fileProfileRows: DenseFileRow[],
-  entrypoints: Set<string>,
-): Row {
-  return {
-    counts: {
-      module_agents_files: displayFiles.filter((filePath) => filePath.endsWith("AGENTS.md")).length,
-      typescript_import_edges: sumLengths(scannedFiles, "typescriptImports"),
-      typescript_relative_imports: sumLengths(scannedFiles, "typescriptLocalImportTargets"),
-      typescript_reexport_edges: sumLengths(scannedFiles, "typescriptReexportTargets"),
-      typescript_local_reexports: sumLengths(scannedFiles, "typescriptLocalReexportTargets"),
-      typescript_extends_edges: sumLengths(scannedFiles, "typescriptExtendsBases"),
-      python_import_edges: sumLengths(scannedFiles, "pyImportTargets"),
-      python_relative_imports: sumLengths(scannedFiles, "pyLocalImportTargets"),
-      python_inheritance_edges: sumLengths(scannedFiles, "pyBases"),
-      entrypoint_like_files: entrypoints.size,
-    },
-    entrypoint_like_files: [...entrypoints].sort(),
-    top_local_import_hubs: topHubs(fileProfileRows, { key: "imports_local" }),
-    top_inheritance_hubs: topInheritanceHubs(fileProfileRows),
-  };
-}
+const DOCSTRING_SIGNAL_FILE_LIMIT = 3;
+const DOCSTRING_SIGNAL_FUNCTION_LIMIT = 6;
 
-function buildEmptyDocstringSignals(): Row {
-  return {
-    files_considered: 0,
-    python_files_considered: 0,
-    typescript_files_considered: 0,
-    file_docstrings: { present: 0, total: 0 },
-    file_docstring_previews: [],
-    likely_main_function_docstrings: [],
-  };
-}
-
-function functionSpans(scannedFiles: FileMetrics[], suffixes: Set<string>): FunctionSpan[] {
-  const spans: FunctionSpan[] = [];
-  for (const metrics of scannedFiles) {
-    if (suffixes.has(metrics.suffix)) {
-      spans.push(...metrics.functionSpans);
-    }
-  }
-  return spans;
-}
-
-function buildFunctionLengthsSection(scannedFiles: FileMetrics[]): Row {
-  return {
-    typescript: functionLengthSection(functionSpans(scannedFiles, TYPESCRIPT_SUFFIXES)),
-    python: functionLengthSection(functionSpans(scannedFiles, PYTHON_SUFFIXES)),
-  };
-}
-
-function buildDocstringSignalSection(targetPath: string, signalFocusDocFiles: string[]): Row {
-  const signalFocus = signalFocusDocFiles.slice(0, 3);
-  if (signalFocus.length === 0) {
-    return buildEmptyDocstringSignals();
-  }
-  return buildDocstringSignals(targetPath, {
-    focusFiles: signalFocus,
-    maxFiles: 3,
-    maxFunctions: 6,
-  });
-}
-
-export function buildSignalExport(
-  targetPath: string,
-  {
-    sectionMode,
-    files,
-  }: { sectionMode: SignalExportSection | SignalExportSection[]; files?: string[] },
-): Row {
-  const selected = new Set(Array.isArray(sectionMode) ? sectionMode : [sectionMode]);
-  if (selected.size === 1 && selected.has("docstrings")) {
-    return { sections: { docstrings: buildDocstringsData(targetPath) } };
-  }
-  const displayRoot = isDirectory(targetPath) ? targetPath : path.dirname(targetPath);
-  const allFiles = files ?? discoverFiles(targetPath);
-  const displayFiles = allFiles.map((filePath) => relativePath(filePath, { displayRoot }));
-  const scannedFiles = allFiles.map((filePath) => scanFile(filePath, { displayRoot }));
+export function buildSignalSections(
+  root: string,
+  { names, files }: { names: SignalSectionName[]; files: string[] },
+): SignalSections {
+  const selected = new Set(names);
+  const scannedFiles = files.map((filePath) => scanFile(filePath, { displayRoot: root }));
   const needsProfiles =
     selected.has("relationships") ||
-    selected.has("file-profiles") ||
-    selected.has("docstring-signals");
-  const fileProfileRows = needsProfiles ? scannedFiles.map(fileProfileRow) : [];
-  fileProfileRows.sort(
-    (left, right) =>
-      Number(right.total ?? 0) - Number(left.total ?? 0) ||
-      compareText(String(left.file), String(right.file)),
-  );
+    selected.has("fileProfiles") ||
+    selected.has("docstringSignals");
+  const fileProfileRows = needsProfiles
+    ? scannedFiles
+        .map(fileProfileRow)
+        .sort((left, right) => right.total - left.total || compareText(left.file, right.file))
+    : [];
   const entrypoints = new Set(
     scannedFiles.filter((metrics) => metrics.entrypointHint).map((metrics) => metrics.relPath),
   );
-  const sections: Row = {};
+  const sections: SignalSections = {};
   if (selected.has("relationships")) {
     sections.relationships = buildRelationshipsSection(
-      displayFiles,
+      files.map((filePath) => relativePath(filePath, { displayRoot: root })),
       scannedFiles,
       fileProfileRows,
       entrypoints,
     );
   }
-  if (selected.has("docstring-signals")) {
-    const focusFiles =
-      isFile(targetPath) && DOCSTRING_SUFFIXES.has(path.extname(targetPath))
-        ? [relativePath(targetPath, { displayRoot })]
-        : rankSignalFocusFiles(fileProfileRows, { entrypoints }).filter((filePath) =>
-            DOCSTRING_SUFFIXES.has(path.extname(filePath)),
-          );
-    sections.docstring_signals = buildDocstringSignalSection(targetPath, focusFiles);
+  if (selected.has("docstringSignals")) {
+    sections.docstringSignals = buildDocstringSignalSection(
+      root,
+      rankSignalFocusFiles(fileProfileRows, { entrypoints }).filter((filePath) =>
+        DOCSTRING_SUFFIXES.has(path.extname(filePath)),
+      ),
+    );
   }
-  if (selected.has("file-profiles")) {
-    sections.file_profiles = fileProfileRows;
+  if (selected.has("fileProfiles")) {
+    sections.fileProfiles = fileProfileRows;
   }
   if (selected.has("usage")) {
-    sections.usage_signals = buildUsageSection(allFiles, scannedFiles);
+    sections.usage = buildUsageSection(files, scannedFiles);
   }
-  if (selected.has("function-lengths")) {
-    sections.function_lengths = buildFunctionLengthsSection(scannedFiles);
+  if (selected.has("functionLengths")) {
+    sections.functionLengths = functionLengthsByLanguage(scannedFiles);
   }
-  if (selected.has("docstrings")) {
-    sections.docstrings = buildDocstringsData(targetPath);
-  }
-  return { sections };
+  return sections;
 }
 
-function sumLengths(
+function buildRelationshipsSection(
+  displayFiles: string[],
   scannedFiles: FileMetrics[],
-  key:
-    | "typescriptImports"
-    | "typescriptLocalImportTargets"
-    | "typescriptReexportTargets"
-    | "typescriptLocalReexportTargets"
-    | "typescriptExtendsBases"
-    | "pyImportTargets"
-    | "pyLocalImportTargets"
-    | "pyBases",
-): number {
-  return scannedFiles.reduce((total, metrics) => total + metrics[key].length, 0);
+  fileProfileRows: FileProfileRow[],
+  entrypoints: Set<string>,
+): SignalRow {
+  // Only `importsLocal` needs the language split: `extends` is counted in TypeScript files alone and `inherits` in Python files alone.
+  const typescriptFiles = scannedFiles.filter((metrics) => TYPESCRIPT_SUFFIXES.has(metrics.suffix));
+  const pythonFiles = scannedFiles.filter((metrics) => PYTHON_SUFFIXES.has(metrics.suffix));
+  return {
+    counts: {
+      module_agents_files: displayFiles.filter((filePath) => filePath.endsWith("AGENTS.md")).length,
+      typescript_import_edges: sumOf(scannedFiles, (metrics) => metrics.typescriptImports.length),
+      typescript_relative_imports: sumOf(typescriptFiles, (metrics) => metrics.importsLocal),
+      typescript_reexport_edges: sumOf(
+        scannedFiles,
+        (metrics) => metrics.typescriptReexportTargets.length,
+      ),
+      typescript_local_reexports: sumOf(scannedFiles, (metrics) => metrics.reexportsLocal),
+      typescript_extends_edges: sumOf(scannedFiles, (metrics) => metrics.extends),
+      python_import_edges: sumOf(scannedFiles, (metrics) => metrics.pythonImportTargets.length),
+      python_relative_imports: sumOf(pythonFiles, (metrics) => metrics.importsLocal),
+      python_inheritance_edges: sumOf(scannedFiles, (metrics) => metrics.inherits),
+      entrypoint_like_files: entrypoints.size,
+    },
+    entrypoint_like_files: [...entrypoints].sort(),
+    top_local_import_hubs: topLocalImportHubs(fileProfileRows),
+    top_inheritance_hubs: topInheritanceHubs(fileProfileRows),
+  };
+}
+
+function buildDocstringSignalSection(root: string, rankedFiles: string[]): DocstringSignals {
+  const focusFiles = rankedFiles.slice(0, DOCSTRING_SIGNAL_FILE_LIMIT);
+  if (focusFiles.length === 0) {
+    return {
+      files_considered: 0,
+      python_files_considered: 0,
+      typescript_files_considered: 0,
+      file_docstrings: { present: 0, total: 0 },
+      file_docstring_previews: [],
+      likely_main_function_docstrings: [],
+    };
+  }
+  return buildDocstringSignals(root, {
+    focusFiles,
+    maxFiles: DOCSTRING_SIGNAL_FILE_LIMIT,
+    maxFunctions: DOCSTRING_SIGNAL_FUNCTION_LIMIT,
+  });
+}
+
+function sumOf(scannedFiles: FileMetrics[], count: (metrics: FileMetrics) => number): number {
+  return scannedFiles.reduce((total, metrics) => total + count(metrics), 0);
 }

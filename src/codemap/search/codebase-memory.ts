@@ -3,25 +3,18 @@
 import {
   callCodebaseMemoryTool,
   withFreshCodebaseMemoryProject,
-} from "../codebase-memory/client.js";
+} from "../codebase-memory/index.js";
 import { arrayValue, numberField, recordValue, stringField } from "../json-utils.js";
 import { uniqueStrings } from "../text-utils.js";
-import { matchesGlobFilter, matchesTextFilter } from "./filters.js";
+import {
+  type GraphSearchFilters,
+  type GraphSearchOptions,
+  matchesGlobFilter,
+  matchesTextFilter,
+} from "./filters.js";
 
 type CodebaseMemoryRenderOptions = {
   includeTests?: boolean;
-};
-
-export type CodebaseMemoryGraphSearchOptions = CodebaseMemoryRenderOptions & {
-  label?: string;
-  namePattern?: string;
-  qnPattern?: string;
-  filePattern?: string;
-  relationship?: string;
-  minDegree?: number;
-  maxDegree?: number;
-  excludeEntryPoints?: boolean;
-  offset?: number;
 };
 
 type SearchRowSelection = {
@@ -59,7 +52,7 @@ function codebaseMemoryGraphSearch(
   root: string,
   searchText: string,
   limit: number,
-  options: CodebaseMemoryGraphSearchOptions,
+  options: GraphSearchFilters,
 ): unknown | null {
   return withFreshCodebaseMemoryProject(root, (project) => {
     const result = callCodebaseMemoryTool("search_graph", {
@@ -110,7 +103,7 @@ function hasSearchAnswer(value: unknown, arrayKeys: string[]): boolean {
   return arrayKeys.some((key) => arrayValue(record[key]).length > 0);
 }
 
-function graphSearchArgs(options: CodebaseMemoryGraphSearchOptions): Record<string, unknown> {
+function graphSearchArgs(options: GraphSearchFilters): Record<string, unknown> {
   return {
     ...(options.label !== undefined ? { label: options.label } : {}),
     ...(options.namePattern !== undefined ? { name_pattern: options.namePattern } : {}),
@@ -157,7 +150,7 @@ export function printCodebaseMemorySearch(
     lines.push(`grep matches: ${grepTotal}`);
   }
   appendSearchRows(lines, shown, selection.visibleRows.length > shown.length);
-  console.log("\nCodebaseMemory code matches:");
+  console.log("\nCodebase Memory code matches:");
   console.log(lines.join("\n"));
   return true;
 }
@@ -166,7 +159,7 @@ export function printCodebaseMemoryGraphSearch(
   root: string,
   searchText: string,
   limit: number,
-  options: CodebaseMemoryGraphSearchOptions = {},
+  options: GraphSearchOptions = {},
 ): boolean {
   const { includeTests = false, ...filters } = options;
   const result = codebaseMemoryGraphSearch(
@@ -195,7 +188,7 @@ export function printCodebaseMemoryGraphSearch(
     lines.push(`hidden filtered: ${hiddenFilterRows}`);
   }
   appendSearchRows(lines, shown, Boolean(record.has_more) || filteredRows.length > shown.length);
-  console.log("\nCodebaseMemory graph matches:");
+  console.log("\nCodebase Memory graph matches:");
   console.log(lines.join("\n"));
   return true;
 }
@@ -221,7 +214,7 @@ export function printCodebaseMemorySemanticSearch(
     ...hiddenTestLines(selection),
   ];
   appendSearchRows(lines, shown, result.hasMore || selection.visibleRows.length > shown.length);
-  console.log("\nCodebaseMemory semantic matches:");
+  console.log("\nCodebase Memory semantic matches:");
   console.log(lines.join("\n"));
   return true;
 }
@@ -245,7 +238,7 @@ function appendSearchRows(lines: string[], shown: unknown[], hasMore: boolean): 
 }
 
 /** Checks output-side graph filters when the backend returns broader rows. */
-function graphSearchRowMatches(value: unknown, options: CodebaseMemoryGraphSearchOptions): boolean {
+function graphSearchRowMatches(value: unknown, options: GraphSearchFilters): boolean {
   const row = recordValue(value);
   const nested = recordValue(row.node);
   const label = stringField(row.label) ?? stringField(nested.label);

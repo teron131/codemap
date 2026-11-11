@@ -1,4 +1,4 @@
-/** Shapes the detailed signal export into the payload both `--json` and text output render. It filters test and generated rows and fixes each ranking's order. */
+/** Shapes the working-tree signal sections into the payload both `--json` and text output render. It filters test and generated rows and fixes each ranking's order. */
 import { arrayValue, recordValue } from "../json-utils.js";
 import { describeNumbers } from "../math-utils.js";
 import {
@@ -8,54 +8,41 @@ import {
   TYPESCRIPT_SUFFIXES,
 } from "../source/scanner/index.js";
 import { compareText } from "../text-utils.js";
-import type { FunctionLengthSection, LanguageRows, SignalRow } from "./schema.js";
+import type { SignalSections } from "./build.js";
+import type { FunctionLengthSection, LanguageRows, SignalRow, UsageSection } from "./schema.js";
 
 const STRUCTURAL_SUFFIXES = new Set([...PYTHON_SUFFIXES, ...TYPESCRIPT_SUFFIXES]);
-
-type SignalExport = {
-  sections?: Record<string, unknown>;
-};
 
 type Row = SignalRow;
 
 export function buildSignalPayload(
-  signalExport: SignalExport,
+  sections: SignalSections,
   { includeTests }: { includeTests: boolean },
 ): Record<string, unknown> {
-  const sections = recordValue(signalExport.sections);
-  const usage = recordValue(sections.usage_signals);
-  const usageTables = recordValue(usage.tables);
-  const functionLengths = recordValue(sections.function_lengths);
-  const fileRows = fileScopedRows(arrayValue<Row>(sections.file_profiles), {
-    includeTests,
-  }).filter((row) => isStructuralFileRow(row));
-
-  const lengthRows = {
-    python: lengthSection(recordValue(functionLengths.python), {
-      includeTests,
-    }),
-    typescript: lengthSection(recordValue(functionLengths.typescript), {
-      includeTests,
-    }),
-  };
-  const functions = functionPayload(usageTables, { includeTests });
-  const variables = variablePayload(usageTables, { includeTests });
+  const fileRows = fileScopedRows(sections.fileProfiles ?? [], { includeTests }).filter((row) =>
+    isStructuralFileRow(row),
+  );
+  const functions = functionPayload(sections.usage?.tables, { includeTests });
+  const variables = variablePayload(sections.usage?.tables, { includeTests });
   const payload: Record<string, unknown> = {
     relationships: sections.relationships ?? {},
     files: fileRows,
-    lengths: lengthRows,
-    usage: { bins: recordValue(usage.bins) },
+    lengths: {
+      python: lengthSection(sections.functionLengths?.python, { includeTests }),
+      typescript: lengthSection(sections.functionLengths?.typescript, { includeTests }),
+    },
+    usage: { bins: sections.usage?.bins ?? {} },
     functions,
     variables,
   };
-  if ("docstring_signals" in sections) {
-    payload.docstring_signals = sections.docstring_signals ?? {};
+  if (sections.docstringSignals !== undefined) {
+    payload.docstring_signals = sections.docstringSignals;
   }
 
   const functionRows = languageRows(recordValue(functions.byMentions));
   const variableRows = arrayValue<Row>(variables.byNameLength);
   const stats = {
-    source: "currentTree",
+    source: "workingTree",
     ...(functionRows.length === 0
       ? {}
       : {
@@ -68,7 +55,7 @@ export function buildSignalPayload(
       ? {}
       : {
           variables: {
-            characters: describeNumbers(variableRows.map((row) => String(row.name ?? "").length)),
+            nameLength: describeNumbers(variableRows.map((row) => String(row.name ?? "").length)),
             mentions: describeNumbers(variableRows.map((row) => Number(row.count))),
           },
         }),
@@ -87,19 +74,15 @@ export function buildSignalPayload(
 }
 
 function functionPayload(
-  usageTables: Record<string, unknown>,
+  tables: UsageSection["tables"] | undefined,
   { includeTests }: { includeTests: boolean },
 ): Record<string, LanguageRows> {
-  const pythonDefinitions = fileScopedRows(
-    arrayValue<Row>(usageTables.python_function_definitions),
-    {
-      includeTests,
-    },
-  );
-  const typescriptDefinitions = fileScopedRows(
-    arrayValue<Row>(usageTables.typescript_function_definitions),
-    { includeTests },
-  );
+  const pythonDefinitions = fileScopedRows(tables?.python_function_definitions ?? [], {
+    includeTests,
+  });
+  const typescriptDefinitions = fileScopedRows(tables?.typescript_function_definitions ?? [], {
+    includeTests,
+  });
   return {
     byLength: {
       python: rankFunctionRowsByLength(pythonDefinitions),
@@ -113,19 +96,15 @@ function functionPayload(
 }
 
 function variablePayload(
-  usageTables: Record<string, unknown>,
+  tables: UsageSection["tables"] | undefined,
   { includeTests }: { includeTests: boolean },
 ): Record<string, unknown> {
-  const pythonDefinitions = fileScopedRows(
-    arrayValue<Row>(usageTables.python_variable_definitions),
-    {
-      includeTests,
-    },
-  );
-  const typescriptDefinitions = fileScopedRows(
-    arrayValue<Row>(usageTables.typescript_variable_definitions),
-    { includeTests },
-  );
+  const pythonDefinitions = fileScopedRows(tables?.python_variable_definitions ?? [], {
+    includeTests,
+  });
+  const typescriptDefinitions = fileScopedRows(tables?.typescript_variable_definitions ?? [], {
+    includeTests,
+  });
   return {
     byMentions: {
       python: rankDefinitionRowsByMentions(pythonDefinitions),
@@ -157,10 +136,10 @@ function isStructuralFileRow(row: Row): boolean {
 
 /** Recomputes statistics after filtering, so they describe only the rows that survive test and generated filtering. */
 function lengthSection(
-  section: Record<string, unknown>,
+  section: FunctionLengthSection | undefined,
   { includeTests }: { includeTests: boolean },
 ): FunctionLengthSection<Row> {
-  const rows = fileScopedRows(arrayValue<Row>(section.items), { includeTests });
+  const rows = fileScopedRows(section?.items ?? [], { includeTests });
   return {
     ...describeNumbers(rows.map((row) => Number(row.count ?? 0))),
     items: rows,
@@ -212,7 +191,7 @@ function compactVariableNameLengthRows(rows: Row[]): Row[] {
     name: String(row.name ?? ""),
     path: String(row.file ?? ""),
     ...(Number(row.line ?? 0) > 0 ? { line: Number(row.line) } : {}),
-    characters: String(row.name ?? "").length,
+    nameLength: String(row.name ?? "").length,
     mentions: Number(row.count ?? 0),
   }));
 }

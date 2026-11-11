@@ -1,14 +1,14 @@
 /** Checks the likely-entry ranking behind inspect's navigation context. */
 import { describe, expect, it } from "vitest";
 
-import type { GraphNode, GraphPayload } from "../src/codemap/source/graph/index.js";
 import {
   buildLikelyEntries,
   buildPathRankedLikelyEntries,
-  inventoryFileNodes,
-} from "../src/codemap/source/graph/index.js";
+} from "../src/codemap/inspect/likely-entries.js";
+import type { GraphNode, GraphPayload } from "../src/codemap/source/graph/index.js";
+import { inventoryFileNodes } from "../src/codemap/source/graph/index.js";
 
-describe("source graph likely-entry ranking", () => {
+describe("inspect likely-entry ranking", () => {
   it("prefers production entry files over test files in normal graph rankings", () => {
     const entries = buildLikelyEntries(
       [node("src/index.ts"), node("src/index.test.ts"), node("src/helpers.ts")],
@@ -22,8 +22,8 @@ describe("source graph likely-entry ranking", () => {
       ],
     );
 
-    expect(entries.map((entry) => entry.title)).not.toContain("src/index.test.ts");
-    expect(entries[0]?.title).toBe("src/index.ts");
+    expect(entries.map((entry) => entry.file)).not.toContain("src/index.test.ts");
+    expect(entries[0]?.file).toBe("src/index.ts");
   });
 
   it("treats only conventional test paths as test files when tagging inventory nodes", () => {
@@ -38,7 +38,7 @@ describe("source graph likely-entry ranking", () => {
       ),
     );
 
-    expect(entries.map((entry) => entry.title).sort()).toEqual([
+    expect(entries.map((entry) => entry.file).sort()).toEqual([
       "src/inspect/render.ts",
       "src/latest.ts",
     ]);
@@ -58,7 +58,7 @@ describe("source graph likely-entry ranking", () => {
       node("ui/src/main.ts"),
       node("test/helpers/index.ts"),
     ]);
-    expect(entries.map((entry) => entry.title).slice(0, 5)).toEqual([
+    expect(entries.map((entry) => entry.file).slice(0, 5)).toEqual([
       "src/index.ts",
       "src/cli/run-main.ts",
       "src/gateway/server.ts",
@@ -117,20 +117,20 @@ describe("source graph likely-entry ranking", () => {
       ],
     );
 
-    expect(entries.map((entry) => entry.title).slice(0, 5)).toEqual([
+    expect(entries.map((entry) => entry.file).slice(0, 5)).toEqual([
       "libs/langchain_v1/langchain/agents/__init__.py",
       "libs/core/langchain_core/language_models/chat_models.py",
       "libs/core/langchain_core/agents.py",
       "libs/langchain_v1/langchain/agents/factory.py",
       "libs/core/langchain_core/runnables/config.py",
     ]);
-    expect(entries.map((entry) => entry.title).slice(0, 5)).not.toContain(
+    expect(entries.map((entry) => entry.file).slice(0, 5)).not.toContain(
       "libs/core/langchain_core/exceptions.py",
     );
-    expect(entries.map((entry) => entry.title).slice(0, 5)).not.toContain(
+    expect(entries.map((entry) => entry.file).slice(0, 5)).not.toContain(
       "libs/langchain/langchain_classic/_api/__init__.py",
     );
-    expect(entries.map((entry) => entry.title)).toContain(
+    expect(entries.map((entry) => entry.file)).toContain(
       "libs/langchain/langchain_classic/_api/__init__.py",
     );
     expect(entries.slice(0, 4).map((entry) => entry.role)).toEqual([
@@ -165,7 +165,7 @@ describe("source graph likely-entry ranking", () => {
       ],
     );
 
-    const titles = entries.map((entry) => entry.title);
+    const titles = entries.map((entry) => entry.file);
     expect(titles.slice(0, 2)).toEqual([
       "libs/core/langchain_core/messages/__init__.py",
       "libs/core/langchain_core/language_models/__init__.py",

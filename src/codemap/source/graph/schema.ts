@@ -1,4 +1,4 @@
-/** Current-tree graph shapes shared by graph search fallback and inspection. Node ids are `type:path` for files and `type:path:name` for definitions. */
+/** Working-tree graph shapes shared by graph search fallback and inspection. Node ids are `type:path` for files and `type:path:name` for definitions. */
 export type GraphNode = {
   id: string;
   type: string;
@@ -6,7 +6,8 @@ export type GraphNode = {
   filePath: string;
   summary: string;
   tags: string[];
-  lineRange?: Array<number | null>;
+  /** First and last line of a function or class; absent on file nodes. */
+  lineRange?: [number, number];
 };
 
 export type GraphEdge = {

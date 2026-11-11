@@ -4,8 +4,9 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../src/codemap/common.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../src/codemap/common.js")>();
+vi.mock("../src/codemap/source/graph/working-tree.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../src/codemap/source/graph/working-tree.js")>();
   return {
     ...actual,
     DETAILED_ANALYSIS_FILE_LIMIT: 2,
@@ -62,7 +63,7 @@ describe("large-repo command fallbacks", () => {
     const output = logLines().join("\n");
     expect(output).toContain("\nNo whole-query source match; partial candidates:");
     expect(output).toContain("  Fallback: large repo; structural partial search skipped.");
-    expect(output).toContain("./src/policy.ts [terms 2/3: policy, attestation]");
+    expect(output).toContain("  - src/policy.ts [terms 2/3: policy, attestation]");
     expect(output).toContain("1:24 export function resolveAttestation()");
     expect(output).not.toContain("ast-grep");
   });

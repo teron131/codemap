@@ -1,12 +1,13 @@
 /** Ranks up to eight likely navigation starts for inspect from import centrality and path conventions. Without a detailed graph, path conventions alone decide. */
 import path from "node:path";
 
-import { compareText } from "../../text-utils.js";
-import { isGeneratedPath } from "../scanner/index.js";
-import type { GraphEdge, GraphNode } from "./schema.js";
+import { pathDepth } from "../path-utils.js";
+import type { GraphEdge, GraphNode } from "../source/graph/index.js";
+import { isGeneratedPath } from "../source/scanner/index.js";
+import { compareText } from "../text-utils.js";
 
 export type LikelyEntry = {
-  title: string;
+  file: string;
   role: string;
   reason: string;
   description: string;
@@ -63,8 +64,8 @@ function likelyEntryCandidates(nodes: GraphNode[]): GraphNode[] {
   const fileNodes = nodes.filter(
     (node) => node.filePath && !["function", "class"].includes(node.type),
   );
-  const codeNodes = fileNodes.filter((node) => (node.tags ?? []).includes("code"));
-  const productionCodeNodes = codeNodes.filter((node) => !(node.tags ?? []).includes("test"));
+  const codeNodes = fileNodes.filter((node) => node.tags.includes("code"));
+  const productionCodeNodes = codeNodes.filter((node) => !node.tags.includes("test"));
   const baseCandidates =
     productionCodeNodes.length > 0
       ? productionCodeNodes
@@ -83,7 +84,7 @@ function likelyEntryRow(
 ): LikelyEntry {
   const role = likelyEntryRole(node, relationshipCount);
   return {
-    title: String(node.filePath || node.name || node.id),
+    file: node.filePath || node.name || node.id,
     role: role.label,
     reason: role.reason,
     description,
@@ -103,7 +104,7 @@ function likelyEntryDescription(
   if (incoming + outgoing <= 1) {
     return `Low-relationship source file with ${importEdgeCountText(incoming, "incoming")} and ${importEdgeCountText(outgoing, "outgoing")}.`;
   }
-  return `High-signal file with ${incoming} incoming and ${outgoing} outgoing import edges.`;
+  return `Source file with ${incoming} incoming and ${outgoing} outgoing import edges.`;
 }
 
 function importEdgeCountText(count: number, direction: string): string {
@@ -148,7 +149,7 @@ function likelyEntryScore(
   const filePath = node.filePath;
   const centrality = incoming + outgoing;
   let score = Math.min(centrality, 120);
-  if ((node.tags ?? []).includes("entry-candidate")) {
+  if (node.tags.includes("entry-candidate")) {
     score += isShallowEntrypoint(filePath) ? 80 : 12;
   }
   if (isPackageSurfacePath(filePath) && !isSupportApiPath(filePath)) {
@@ -257,7 +258,7 @@ function likelyEntryRole(node: GraphNode, relationshipCount?: number): LikelyEnt
       reason: "workflow-owning implementation filename",
     };
   }
-  if ((node.tags ?? []).includes("entry-candidate")) {
+  if (node.tags.includes("entry-candidate")) {
     return {
       label: "entry file",
       reason: "conventional app, main, or index filename",
@@ -299,7 +300,7 @@ function isServerEntryPath(filePath: string): boolean {
 }
 
 function entryCandidateRank(node: GraphNode): number {
-  return (node.tags ?? []).includes("entry-candidate") ? 0 : 1;
+  return node.tags.includes("entry-candidate") ? 0 : 1;
 }
 
 /** Ranks likely application roots before broad plugin, extension, and test catalogs. */
@@ -375,8 +376,4 @@ function countBy<T>(items: T[], keyFor: (item: T) => string): Map<string, number
     counts.set(key, (counts.get(key) ?? 0) + 1);
   }
   return counts;
-}
-
-function pathDepth(filePath: string): number {
-  return filePath.split("/").length;
 }

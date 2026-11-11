@@ -4,14 +4,14 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { isIgnorableFileComment } from "../src/codemap/source/docstrings/index.js";
+import { isIgnorableFileComment } from "../src/codemap/source/docstrings/typescript.js";
+import { readmeSummaryFromText } from "../src/codemap/summary/architecture/readme.js";
 import {
   buildSourceContext,
-  filePreview,
+  fileDescription,
   resolveSourceSymbol,
   symbolDescription,
 } from "../src/codemap/summary/architecture/source-context.js";
-import { readmeSummaryFromText } from "../src/codemap/summary/index.js";
 
 const workspaceRoot = process.cwd();
 let workDir: string | null = null;
@@ -231,7 +231,7 @@ describe("summary source resolution", () => {
     }
     const source = buildSourceContext(workDir);
     for (const [file, text, original, updated] of sources) {
-      expect(filePreview(source, file)).toBe("Coordinates request workflows.");
+      expect(fileDescription(source, file)).toBe("Coordinates request workflows.");
       const symbol =
         source.symbolsByName.get("execute")?.find((candidate) => candidate.file === file) ?? null;
       expect(symbolDescription(source, symbol)).toBe(original);

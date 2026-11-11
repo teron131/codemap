@@ -1,22 +1,26 @@
-/** Builds one repository summary from current-tree documentation and Codebase Memory structure. The local skeleton and public API survive when the backend is unavailable. */
+/** Builds one repository summary from working-tree documentation and Codebase Memory structure. The local skeleton and public API survive when the backend is unavailable. */
 import path from "node:path";
 
-import { codebaseMemoryFailureReason } from "../../codebase-memory/client.js";
+import { codebaseMemoryFailureReason } from "../../codebase-memory/index.js";
 import type { RepositorySummary } from "../schema.js";
 import { publicExportSurfaces } from "./exports.js";
 import { readmeSummary } from "./readme.js";
-import { relationshipEvidence, relationshipSummaries } from "./relationships.js";
+import {
+  fetchRelationshipEvidence,
+  relationshipSummaries,
+  workingTreeRelationshipRows,
+} from "./relationships.js";
 import { buildSourceContext, languageSummaries } from "./source-context.js";
-import { currentTreeRelationshipRows, structuralSummary } from "./structure.js";
+import { structuralSummary } from "./structure.js";
 
 export function buildRepositorySummary(root: string): RepositorySummary {
   const source = buildSourceContext(root);
-  const evidence = relationshipEvidence(root, source.files.length);
-  const currentTreeRelationships = currentTreeRelationshipRows(source);
+  const evidence = fetchRelationshipEvidence(root, source.files.length);
+  const workingTreeRelationships = workingTreeRelationshipRows(source);
   const structural = structuralSummary(
     evidence?.relationships ?? [],
     source,
-    currentTreeRelationships,
+    workingTreeRelationships,
   );
   const relationshipSummary =
     evidence === null ? null : relationshipSummaries(evidence.architecture, source);
@@ -24,10 +28,10 @@ export function buildRepositorySummary(root: string): RepositorySummary {
     project: path.basename(root),
     readme: readmeSummary(root),
     languages: languageSummaries(source),
-    exportSurfaces: publicExportSurfaces(source, structural, currentTreeRelationships),
-    structuralSignals: structural.signals,
+    publicSurfaces: publicExportSurfaces(source, structural, workingTreeRelationships),
+    structuralRoles: structural.roles,
     structuralOutlines: structural.outlines,
-    hotspots: relationshipSummary?.hotspots ?? [],
+    mostCalled: relationshipSummary?.mostCalled ?? [],
     clusters: relationshipSummary?.clusters ?? [],
     relationshipEvidenceAvailable: evidence !== null,
     relationshipEvidenceFailureReason: evidence === null ? codebaseMemoryFailureReason(root) : null,

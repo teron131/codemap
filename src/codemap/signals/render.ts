@@ -25,7 +25,7 @@ export function renderSignalText(payload: Record<string, unknown>, section: Sign
   const coverage = recordValue(payload.coverage);
   if (coverage.mode === "bounded") {
     lines.push(
-      `coverage: bounded current tree; parsed=${numberValue(coverage.parsedFiles)}, eligible=${numberValue(coverage.eligibleFiles)}`,
+      `coverage: bounded working tree; parsed=${numberValue(coverage.parsedFiles)}, eligible=${numberValue(coverage.eligibleFiles)}`,
       "",
     );
   }
@@ -130,7 +130,7 @@ function functionMetricRankingTitle(rows: Row[]): string {
   if (backendRows === rows.length) {
     return "Function Metrics (cognitive, cyclomatic, then length)";
   }
-  return "Function Metrics (backend complexity, then local length fallback)";
+  return "Function Metrics (backend complexity, then working-tree length fallback)";
 }
 
 function appendCompactSignalRows(
@@ -158,7 +158,7 @@ function functionMetricFacts(row: Row): string[] {
     facts.push(`cyclomatic=${numberValue(row.cyclomatic)}`);
   }
   facts.push(`lines=${numberValue(row.lines)}`);
-  appendPositiveFact(facts, row, "linearScanInLoop", "linear_scan_in_loop");
+  appendPositiveFact(facts, row, "hiddenQuadratic", "hidden_quadratic");
   if ("mentions" in row) {
     facts.push(`mentions=${numberValue(row.mentions)}`);
   }
@@ -173,7 +173,7 @@ function functionMentionFacts(row: Row): string[] {
 }
 
 function variableNameLengthFacts(row: Row): string[] {
-  return [`characters=${numberValue(row.characters)}`, `mentions=${numberValue(row.mentions)}`];
+  return [`name_length=${numberValue(row.nameLength)}`, `mentions=${numberValue(row.mentions)}`];
 }
 
 function signalLocation(row: Row): string {
@@ -267,7 +267,7 @@ function appendVariableNameLengthRows(lines: string[], rows: Row[]): void {
   lines.push("## Variables by Name Length (longest, then fewest mentions)");
   for (const row of rows) {
     lines.push(
-      `- ${row.identifier ?? row.name}: characters=${String(row.name ?? "").length}, mentions=${numberValue(row.count)}`,
+      `- ${row.identifier ?? row.name}: name_length=${String(row.name ?? "").length}, mentions=${numberValue(row.count)}`,
     );
   }
   lines.push("");
@@ -307,7 +307,7 @@ function appendSignalStats(lines: string[], stats: Record<string, unknown>): voi
     for (const [metric, value] of Object.entries(group)) {
       const metricStats = recordValue(value);
       if (Object.keys(metricStats).length > 0) {
-        rows.push([`${groupLabel} ${metric}`, metricStats]);
+        rows.push([`${groupLabel} ${spacedWords(metric)}`, metricStats]);
       }
     }
   }
@@ -323,6 +323,11 @@ function appendSignalStats(lines: string[], stats: Record<string, unknown>): voi
     }
   }
   lines.push("");
+}
+
+/** Spells a camelCase payload key as lowercase words, as in `nameLength` → `name length`. */
+function spacedWords(key: string): string {
+  return key.replace(/[A-Z]/g, (letter) => ` ${letter.toLowerCase()}`);
 }
 
 function numericStatsText(stats: Record<string, unknown>): string {
@@ -497,7 +502,7 @@ function appendKnownCounter(counters: string[], item: Row, key: string, label: s
 }
 
 function denseFileScoreText(item: Row): string {
-  const label = item.total_label === "lines" ? "lines" : "signals";
+  const label = item.total_label === "lines" ? "lines" : "declarations";
   return `${label}=${numberValue(item.total)}`;
 }
 

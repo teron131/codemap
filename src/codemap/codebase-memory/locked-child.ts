@@ -1,4 +1,4 @@
-/** Per-call child that `transport.ts` runs synchronously. It drives the official async MCP client and holds the project lock until the provider process has exited. */
+/** Per-call child that `transport.ts` runs synchronously. It drives the official async MCP client and holds the project lock until the backend process has exited. */
 import { readFileSync, writeFileSync, writeSync } from "node:fs";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -104,7 +104,7 @@ async function run(): Promise<void> {
     await client.close().catch((error: unknown) => {
       failures.push(error);
     });
-    // SDK close can return immediately after SIGKILL; retain the lock until the OS reaps the provider.
+    // SDK close can return immediately after SIGKILL; retain the lock until the OS reaps the backend.
     await exited;
     process.removeListener("SIGTERM", terminate);
     process.removeListener("SIGINT", terminate);

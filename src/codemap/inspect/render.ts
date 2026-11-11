@@ -1,21 +1,23 @@
-/** Current-tree `inspect` profiles from the local graph, or path-only ones above the detailed-analysis limit. */
+/** Working-tree `inspect` profiles from the local graph, or path-only ones above the detailed-analysis limit. */
 import path from "node:path";
 
-import { DETAILED_ANALYSIS_FILE_LIMIT } from "../common.js";
 import { docstringForSymbol } from "../source/docstrings/index.js";
-import { runScan } from "../source/extraction/index.js";
+import { buildInventory } from "../source/extraction/index.js";
 import {
-  buildLikelyEntries,
-  buildPathRankedLikelyEntries,
+  DETAILED_ANALYSIS_FILE_LIMIT,
   edgeRelationshipLabel,
   type GraphEdge,
   type GraphNode,
   type GraphPayload,
   inventoryFileNodes,
-  type LikelyEntry,
   relatedEdges,
 } from "../source/graph/index.js";
-import { currentTreeInspectGraph, type InspectMetrics } from "./graph.js";
+import { type InspectMetrics, workingTreeInspectGraph } from "./graph.js";
+import {
+  buildLikelyEntries,
+  buildPathRankedLikelyEntries,
+  type LikelyEntry,
+} from "./likely-entries.js";
 import {
   appendFileProfile,
   appendLikelyEntryContext,
@@ -29,28 +31,29 @@ import {
 import { inspectCandidates, inspectPathTargetKind, nodeLabel, normalizeTarget } from "./targets.js";
 
 /** Null when the target matches nothing, leaving the no-match message to the command. */
-export function renderCurrentTreeInspection(
+export function renderWorkingTreeInspection(
   root: string,
-  target: string,
+  rawTarget: string,
   { limit }: { limit: number },
 ): string | null {
-  const scan = runScan(root);
+  const target = normalizeTarget(root, rawTarget);
+  const inventory = buildInventory(root);
   const pathTargetKind = inspectPathTargetKind(root, target);
-  if (pathTargetKind !== null && scan.length > DETAILED_ANALYSIS_FILE_LIMIT) {
+  if (pathTargetKind !== null && inventory.length > DETAILED_ANALYSIS_FILE_LIMIT) {
     const inspection =
       pathTargetKind === "directory"
-        ? renderLightweightDirectoryInspection(root, target, scan, { limit })
-        : renderLightweightFileInspection(root, target, scan, {
+        ? renderLightweightDirectoryInspection(target, inventory, { limit })
+        : renderLightweightFileInspection(root, target, inventory, {
             limit,
             likelyEntries: likelyEntriesByFile(
-              buildPathRankedLikelyEntries(inventoryFileNodes(scan)),
+              buildPathRankedLikelyEntries(inventoryFileNodes(inventory)),
             ),
           });
     if (inspection !== null) {
       return inspection;
     }
   }
-  const [graph, metrics] = currentTreeInspectGraph(root, target, scan);
+  const [graph, metrics] = workingTreeInspectGraph(root, target, inventory);
   return renderInspection(root, graph, metrics, target, {
     limit,
     likelyEntries: likelyEntriesByFile(buildLikelyEntries(graph.nodes, graph.edges)),
@@ -59,7 +62,7 @@ export function renderCurrentTreeInspection(
 
 /** Keys likely-entry rows by their source file path. */
 function likelyEntriesByFile(entries: LikelyEntry[]): Map<string, LikelyEntry> {
-  return new Map(entries.map((entry) => [entry.title, entry]));
+  return new Map(entries.map((entry) => [entry.file, entry]));
 }
 
 function edgeEndpoint(edge: GraphEdge, nodeId: string, nodesById: Map<string, GraphNode>): string {
@@ -125,10 +128,9 @@ function renderInspection(
   root: string,
   graph: GraphPayload,
   metrics: InspectMetrics,
-  rawTarget: string,
+  target: string,
   { limit, likelyEntries }: { limit: number; likelyEntries: Map<string, LikelyEntry> },
 ): string | null {
-  const target = normalizeTarget(root, rawTarget);
   const directoryProfile = renderDirectoryProfile(root, graph, metrics, target, {
     limit,
   });
@@ -184,7 +186,7 @@ function docstringForNode(root: string, node: GraphNode): string | null {
     displayPath: relPath,
     kind: node.type,
     name: node.name,
-    line: Number(node.lineRange?.[0] ?? 0),
+    line: node.lineRange?.[0] ?? 0,
   });
 }
 

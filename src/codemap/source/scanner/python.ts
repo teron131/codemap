@@ -4,11 +4,11 @@ import path from "node:path";
 
 import type { SgNode } from "@ast-grep/napi";
 
-import { astGrepRoot } from "../../ast-grep/adapter.js";
+import { astGrepRoot } from "../../ast-grep.js";
 import { ENTRYPOINT_BASENAMES } from "./constants.js";
 import {
   addSample,
-  addVariableSignal,
+  addVariableDefinition,
   createFileMetrics,
   type FileMetrics,
   type PythonImport,
@@ -87,7 +87,6 @@ export function scanPythonFile(
             .filter((base) => !["keyword_argument", "comment"].includes(String(base.kind()))) ?? [];
         for (const base of bases) {
           metrics.inherits += 1;
-          metrics.pyBases.push(base.text());
           addSample(metrics.samples, base.text());
         }
       }
@@ -112,7 +111,7 @@ export function scanPythonFile(
       const moduleLevel = scopes.length === 0;
       if (moduleLevel) {
         for (const name of names)
-          addVariableSignal(metrics, relPath, name, {
+          addVariableDefinition(metrics, relPath, name, {
             startLine: range.start.line + 1,
             moduleLevel,
           });
@@ -165,16 +164,15 @@ function collectImport(metrics: FileMetrics, node: SgNode): void {
   let statement: PythonImport;
   if (node.kind() === "import_statement") {
     statement = { kind: "import", names };
-    metrics.pyImportTargets.push(...names);
+    metrics.pythonImportTargets.push(...names);
   } else {
     const raw = node.field("module_name")?.text() ?? "";
     const level = raw.match(/^\.+/)?.[0].length ?? 0;
     statement = { kind: "from", level, module: raw.slice(level), names };
     for (const name of names) {
       const target = raw || name;
-      metrics.pyImportTargets.push(target);
+      metrics.pythonImportTargets.push(target);
       if (level > 0) {
-        metrics.pyLocalImportTargets.push(target);
         metrics.importsLocal += 1;
         addSample(metrics.samples, target);
       }

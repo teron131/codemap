@@ -59,11 +59,11 @@ describe("signals CLI", () => {
     expect(output).not.toContain("cognitive, cyclomatic");
   });
 
-  it("renders current-tree population statistics before ranked rows", () => {
+  it("renders working-tree population statistics before ranked rows", () => {
     const output = renderSignalText(
       {
         stats: {
-          source: "currentTree",
+          source: "workingTree",
           functions: {
             lines: {
               count: 4,
@@ -112,7 +112,7 @@ describe("signals CLI", () => {
 
     expect(output).toContain("backend: skipped");
     expect(output).toContain("backend reason: eligible source files exceed 10000");
-    expect(output).toContain("coverage: bounded current tree; parsed=100, eligible=14071");
+    expect(output).toContain("coverage: bounded working tree; parsed=100, eligible=14071");
   });
 
   it("globally orders detailed function rows across languages", () => {
@@ -179,31 +179,34 @@ describe("signals CLI", () => {
   it("filters tests, bundles, and non-source files in lightweight signal rows", () => {
     const payload = buildLightweightSignalPayload(
       [
-        scanEntry("src/app.ts", "typescript", 30),
-        scanEntry("src/app.test.ts", "typescript", 500),
-        scanEntry("libs/standard-tests/chat_models.py", "python", 700),
-        scanEntry("libs/langchain-core/src/load/import_map.ts", "typescript", 1000),
-        scanEntry("src/a2ui.bundle.js", "javascript", 900),
-        scanEntry("src/styles.css", "css", 800),
-        scanEntry("src/worker.py", "python", 40),
+        inventoryEntry("src/app.ts", "typescript", 30),
+        inventoryEntry("src/app.test.ts", "typescript", 500),
+        inventoryEntry("libs/standard-tests/chat_models.py", "python", 700),
+        inventoryEntry("libs/langchain-core/src/load/import_map.ts", "typescript", 1000),
+        inventoryEntry("src/a2ui.bundle.js", "javascript", 900),
+        inventoryEntry("src/styles.css", "css", 800),
+        inventoryEntry("src/worker.py", "python", 40),
       ],
-      { includeTests: false },
+      { includeTests: false, root: workDir },
     );
 
     expect(fileRows(payload)).toEqual(["src/worker.py", "src/app.ts"]);
     expect(payload.coverage).toEqual({
       mode: "bounded",
       eligibleFiles: 2,
-      parsedFiles: 0,
+      parsedFiles: 2,
     });
     expect(firstDenseRow(payload).total_label).toBe("lines");
     const output = renderSignalText(selectPayloadSection(payload, "top"), "top");
-    expect(output).toContain("coverage: bounded current tree; parsed=0, eligible=2");
+    expect(output).toContain("coverage: bounded working tree; parsed=2, eligible=2");
     expect(output).toContain("No ranked source rows.");
 
     const withTests = buildLightweightSignalPayload(
-      [scanEntry("src/app.ts", "typescript", 30), scanEntry("src/app.test.ts", "typescript", 500)],
-      { includeTests: true },
+      [
+        inventoryEntry("src/app.ts", "typescript", 30),
+        inventoryEntry("src/app.test.ts", "typescript", 500),
+      ],
+      { includeTests: true, root: workDir },
     );
 
     expect(fileRows(withTests)).toEqual(["src/app.test.ts", "src/app.ts"]);
@@ -228,8 +231,11 @@ describe("signals CLI", () => {
     );
 
     const payload = buildLightweightSignalPayload(
-      [scanEntry("src/large.ts", "typescript", 500), scanEntry("src/small.ts", "typescript", 20)],
-      { root: workDir },
+      [
+        inventoryEntry("src/large.ts", "typescript", 500),
+        inventoryEntry("src/small.ts", "typescript", 20),
+      ],
+      { includeTests: false, root: workDir },
     );
     const first = firstDenseRow(payload);
 
@@ -246,7 +252,7 @@ describe("signals CLI", () => {
     const top = selectPayloadSection(payload, "top");
     expect(top).toMatchObject({
       stats: {
-        source: "currentTree",
+        source: "workingTree",
         functions: {
           lines: {
             count: 2,
@@ -363,7 +369,7 @@ describe("signals CLI", () => {
     expect(payload).not.toHaveProperty("top");
     expect(payload.docstrings).toEqual({});
     expect(payload.stats).toMatchObject({
-      source: "currentTree",
+      source: "workingTree",
       functions: {
         lines: {
           count: 2,
@@ -534,14 +540,14 @@ describe("signals CLI", () => {
     expect(payload).toMatchObject({
       freshness: "degraded",
       stats: {
-        source: "currentTree",
+        source: "workingTree",
         functions: {
           lines: {
             count: 400,
           },
         },
         variables: {
-          characters: {
+          nameLength: {
             count: 400,
           },
         },
@@ -616,7 +622,7 @@ describe("signals CLI", () => {
   });
 });
 
-function scanEntry(pathValue: string, language: string, sizeLines: number) {
+function inventoryEntry(pathValue: string, language: string, sizeLines: number) {
   return {
     path: pathValue,
     language,

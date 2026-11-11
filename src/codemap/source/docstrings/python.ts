@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 
 import type { SgNode } from "@ast-grep/napi";
 
-import { astGrepRoot } from "../../ast-grep/adapter.js";
+import { astGrepRoot } from "../../ast-grep.js";
 import type { ClassReport, FileReport, FunctionReport } from "./models.js";
 
 type Definition = {
@@ -51,9 +51,9 @@ export function buildPythonFileReport(
   report.fileDocstring = bodyDocstring(root);
   for (const definition of collectDefinitions(root)) {
     if (definition.node.kind() === "function_definition") {
-      report.functions.push(buildFunctionReport(definition));
+      report.functions.push(functionReport(definition));
     } else {
-      report.classes.push(buildClassReport(definition));
+      report.classes.push(classReport(definition));
     }
   }
   return report;
@@ -79,7 +79,7 @@ function collectDefinitions(root: SgNode): Definition[] {
   return topLevel;
 }
 
-function buildFunctionReport({ node, children }: Definition): FunctionReport {
+function functionReport({ node, children }: Definition): FunctionReport {
   const parameters = node.field("parameters")?.namedChildren() ?? [];
   return {
     name: node.field("name")?.text() ?? "",
@@ -93,21 +93,21 @@ function buildFunctionReport({ node, children }: Definition): FunctionReport {
     docstring: bodyDocstring(node.field("body")),
     nestedFunctions: children
       .filter((child) => child.node.kind() === "function_definition")
-      .map(buildFunctionReport),
+      .map(functionReport),
   };
 }
 
-function buildClassReport({ node, children }: Definition): ClassReport {
+function classReport({ node, children }: Definition): ClassReport {
   return {
     name: node.field("name")?.text() ?? "",
     lineno: node.range().start.line + 1,
     docstring: bodyDocstring(node.field("body")),
     methods: children
       .filter((child) => child.node.kind() === "function_definition")
-      .map(buildFunctionReport),
+      .map(functionReport),
     nestedClasses: children
       .filter((child) => child.node.kind() === "class_definition")
-      .map(buildClassReport),
+      .map(classReport),
   };
 }
 

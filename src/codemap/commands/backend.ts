@@ -1,7 +1,6 @@
-/** `backend` diagnostics and the `index` refresh. Every command rebuilds the project index first, prints compact text unless `--json`, and appends the provider's failure reason on error. */
+/** `backend` diagnostics and the `index` refresh. Every command rebuilds the project index first, prints compact text unless `--json`, and appends the backend's failure reason on error. */
 import type { Command } from "commander";
 
-import { canonicalPath } from "../codebase-memory/cache.js";
 import {
   type CodebaseMemoryChangeOptions,
   codebaseMemoryChanges,
@@ -13,10 +12,15 @@ import {
   codebaseMemoryStatus,
   type CodebaseMemoryStatusResult,
 } from "../codebase-memory/index.js";
-import { resolveProjectRoot } from "../common.js";
 import { arrayValue, numberField, recordValue, stringField } from "../json-utils.js";
+import { canonicalPath } from "../path-utils.js";
 import { uniqueStrings } from "../text-utils.js";
-import { addProjectRootArgument, parseIntegerOption, type ProjectRootOptions } from "./options.js";
+import {
+  addProjectRootArgument,
+  parseIntegerOption,
+  type ProjectRootOptions,
+  resolveProjectRoot,
+} from "./options.js";
 
 type BackendQueryOptions = ProjectRootOptions & {
   maxRows?: number;
@@ -96,7 +100,7 @@ export function commandBackendProjects(
   options: ProjectRootOptions,
   rootOptions: ProjectRootOptions = {},
 ): number {
-  const root = resolveBackendRoot(options, rootOptions);
+  const root = resolveProjectRoot(options, rootOptions);
   const result = codebaseMemoryProjects(root);
   if (result !== null) {
     console.log(renderBackendProjects(result, root));
@@ -110,7 +114,7 @@ export function commandBackendStatus(
   options: ProjectRootOptions,
   rootOptions: ProjectRootOptions = {},
 ): number {
-  const root = resolveBackendRoot(options, rootOptions);
+  const root = resolveProjectRoot(options, rootOptions);
   const result = codebaseMemoryStatus(root);
   if (result !== null) {
     console.log(renderBackendStatus(result));
@@ -124,7 +128,7 @@ export function commandBackendSchema(
   options: ProjectRootOptions,
   rootOptions: ProjectRootOptions = {},
 ): number {
-  const root = resolveBackendRoot(options, rootOptions);
+  const root = resolveProjectRoot(options, rootOptions);
   const result = codebaseMemorySchema(root);
   if (result !== null) {
     console.log(renderBackendSchema(result));
@@ -150,7 +154,7 @@ export function commandBackendQuery(
     );
     return 2;
   }
-  const root = resolveBackendRoot(options, rootOptions);
+  const root = resolveProjectRoot(options, rootOptions);
   const result = codebaseMemoryQuery(root, queryText, options.maxRows);
   if (result !== null) {
     console.log(options.json ? JSON.stringify(result) : renderQueryRows(result));
@@ -164,7 +168,7 @@ export function commandBackendChanges(
   options: BackendChangesOptions,
   rootOptions: ProjectRootOptions = {},
 ): number {
-  const root = resolveBackendRoot(options, rootOptions);
+  const root = resolveProjectRoot(options, rootOptions);
   const result = codebaseMemoryChanges(root, options);
   if (result !== null) {
     console.log(options.json ? JSON.stringify(result) : renderBackendChanges(result));
@@ -178,7 +182,7 @@ export function commandIndex(
   options: ProjectRootOptions,
   rootOptions: ProjectRootOptions = {},
 ): number {
-  const root = resolveBackendRoot(options, rootOptions);
+  const root = resolveProjectRoot(options, rootOptions);
   const result = codebaseMemoryIndex(root);
   if (result !== null) {
     const elapsed =
@@ -186,7 +190,7 @@ export function commandIndex(
         ? `${result.elapsedMs.toFixed(1)} ms`
         : `${(result.elapsedMs / 1000).toFixed(2)} s`;
     console.log(
-      ["CodebaseMemory refresh complete", `elapsed: ${elapsed}`, renderBackendStatus(result)].join(
+      ["Codebase Memory refresh complete", `elapsed: ${elapsed}`, renderBackendStatus(result)].join(
         "\n",
       ),
     );
@@ -206,13 +210,9 @@ function mutatesGraph(query: string): boolean {
   return /\b(CREATE|MERGE|DELETE|DETACH|SET|REMOVE|DROP|LOAD\s+CSV)\b/i.test(query);
 }
 
-function resolveBackendRoot(options: ProjectRootOptions, rootOptions: ProjectRootOptions): string {
-  return resolveProjectRoot(options.projectRoot ?? rootOptions.projectRoot);
-}
-
 function renderBackendStatus(result: CodebaseMemoryStatusResult): string {
   const lines = [
-    `CodebaseMemory index: ${result.projectName}`,
+    `Codebase Memory index: ${result.projectName}`,
     `status: ${result.status}`,
     `nodes: ${result.nodes ?? "unknown"}`,
     `edges: ${result.edges ?? "unknown"}`,
@@ -242,7 +242,7 @@ function renderBackendProjects(value: unknown, currentRoot: string): string {
   const hiddenEphemeral =
     projects.length - otherProjects.length - (currentProject === undefined ? 0 : 1);
   const lines = [
-    `CodebaseMemory projects: ${projects.length}${hiddenEphemeral > 0 ? ` (hidden work: ${hiddenEphemeral})` : ""}`,
+    `Codebase Memory projects: ${projects.length}${hiddenEphemeral > 0 ? ` (hidden work: ${hiddenEphemeral})` : ""}`,
   ];
   if (currentProject !== undefined) {
     lines.push(`current: ${projectRow(currentProject)}`);
@@ -289,7 +289,7 @@ function renderBackendSchema(value: unknown): string {
   const nodeLabels = arrayValue(record.node_labels);
   const edgeTypes = arrayValue(record.edge_types);
   return [
-    `CodebaseMemory schema: ${nodeLabels.length} node labels, ${edgeTypes.length} edge types`,
+    `Codebase Memory schema: ${nodeLabels.length} node labels, ${edgeTypes.length} edge types`,
     ...nodeLabels.map((item) => `- node: ${schemaRow(item)}`),
     ...edgeTypes.map((item) => `- edge: ${schemaRow(item)}`),
   ].join("\n");
@@ -313,7 +313,7 @@ function renderQueryRows(value: unknown): string {
   const renderedRows = uniqueStrings(rows.map((row) => rowValueText(row)));
   const hiddenDuplicates = rows.length - renderedRows.length;
   const lines = [
-    `CodebaseMemory query rows: ${total}${hiddenDuplicates > 0 ? ` (hidden duplicates: ${hiddenDuplicates})` : ""}`,
+    `Codebase Memory query rows: ${total}${hiddenDuplicates > 0 ? ` (hidden duplicates: ${hiddenDuplicates})` : ""}`,
   ];
   for (const row of renderedRows) {
     lines.push(`- ${row}`);
@@ -356,7 +356,7 @@ function scalarRowText(value: string | number | boolean): string {
 
 function renderBackendChanges(value: unknown): string {
   const record = recordValue(value);
-  const lines = ["CodebaseMemory changed-code impact:"];
+  const lines = ["Codebase Memory changed-code impact:"];
   const changedFiles = arrayValue(record.changed_files).filter(
     (item): item is string => typeof item === "string" && item.length > 0,
   );

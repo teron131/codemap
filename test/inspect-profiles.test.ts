@@ -5,6 +5,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { appendFileProfileRow, renderDirectoryProfile } from "../src/codemap/inspect/profiles.js";
+import type { FileProfileRow } from "../src/codemap/signals/index.js";
 
 const workspaceRoot = process.cwd();
 let workDir: string;
@@ -27,19 +28,10 @@ describe("inspection profile rendering", () => {
   it("shows source line counts in file profiles", () => {
     const lines: string[] = [];
 
-    appendFileProfileRow(lines, [
-      {
-        file: "src/large.ts",
-        total: 0,
-        lines: 420,
-        defines: 0,
-        imports_local: 0,
-        exports: 0,
-      },
-    ]);
+    appendFileProfileRow(lines, emptyProfile("src/large.ts", 420));
 
     expect(lines.join("\n")).toContain(
-      "- signals=0, lines=420, defines=0, local_imports=0, exports=0",
+      "- declarations=0, lines=420, defines=0, local_imports=0, exports=0",
     );
   });
 
@@ -48,20 +40,31 @@ describe("inspection profile rendering", () => {
       workDir,
       { nodes: [], edges: [] },
       {
-        fileProfiles: [
-          {
-            file: "src/large.ts",
-            total: 0,
-            lines: 420,
-            defines: 0,
-            imports_local: 0,
-          },
-        ],
+        fileProfiles: [emptyProfile("src/large.ts", 420)],
       },
       "src",
       { limit: 4 },
     );
 
-    expect(output).toContain("- src/large.ts: signals=0, lines=420, defines=0, local_imports=0");
+    expect(output).toContain(
+      "- src/large.ts: declarations=0, lines=420, defines=0, local_imports=0",
+    );
   });
 });
+
+function emptyProfile(file: string, lines: number): FileProfileRow {
+  return {
+    file,
+    total: 0,
+    lines,
+    defines: 0,
+    imports_local: 0,
+    exports: 0,
+    reexports_local: 0,
+    extends: 0,
+    inherits: 0,
+    jsx_components: 0,
+    decorators: 0,
+    samples: [],
+  };
+}

@@ -1,10 +1,20 @@
 /** `search match`, `search calls`, and `search rule`: explicit ast-grep searches. Exit code 1 means no match and 127 an unavailable language. */
 import type { Command } from "commander";
 
-import { resolveProjectFile, type SyntaxMatch, SyntaxSearch } from "../ast-grep/index.js";
-import { resolveProjectRoot } from "../common.js";
-import { callMatches, resolveTargetPaths, searchRuleMatches } from "../search/structural.js";
-import { addProjectRootArgument, DEFAULT_ROW_LIMIT, parseIntegerOption } from "./options.js";
+import {
+  callMatches,
+  resolveProjectFile,
+  resolveTargetPaths,
+  searchRuleMatches,
+  type SyntaxMatch,
+  SyntaxSearch,
+} from "../search/index.js";
+import {
+  addProjectRootArgument,
+  DEFAULT_ROW_LIMIT,
+  parseIntegerOption,
+  resolveProjectRoot,
+} from "./options.js";
 
 type SearchMatchOptions = {
   projectRoot?: string | undefined;
@@ -85,7 +95,7 @@ export function addSearchRuleParser(command: Command): void {
 }
 
 function commandSearchMatch(options: SearchMatchOptions): number {
-  const root = resolveProjectRoot(options.projectRoot);
+  const root = resolveProjectRoot(options);
   const paths = resolveTargetPaths(root, options.paths ?? []);
   const search = new SyntaxSearch(root, paths);
   const languages = options.lang ? [options.lang] : search.languages();
@@ -124,7 +134,7 @@ function commandSearchCalls(options: SearchCallsOptions): number {
     console.log("Call-site limit must be a positive integer.");
     return 2;
   }
-  const root = resolveProjectRoot(options.projectRoot);
+  const root = resolveProjectRoot(options);
   const paths = resolveTargetPaths(root, options.paths ?? []);
   const search = new SyntaxSearch(root, paths);
   const languages = options.lang ? [options.lang] : search.languages();
@@ -161,7 +171,7 @@ function commandSearchCalls(options: SearchCallsOptions): number {
 }
 
 async function commandSearchRule(options: SearchRuleOptions): Promise<number> {
-  const root = resolveProjectRoot(options.projectRoot);
+  const root = resolveProjectRoot(options);
   const paths = resolveTargetPaths(root, options.paths ?? []);
   const rulePath = resolveProjectFile(root, options.rule);
   const matches = await searchRuleMatches(root, rulePath, paths);
@@ -192,8 +202,7 @@ function printSyntaxMatches(matches: SyntaxMatch[], { jsonOutput }: { jsonOutput
   for (const match of matches) {
     const lines = match.text.trimEnd().split(/\r?\n/);
     const text = lines.length > 1 ? `${lines[0] ?? ""} ...` : (lines[0] ?? "");
-    const engine = match.engine === "regex" ? " [regex]" : "";
-    console.log(`${match.filePath}:${match.line}:${match.column}${engine}: ${text}`);
+    console.log(`${match.filePath}:${match.line}:${match.column}: ${text}`);
   }
 }
 

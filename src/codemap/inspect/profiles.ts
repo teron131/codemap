@@ -1,29 +1,34 @@
 /** Markdown sections shared by every inspect profile, plus the lightweight file and directory profiles. */
 import path from "node:path";
 
-import { DETAILED_ANALYSIS_FILE_LIMIT, isDirectory } from "../common.js";
-import type { DenseFileRow } from "../signals/index.js";
-import { denseFileCounters } from "../signals/render.js";
-import { type ScanEntry, structureForFile } from "../source/extraction/index.js";
-import type { GraphNode, GraphPayload, LikelyEntry } from "../source/graph/index.js";
+import { isDirectory, isWithinDirectory } from "../path-utils.js";
+import { denseFileCounters, type FileProfileRow } from "../signals/index.js";
+import type { InventoryEntry } from "../source/extraction/index.js";
+import {
+  DETAILED_ANALYSIS_FILE_LIMIT,
+  type GraphNode,
+  type GraphPayload,
+  structureForFile,
+} from "../source/graph/index.js";
 import { type FileMetrics, scanFile } from "../source/scanner/index.js";
 import { compareText, uniqueStrings } from "../text-utils.js";
 import { importBoundaryRows, type InspectMetrics, metricsForFiles } from "./graph.js";
+import type { LikelyEntry } from "./likely-entries.js";
 
+/** Takes a normalized file target; null when the inventory does not hold it. */
 export function renderLightweightFileInspection(
   root: string,
-  target: string,
-  files: ScanEntry[],
+  relTarget: string,
+  files: InventoryEntry[],
   { limit, likelyEntries }: { limit: number; likelyEntries: Map<string, LikelyEntry> },
 ): string | null {
-  const relTarget = relativeTargetPath(root, target);
-  const scanEntry = files.find((entry) => entry.path === relTarget);
-  if (scanEntry === undefined) {
+  const inventoryEntry = files.find((entry) => entry.path === relTarget);
+  if (inventoryEntry === undefined) {
     return null;
   }
   const filePath = path.join(root, relTarget);
   const metrics = scanFile(filePath, { displayRoot: root });
-  const structure = structureForFile(root, scanEntry, {
+  const structure = structureForFile(root, inventoryEntry, {
     metricsByPath: { [relTarget]: metrics },
   });
   const functionCount = structure.functions.length;
@@ -31,7 +36,7 @@ export function renderLightweightFileInspection(
   const lines = [
     `# ${relTarget}`,
     "",
-    `${relTarget}: ${scanEntry.fileCategory} file in ${scanEntry.language}; ${scanEntry.sizeLines} lines; ${functionCount} functions, ${classCount} classes.`,
+    `${relTarget}: ${inventoryEntry.fileCategory} file in ${inventoryEntry.language}; ${inventoryEntry.sizeLines} lines; ${functionCount} functions, ${classCount} classes.`,
     `Fallback: detailed graph skipped above ${DETAILED_ANALYSIS_FILE_LIMIT} files; incoming imports not computed.`,
   ];
   appendLikelyEntryContext(lines, likelyEntries.get(relTarget));
@@ -47,25 +52,22 @@ export function renderLightweightFileInspection(
   );
   appendFileProfile(
     lines,
-    metricsForFiles(root, [scanEntry], { [relTarget]: metrics }),
+    metricsForFiles(root, [inventoryEntry], { [relTarget]: metrics }),
     relTarget,
     { limit },
   );
   return lines.join("\n").trim();
 }
 
+/** Takes a normalized directory target. */
 export function renderLightweightDirectoryInspection(
-  root: string,
-  target: string,
-  files: ScanEntry[],
+  relTarget: string,
+  files: InventoryEntry[],
   { limit }: { limit: number },
 ): string {
-  const relTarget = relativeTargetPath(root, target);
-  const rows =
-    relTarget === "." ? files : files.filter((entry) => entry.path.startsWith(`${relTarget}/`));
-  const title = relTarget === "." ? "." : relTarget.replace(/\/+$/, "");
+  const rows = files.filter((entry) => isWithinDirectory(entry.path, relTarget));
   const lines = [
-    `# ${title}/`,
+    `# ${relTarget || "."}/`,
     "",
     `Directory profile: ${rows.length} scanned files.`,
     `Fallback: detailed graph skipped above ${DETAILED_ANALYSIS_FILE_LIMIT} files.`,
@@ -135,17 +137,15 @@ export function appendFileProfile(
   }
   appendFileProfileRow(
     lines,
-    metrics.fileProfiles.filter((item) => item.file === relPath),
+    metrics.fileProfiles.find((item) => item.file === relPath),
   );
 }
 
-/** Renders only `rows[0]`. */
-export function appendFileProfileRow(lines: string[], rows: DenseFileRow[]): void {
-  const profile = rows[0];
+export function appendFileProfileRow(lines: string[], profile: FileProfileRow | undefined): void {
   if (profile === undefined) {
     return;
   }
-  const samples = (profile.samples ?? []).slice(0, 6).join(", ");
+  const samples = profile.samples.join(", ");
   lines.push("");
   lines.push("## File Profile");
   lines.push(`- ${denseFileCounters(profile)}`);
@@ -158,10 +158,9 @@ export function appendSymbolProfile(lines: string[], node: GraphNode): void {
   if (node.type !== "function" && node.type !== "class") {
     return;
   }
-  const lineRange = node.lineRange ?? [];
   const parts = [`file: ${node.filePath}`];
-  if (lineRange.length > 0) {
-    parts.push(`lines: ${String(lineRange[0])}-${String(lineRange.at(-1))}`);
+  if (node.lineRange !== undefined) {
+    parts.push(`lines: ${node.lineRange[0]}-${node.lineRange[1]}`);
   }
   lines.push("");
   lines.push(`## ${node.type === "function" ? "Function" : "Class"} Profile`);
@@ -191,12 +190,12 @@ export function renderVariableProfile(
   const rowFiles = new Set(rows.map((item) => item.file));
   appendFileProfileRow(
     lines,
-    metrics.fileProfiles.filter((row) => rowFiles.has(row.file)),
+    metrics.fileProfiles.find((row) => rowFiles.has(row.file)),
   );
   return lines.join("\n").trim();
 }
 
-/** Null when `target` is not a directory, so the caller can try symbol profiles. */
+/** Takes a normalized target; null when it is not a directory, so the caller can try symbol profiles. */
 export function renderDirectoryProfile(
   root: string,
   graph: GraphPayload,
@@ -207,16 +206,11 @@ export function renderDirectoryProfile(
   if (!isDirectory(path.join(root, target))) {
     return null;
   }
-  const prefix = `${target.replace(/\/+$/, "")}/`;
-  const rows =
-    target === "" || target === "."
-      ? metrics.fileProfiles
-      : metrics.fileProfiles.filter((item) => item.file.startsWith(prefix));
-  const title = target === "" || target === "." ? "." : target.replace(/\/+$/, "");
-  const totalDefines = rows.reduce((sum, item) => sum + (item.defines ?? 0), 0);
-  const totalImports = rows.reduce((sum, item) => sum + (item.imports_local ?? 0), 0);
+  const rows = metrics.fileProfiles.filter((item) => isWithinDirectory(item.file, target));
+  const totalDefines = rows.reduce((sum, item) => sum + item.defines, 0);
+  const totalImports = rows.reduce((sum, item) => sum + item.imports_local, 0);
   const lines = [
-    `# ${title}/`,
+    `# ${target || "."}/`,
     "",
     `Directory profile: ${rows.length} scanned files; defines ${totalDefines}; local imports ${totalImports}.`,
   ];
@@ -224,10 +218,7 @@ export function renderDirectoryProfile(
     lines,
     "Dense Files",
     rows
-      .toSorted(
-        (left, right) =>
-          (right.total ?? 0) - (left.total ?? 0) || compareText(left.file, right.file),
-      )
+      .toSorted((left, right) => right.total - left.total || compareText(left.file, right.file))
       .map((item) => `${item.file}: ${denseFileCounters(item)}`),
     limit,
   );
@@ -243,14 +234,8 @@ export function renderDirectoryProfile(
 /** Unresolved import specifiers, since the lightweight profile skips import resolution. */
 function fileImportSpecs(metrics: FileMetrics): string[] {
   return uniqueStrings([
-    ...metrics.pyImportTargets,
+    ...metrics.pythonImportTargets,
     ...metrics.typescriptImports.map((item) => item.target),
     ...metrics.typescriptReexportTargets.map((target) => `re-export ${target}`),
   ]);
-}
-
-function relativeTargetPath(root: string, target: string): string {
-  const resolved = path.resolve(root, target);
-  const relative = path.relative(root, resolved).split(path.sep).join("/");
-  return relative || ".";
 }

@@ -7,15 +7,16 @@ export type ReadmeSection = {
   content: string[];
 };
 
-export type ExportCapability = {
+/** A module a public surface exposes directly; `exports` lists its names only when they clearly belong to that module. */
+export type ExposedModule = {
   label: string;
   exports: string[];
 };
 
-export type ExportSurface = {
+export type PublicSurface = {
   file: string;
   description: string | null;
-  capabilities: ExportCapability[];
+  modules: ExposedModule[];
 };
 
 export type LanguageSummary = {
@@ -23,7 +24,7 @@ export type LanguageSummary = {
   share: number;
 };
 
-export type HotspotSummary = {
+export type MostCalledSymbol = {
   name: string;
   file: string | null;
   description: string | null;
@@ -33,7 +34,7 @@ export type HotspotSummary = {
 export type ClusterSummary = {
   label: string;
   description: string | null;
-  codeShare: number | null;
+  symbolShare: number | null;
   internalCallShare: number | null;
   topNodes: string[];
 };
@@ -44,15 +45,16 @@ export type StructuralReference = {
   examples: string[];
 };
 
-export type StructuralSignal = {
+/** `related` holds what the boundary imports for `entry` and `coordination`, its importers for `foundation`, and both for `core`; `share` is the fraction of connected boundaries importing it. */
+export type StructuralRole = {
   kind: "entry" | "coordination" | "core" | "foundation";
-  source: string;
-  targets: StructuralReference[];
+  boundary: string;
+  related: StructuralReference[];
   share: number | null;
 };
 
 export type StructuralOutline = {
-  source: string;
+  boundary: string;
   items: StructuralReference[];
 };
 
@@ -60,10 +62,10 @@ export type RepositorySummary = {
   project: string;
   readme: ReadmeSection[];
   languages: LanguageSummary[];
-  exportSurfaces: ExportSurface[];
-  structuralSignals: StructuralSignal[];
+  publicSurfaces: PublicSurface[];
+  structuralRoles: StructuralRole[];
   structuralOutlines: StructuralOutline[];
-  hotspots: HotspotSummary[];
+  mostCalled: MostCalledSymbol[];
   clusters: ClusterSummary[];
   relationshipEvidenceAvailable: boolean;
   relationshipEvidenceFailureReason: string | null;

@@ -1,4 +1,4 @@
-/** Current-tree fallback for `search --graph`, scoring local graph nodes under the backend lane's filters. */
+/** Working-tree fallback for `search --graph`, scoring local graph nodes under the backend lane's filters. */
 import {
   edgeRelationshipLabel,
   type GraphEdge,
@@ -7,20 +7,7 @@ import {
 } from "../source/graph/index.js";
 import { isTestPath } from "../source/scanner/index.js";
 import { compareText } from "../text-utils.js";
-import { matchesGlobFilter, matchesTextFilter } from "./filters.js";
-
-export type GraphMatchOptions = {
-  includeTests?: boolean;
-  label?: string;
-  namePattern?: string;
-  qnPattern?: string;
-  filePattern?: string;
-  relationship?: string;
-  minDegree?: number;
-  maxDegree?: number;
-  excludeEntryPoints?: boolean;
-  offset?: number;
-};
+import { type GraphSearchOptions, matchesGlobFilter, matchesTextFilter } from "./filters.js";
 
 type GraphSearchIndex = {
   edgesByNode: Map<string, GraphEdge[]>;
@@ -32,7 +19,7 @@ function graphMatches(
   graph: GraphPayload,
   searchText: string,
   limit: number,
-  options: GraphMatchOptions,
+  options: GraphSearchOptions,
   index: GraphSearchIndex,
 ): GraphNode[] {
   const loweredSearch = searchText.toLowerCase();
@@ -47,13 +34,7 @@ function graphMatches(
     if (!graphNodeMatchesFilters(node, related, options)) {
       continue;
     }
-    const nodeHaystack = [
-      nodeId,
-      String(node.name ?? ""),
-      String(node.filePath ?? ""),
-      String(node.summary ?? ""),
-      (node.tags ?? []).join(" "),
-    ]
+    const nodeHaystack = [nodeId, node.name, node.filePath, node.summary, node.tags.join(" ")]
       .join(" ")
       .toLowerCase();
     const edgeHaystack = related.slice(0, 20).map(graphEdgeText).join(" ").toLowerCase();
@@ -71,18 +52,18 @@ function graphMatches(
   scored.sort(
     (left, right) =>
       right[0] - left[0] ||
-      compareText(String(left[1].filePath ?? ""), String(right[1].filePath ?? "")) ||
-      compareText(String(left[1].id ?? ""), String(right[1].id ?? "")),
+      compareText(left[1].filePath, right[1].filePath) ||
+      compareText(left[1].id, right[1].id),
   );
   const offset = Math.max(0, options.offset ?? 0);
   return scored.slice(offset, offset + limit).map(([, node]) => node);
 }
 
-export function renderGraphMatchLines(
+export function graphMatchLines(
   graph: GraphPayload,
   searchText: string,
   limit: number,
-  options: GraphMatchOptions = {},
+  options: GraphSearchOptions = {},
 ): string[] {
   const lines = ["", "Relationship matches:"];
   const index = buildGraphSearchIndex(graph);
@@ -105,15 +86,15 @@ export function renderGraphMatchLines(
 function graphNodeMatchesFilters(
   node: GraphNode,
   related: GraphEdge[],
-  options: GraphMatchOptions,
+  options: GraphSearchOptions,
 ): boolean {
   const degree = related.length;
   return (
-    (options.includeTests === true || !isTestPath(String(node.filePath ?? ""))) &&
+    (options.includeTests === true || !isTestPath(node.filePath)) &&
     graphNodeMatchesLabel(node, options.label) &&
-    matchesTextFilter(String(node.name ?? ""), options.namePattern) &&
+    matchesTextFilter(node.name, options.namePattern) &&
     matchesTextFilter(graphNodeQualifiedName(node), options.qnPattern) &&
-    matchesGlobFilter(String(node.filePath ?? ""), options.filePattern) &&
+    matchesGlobFilter(node.filePath, options.filePattern) &&
     (options.relationship === undefined ||
       related.some((edge) => edge.type === options.relationship)) &&
     (options.minDegree === undefined || degree >= options.minDegree) &&
@@ -128,7 +109,7 @@ function graphNodeMatchesLabel(node: GraphNode, label: string | undefined): bool
     return true;
   }
   const normalizedLabel = label.toLowerCase();
-  const type = String(node.type ?? "").toLowerCase();
+  const type = node.type.toLowerCase();
   return normalizedLabel === type;
 }
 
@@ -138,19 +119,19 @@ function graphNodeQualifiedName(node: GraphNode): string {
 }
 
 function graphNodeSummary(node: GraphNode, label: string): string {
-  const summary = String(node.summary ?? "");
+  const summary = node.summary;
   const duplicatePrefix = `${label}: `;
   return summary.startsWith(duplicatePrefix) ? summary.slice(duplicatePrefix.length) : summary;
 }
 
 function graphNodeLabel(node: GraphNode): string {
-  const name = String(node.name ?? "");
-  const filePath = String(node.filePath ?? "");
-  const nodeType = String(node.type ?? "");
+  const name = node.name;
+  const filePath = node.filePath;
+  const nodeType = node.type;
   if (["function", "class"].includes(nodeType) && name && filePath) {
     return `${name} in ${filePath}`;
   }
-  return filePath || name || String(node.id ?? "");
+  return filePath || name || node.id;
 }
 
 function graphEdgeLabel(
@@ -158,8 +139,8 @@ function graphEdgeLabel(
   node: GraphNode,
   nodesById: Map<string, GraphNode>,
 ): string {
-  const nodeId = String(node.id ?? "");
-  const otherId = String(edge.source === nodeId ? edge.target : edge.source);
+  const nodeId = node.id;
+  const otherId = edge.source === nodeId ? edge.target : edge.source;
   const otherNode = nodesById.get(otherId);
   const otherLabel = otherNode ? graphNodeLabel(otherNode) : otherId;
   return `${edgeRelationshipLabel(edge, nodeId)}: ${otherLabel}`;
@@ -184,5 +165,5 @@ function buildGraphSearchIndex(graph: GraphPayload): GraphSearchIndex {
 }
 
 function graphEdgeText(edge: GraphEdge): string {
-  return `${String(edge.source ?? "")} ${String(edge.type ?? "")} ${String(edge.target ?? "")}`;
+  return `${edge.source} ${edge.type} ${edge.target}`;
 }

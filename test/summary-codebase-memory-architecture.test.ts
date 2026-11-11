@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 
 import { recordValue, stringField } from "../src/codemap/json-utils.js";
-import { TypeScriptResolver } from "../src/codemap/source/extraction/typescript-imports.js";
+import { ImportResolver } from "../src/codemap/source/extraction/index.js";
 import {
   hasRelationshipEvidence,
   relationshipSummaries,
@@ -124,7 +124,7 @@ function renderCodebaseMemoryArchitectureSummary(value: unknown): string {
     filePaths: new Set(),
     symbolsByName: new Map(),
     reports: new Map(),
-    resolver: new TypeScriptResolver(".", new Set()),
+    resolver: new ImportResolver(".", new Set()),
   };
   const architecture = recordValue(value);
   const summary = relationshipSummaries(architecture, source);
@@ -132,10 +132,10 @@ function renderCodebaseMemoryArchitectureSummary(value: unknown): string {
     project: stringField(architecture.project) ?? "project",
     readme: [],
     languages: [],
-    exportSurfaces: [],
-    structuralSignals: [],
+    publicSurfaces: [],
+    structuralRoles: [],
     structuralOutlines: [],
-    hotspots: summary.hotspots,
+    mostCalled: summary.mostCalled,
     clusters: summary.clusters,
     relationshipEvidenceAvailable: hasRelationshipEvidence(architecture),
     relationshipEvidenceFailureReason: null,

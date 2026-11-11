@@ -1,9 +1,8 @@
 /** `summary` command: takes only a project root and prints the rendered repository summary. */
 import type { Command } from "commander";
 
-import { resolveProjectRoot } from "../common.js";
 import { buildRepositorySummary, renderSummaryText } from "../summary/index.js";
-import { addProjectRootArgument, type ProjectRootOptions } from "./options.js";
+import { addProjectRootArgument, type ProjectRootOptions, resolveProjectRoot } from "./options.js";
 
 export function addSummaryParser(program: Command): void {
   const summary = program
@@ -19,7 +18,7 @@ export function commandSummary(
   options: ProjectRootOptions,
   rootOptions: ProjectRootOptions = {},
 ): number {
-  const root = resolveProjectRoot(options.projectRoot ?? rootOptions.projectRoot);
+  const root = resolveProjectRoot(options, rootOptions);
   console.log(renderSummaryText(buildRepositorySummary(root)).trim());
   return 0;
 }

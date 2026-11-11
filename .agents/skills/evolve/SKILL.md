@@ -12,7 +12,7 @@ Use Codemap as its user and owner. Start from the requested outcome and a materi
 1. Read `README.md`, `docs/IDEAS.md`, `skills/codemap/SKILL.md`, and only the relevant source and tests.
 2. Choose a realistic agent task with a source-verified expected next target.
 3. Establish the public workflow before changing its implementation. Record where it hides the target, wastes time or context, obscures evidence, or fails under degradation.
-4. Compare only the affected current-tree, Codebase Memory code, graph, semantic, or structural lanes.
+4. Compare only the affected working-tree, Codebase Memory code, graph, semantic, or structural lanes.
 5. State what should improve, which public behavior and lifecycle guarantees must remain true, and evidence that would reject the change.
 6. Implement the coherent change at the owning boundary, migrate affected callers, rerun the same cases, review the whole diff, and stop when the requested outcome is proven.
 
@@ -30,7 +30,7 @@ Choose the relevant subset of the [public repository pool](#public-repository-po
 
 For each case, keep one compact record of the task, expected target, affected lanes, falsifier, result, and next action. Record rank, evidence mix, output size, elapsed time, and freshness when they bear on the change. Add an adversarial case when the work exposes a plausible failure.
 
-For behavior-preserving work, compare stdout, stderr, and exit status before and after on identical fixtures. Include affected ordering, language variants, candidate limits, degraded results, and JSON truncation. For performance claims, take repeated measurements and interleave baseline and changed runs when practical; distinguish local source work, process startup, and backend refresh. Measure through process exit so native parser teardown and provider shutdown are included. A single faster run or a reduced evidence set does not establish an optimization.
+For behavior-preserving work, compare stdout, stderr, and exit status before and after on identical fixtures. Include affected ordering, language variants, candidate limits, degraded results, and JSON truncation. For performance claims, take repeated measurements and interleave baseline and changed runs when practical; distinguish local source work, process startup, and backend refresh. Measure through process exit so native parser teardown and backend shutdown are included. A single faster run or a reduced evidence set does not establish an optimization.
 
 For parser or resolver changes, verify the affected declarations, documentation anchors, call ownership, and local import edges against source or an independent language parser. Choose relevant cases such as multiline or nested syntax, inherited and nested TypeScript configurations, package import/require conditions, unavailable configuration, and edits between commands. Check that comments and string examples do not fabricate declarations or calls and dependency targets outside the inspected inventory do not become local edges.
 
@@ -61,16 +61,16 @@ LangChain Python is outside the standing pool because the selected Python framew
 
 ## Judge the Change
 
-Prefer current-tree correctness and freshness, earlier useful targets, explicit provenance and coverage, deterministic ordering, compact defaults, and useful degraded behavior. Do not assume one evidence lane should always rank first.
+Prefer working-tree correctness and freshness, earlier useful targets, explicit provenance and coverage, deterministic ordering, compact defaults, and useful degraded behavior. Do not assume one evidence lane should always rank first.
 
-Reject changes that add noise, opaque scores, provider payloads, repository-specific policy, unmeasured lifecycle machinery, extension-only language support, or new formats without changing the agent's next action. Revise changes that work only on one repository, hide evidence behind truncation, misstate freshness, break JSON, or suppress useful fallback results.
+Reject changes that add noise, opaque scores, backend payloads, repository-specific policy, unmeasured lifecycle machinery, extension-only language support, or new formats without changing the agent's next action. Revise changes that work only on one repository, hide evidence behind truncation, misstate freshness, break JSON, or suppress useful fallback results.
 
 Judge maintainability separately from public output. Look for fewer competing owners, simpler caller contracts, and less repeated work. Keep cohesive workflows and idiomatic code when a rewrite only adds helpers, type indirection, or navigation.
 
 ## Keep Boundaries Clear
 
-- Follow the ownership map in `docs/IDEAS.md`: keep project refresh and failure attribution in the client, with cache ownership and lock recovery in their shared owner. The official MCP SDK owns negotiation and messages inside the supervised worker. Wait for provider exit before returning lock ownership, and retain the operation failure if cleanup also fails.
-- Keep provider arguments, eligibility, ranking, fallback, composition, and rendering with the owning feature.
+- Follow the ownership map in `docs/IDEAS.md`: keep project refresh and failure attribution in the client, with cache ownership and lock recovery in their shared owner. The official MCP SDK owns negotiation and messages inside the supervised worker. Wait for backend exit before returning lock ownership, and retain the operation failure if cleanup also fails.
+- Keep backend arguments, eligibility, ranking, fallback, composition, and rendering with the owning feature.
 - Delegate syntax, module resolution, and document structure to established libraries while keeping relevance and coverage decisions in Codemap. Resolve imports in the importing file's configuration and module context, then filter to the inspected source inventory.
 - Reuse target discovery, source reads, and parsed facts within one operation, then rediscover current evidence on the next command. Share scalar scanner facts across graph and inspection consumers without retaining native syntax trees between files. Keep graph extraction sequencing with its graph owner and select signal collection before computing sections.
 - Keep work bounds local to the expensive operation and final stdout budgeting in `commands/output.ts`. Preserve independent rule limits and deterministic ordering when batching work.
@@ -84,6 +84,6 @@ Keep a concise temporary `LOGBOOK.md` while evolving Codemap. Record material ta
 
 ## Verify and Finish
 
-Test public behavior and lifecycle invariants rather than private helper shape. Run formatting, lint, typecheck, focused tests, build, and live commands in proportion to the change, reusing existing proof where it still covers the current tree. Validate changed skills and confirm their examples match the live CLI.
+Test public behavior and lifecycle invariants rather than private helper shape. Run formatting, lint, typecheck, focused tests, build, and live commands in proportion to the change, reusing existing proof where it still covers the working tree. Validate changed skills and confirm their examples match the live CLI.
 
 Report the friction, improvement, changed or preserved contracts, before-and-after evidence, verification, and remaining evidence-backed limitation. Remove the temporary logbook and experiment artifacts after retaining useful decisions, and stop when the requested outcome is proven. If no proposed change survives the evidence, report that result.

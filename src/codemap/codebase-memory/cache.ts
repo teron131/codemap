@@ -7,7 +7,6 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
-  realpathSync,
   rmdirSync,
   statSync,
   unlinkSync,
@@ -223,15 +222,6 @@ export function releaseProjectLock(lockPath: string, token: string): void {
 export function projectLockPath(root: string): string {
   const rootHash = createHash("sha256").update(root).digest("hex");
   return path.join(codebaseMemoryCacheRoot(), "codemap-locks", `${rootHash}.lock`);
-}
-
-/** Resolves symlinks for existing paths; missing paths fall back to `path.resolve` instead of throwing. */
-export function canonicalPath(root: string): string {
-  try {
-    return realpathSync.native(root);
-  } catch {
-    return path.resolve(root);
-  }
 }
 
 function errorCode(error: unknown): string | null {

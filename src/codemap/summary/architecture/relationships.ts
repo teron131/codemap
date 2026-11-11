@@ -1,20 +1,27 @@
-/** Acquires internal relationship evidence and projects its hotspots and clusters. */
+/** Acquires internal relationship evidence and projects its most-called symbols and clusters. */
 
 import {
   callCodebaseMemoryTool,
+  codebaseMemoryQueryRows,
   withFreshCodebaseMemoryProject,
-} from "../../codebase-memory/client.js";
-import { codebaseMemoryQueryRows } from "../../codebase-memory/queries.js";
+} from "../../codebase-memory/index.js";
 import { arrayValue, numberField, recordValue, stringField } from "../../json-utils.js";
 import { isTestPath } from "../../source/scanner/index.js";
 import { uniqueStrings } from "../../text-utils.js";
-import type { ClusterSummary, HotspotSummary } from "../schema.js";
+import type { ClusterSummary, MostCalledSymbol } from "../schema.js";
 import { resolveSourceSymbol, type SourceContext, symbolDescription } from "./source-context.js";
 
-export type RelationshipRow = Record<string, unknown>;
+/** One file-to-file relationship: `weight` counts the import or call edges between the two files. */
+export type RelationshipRow = {
+  source: string;
+  target: string;
+  weight: number;
+};
+
+type Architecture = Record<string, unknown>;
 
 export type RelationshipEvidence = {
-  architecture: RelationshipRow;
+  architecture: Architecture;
   relationships: RelationshipRow[];
 };
 
@@ -25,7 +32,7 @@ const CALL_RELATIONSHIPS_QUERY =
   "MATCH (a)-[r:CALLS]->(b) RETURN a.file_path AS source, b.file_path AS target, count(r) AS weight";
 
 /** Null when the backend is unavailable or reports an empty architecture; a relationship query that fails contributes no rows. */
-export function relationshipEvidence(
+export function fetchRelationshipEvidence(
   root: string,
   sourceFileCount: number,
 ): RelationshipEvidence | null {
@@ -46,13 +53,39 @@ export function relationshipEvidence(
           max_rows: Math.max(1, sourceFileCount ** 2),
           ...JSON_FORMAT,
         });
-        return result.ok
+        const rows = result.ok
           ? (codebaseMemoryQueryRows(result.value, ["source", "target", "weight"]) ?? [])
           : [];
+        return rows.flatMap(relationshipRow);
       },
     );
     return { architecture: recordValue(architectureResult.value), relationships };
   });
+}
+
+/** Drops rows without both file paths; the backend returns `count(r)` as a number or a numeric string, and anything else counts once. */
+function relationshipRow(row: Record<string, unknown>): RelationshipRow[] {
+  const source = stringField(row.source);
+  const target = stringField(row.target);
+  if (source === null || target === null) {
+    return [];
+  }
+  const weight =
+    typeof row.weight === "string" && row.weight.trim() ? Number(row.weight) : row.weight;
+  return [
+    { source, target, weight: typeof weight === "number" && Number.isFinite(weight) ? weight : 1 },
+  ];
+}
+
+/** One row per resolved import in the working tree, from the source scan summary already holds. */
+export function workingTreeRelationshipRows(source: SourceContext): RelationshipRow[] {
+  const relationships: RelationshipRow[] = [];
+  for (const metrics of source.files) {
+    for (const target of source.resolver.targets(metrics)) {
+      relationships.push({ source: metrics.relPath, target, weight: 1 });
+    }
+  }
+  return relationships;
 }
 
 /** Rejects successful-but-empty architecture payloads. */
@@ -72,7 +105,6 @@ const GENERIC_BACKEND_NAMES = new Set([
   "all",
   "any",
   "append",
-  "arrayValue",
   "cat",
   "bool",
   "clear",
@@ -99,21 +131,17 @@ const GENERIC_BACKEND_NAMES = new Set([
   "json",
   "keys",
   "len",
-  "limitedRows",
   "list",
   "lower",
   "map",
   "max",
   "min",
-  "numberField",
-  "numberValue",
   "open",
   "pop",
   "print",
   "range",
   "read",
   "read_text",
-  "recordValue",
   "reject",
   "reshape",
   "resolve",
@@ -122,7 +150,6 @@ const GENERIC_BACKEND_NAMES = new Set([
   "set",
   "sleep",
   "str",
-  "stringField",
   "sum",
   "test",
   "to",
@@ -137,8 +164,8 @@ const GENERIC_BACKEND_NAMES = new Set([
   "yield",
 ]);
 
-/** Drops generic names; `callShare` is a hotspot's fan-in as a fraction of all call edges. */
-function hotspotSummaries(architecture: RelationshipRow, source: SourceContext): HotspotSummary[] {
+/** Reads the backend's `hotspots`, dropping generic names; `callShare` is a symbol's fan-in as a fraction of all call edges. */
+function mostCalledSymbols(architecture: Architecture, source: SourceContext): MostCalledSymbol[] {
   const callEdges = namedCount(architecture.edge_types, "type", "CALLS");
   return arrayValue(architecture.hotspots)
     .map(recordValue)
@@ -159,8 +186,8 @@ function hotspotSummaries(architecture: RelationshipRow, source: SourceContext):
     });
 }
 
-/** `codeShare` is members over analyzed functions, methods, and classes, and `internalCallShare` is the provider's cohesion; both are fractions. */
-function clusterSummaries(architecture: RelationshipRow, source: SourceContext): ClusterSummary[] {
+/** `symbolShare` is members over analyzed functions, methods, and classes, and `internalCallShare` is the backend's cohesion; both are fractions. */
+function clusterSummaries(architecture: Architecture, source: SourceContext): ClusterSummary[] {
   const analyzedSymbols = Math.min(
     CLUSTER_NODE_CAP,
     namedCount(architecture.node_labels, "label", "Function") +
@@ -206,7 +233,7 @@ function clusterSummaries(architecture: RelationshipRow, source: SourceContext):
           "cluster",
         anchorName: anchor?.name ?? topNodes[0] ?? null,
         description: anchor?.description ?? null,
-        codeShare: members !== null && analyzedSymbols > 0 ? members / analyzedSymbols : null,
+        symbolShare: members !== null && analyzedSymbols > 0 ? members / analyzedSymbols : null,
         internalCallShare: cohesion,
         topNodes: source.root ? resolvedNodes.map((item) => item.name) : topNodes,
       } satisfies ClusterSummary & { anchorName: string | null },
@@ -264,7 +291,7 @@ function genericBackendName(value: string): boolean {
   return name.startsWith("#") || GENERIC_BACKEND_NAMES.has(name);
 }
 
-/** Detects provider labels derived from the repository path rather than a source owner; under `/work/acme/api` those are `api`, `acme-api`, and `work-acme-api`. */
+/** Detects backend labels derived from the repository path rather than a source owner; under `/work/acme/api` those are `api`, `acme-api`, and `work-acme-api`. */
 function projectWideClusterLabel(label: string, root: string): boolean {
   if (!root) {
     return false;
@@ -277,14 +304,14 @@ function projectWideClusterLabel(label: string, root: string): boolean {
 }
 
 export function relationshipSummaries(
-  architecture: RelationshipRow,
+  architecture: Architecture,
   source: SourceContext,
 ): {
-  hotspots: HotspotSummary[];
+  mostCalled: MostCalledSymbol[];
   clusters: ClusterSummary[];
 } {
   return {
-    hotspots: hotspotSummaries(architecture, source),
+    mostCalled: mostCalledSymbols(architecture, source),
     clusters: clusterSummaries(architecture, source),
   };
 }

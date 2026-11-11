@@ -398,7 +398,7 @@ describe("search command handler", () => {
     expect(logLines()).toEqual(["No matches"]);
   });
 
-  it("prefers an exact current-tree definition over backend semantic search", async () => {
+  it("prefers an exact working-tree definition over backend semantic search", async () => {
     writeFileSync(
       path.join(workDir, "src", "app.ts"),
       "export function needle() {\n  return 'needle';\n}\n",
@@ -417,7 +417,7 @@ describe("search command handler", () => {
     expect(output).toContain("Search: needle");
     expect(output).toContain("\nSource matches:");
     expect(output).toContain(
-      "Exact current-tree definition found; skipped backend semantic search.",
+      "Exact working-tree definition found; skipped backend semantic search.",
     );
     expect(output).toContain("[symbol]");
     expect(output).not.toContain("\nSemantic graph matches:");
@@ -970,7 +970,7 @@ describe("search command handler", () => {
     const output = logLines().join("\n");
     expect(output).toContain("1:7 const retryBackoff = true;");
     if (count === 1) {
-      expect(output).toContain("Current-tree source candidates:");
+      expect(output).toContain("Working-tree source candidates:");
     } else {
       expect(output).toContain("No whole-query source match; partial candidates:");
       expect(output.indexOf("src/z-owner.ts")).toBeLessThan(output.indexOf("src/a-loose-1.ts"));
@@ -1081,7 +1081,7 @@ describe("search command handler", () => {
 
     const output = logLines().join("\n");
     expect(output).toContain(
-      "Graph fallback: Codebase Memory graph search returned no answer; used current-tree relationship graph.",
+      "Graph fallback: Codebase Memory graph search returned no answer; used working-tree relationship graph.",
     );
     expect(output).toContain("\nRelationship matches:");
     expect(output).toContain("src/helper.ts: code file");

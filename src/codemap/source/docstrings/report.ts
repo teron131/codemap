@@ -1,7 +1,7 @@
 /** Builds docstring signal reports and previews for supported source files. */
 import path from "node:path";
 
-import { isDirectory, isFile } from "../../common.js";
+import { isDirectory, isFile } from "../../path-utils.js";
 import {
   discoverFiles,
   PYTHON_SUFFIXES,
@@ -125,20 +125,6 @@ function resolveFocusPathsInOrder(
   return focusFiles.map((rawFocusPath) =>
     path.isAbsolute(rawFocusPath) ? rawFocusPath : path.resolve(moduleRoot, rawFocusPath),
   );
-}
-
-function selectReports(
-  reports: FileReport[],
-  { focusFiles, moduleRoot }: { focusFiles: string[]; moduleRoot: string },
-): FileReport[] {
-  const focusPaths = resolveFocusPathsInOrder(focusFiles, { moduleRoot });
-  if (focusPaths.length === 0) {
-    return reports;
-  }
-  const byPath = new Map(reports.map((report) => [report.path, report]));
-  return focusPaths
-    .map((focusPath) => byPath.get(focusPath))
-    .filter((report): report is FileReport => report !== undefined);
 }
 
 function functionPriority(report: FunctionReport): [number, number, number] {
@@ -403,8 +389,7 @@ export function buildDocstringSignals(
     maxFunctions = 6,
   }: { focusFiles: string[]; maxFiles?: number; maxFunctions?: number },
 ): DocstringSignals {
-  const [moduleRoot, reports] = collectReports(targetPath, { focusFiles });
-  const focusedReports = selectReports(reports, { focusFiles, moduleRoot });
+  const [, focusedReports] = collectReports(targetPath, { focusFiles });
   const pythonFiles = focusedReports.filter((report) =>
     PYTHON_SUFFIXES.has(path.extname(report.path)),
   ).length;

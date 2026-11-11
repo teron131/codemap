@@ -1,9 +1,9 @@
 /** Resolves an inspect target to the files it names or defines, widened by one import hop each way for graph emission. */
-import { statSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import path from "node:path";
 
-import { expandUser, isDirectory } from "../common.js";
-import type { ScanEntry } from "../source/extraction/index.js";
+import { expandUser, isDirectory, isWithinDirectory } from "../path-utils.js";
+import type { InventoryEntry } from "../source/extraction/index.js";
 import type { GraphNode } from "../source/graph/index.js";
 import { type FileMetrics, scanFile } from "../source/scanner/index.js";
 
@@ -22,29 +22,25 @@ export function inspectPathTargetKind(root: string, target: string): InspectTarg
   }
 }
 
-/** Makes absolute targets inside `root` relative and leaves others alone; with root `/repo`, `/repo/src/a.ts` → `src/a.ts`, `/repo` → `""`, and `parseConfig` → `parseConfig`. */
+/** Rewrites a target naming an existing path inside `root` as its project-relative path, so `./src/a.ts`, `src/a.ts`, and the absolute path inspect the same file and `root` itself becomes `""`; symbol names and outside paths pass through. */
 export function normalizeTarget(root: string, target: string): string {
-  const expanded = expandUser(target);
-  if (path.isAbsolute(expanded)) {
-    const relative = path.relative(root, expanded);
-    if (relative && !relative.startsWith("..") && !path.isAbsolute(relative)) {
-      return relative;
-    }
-    if (expanded === root) {
-      return "";
-    }
+  const resolved = path.resolve(root, expandUser(target));
+  if (!existsSync(resolved)) {
     return target;
   }
-  return target;
+  const relative = path.relative(root, resolved);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    return target;
+  }
+  return relative.split(path.sep).join("/");
 }
 
 function targetFilePaths(
   root: string,
-  rawTarget: string,
-  files: ScanEntry[],
+  target: string,
+  files: InventoryEntry[],
   fileMetricsByPath: Record<string, FileMetrics | undefined>,
 ): Set<string> {
-  const target = normalizeTarget(root, rawTarget);
   const filesByPath = new Set(files.map((entry) => entry.path));
   if (isDirectory(path.join(root, target))) {
     return directoryFilePaths(target, filesByPath);
@@ -56,23 +52,19 @@ function targetFilePaths(
 }
 
 function directoryFilePaths(target: string, filesByPath: Set<string>): Set<string> {
-  if (target === "" || target === ".") {
-    return new Set(filesByPath);
-  }
-  const prefix = `${target.replace(/\/+$/, "")}/`;
-  return new Set([...filesByPath].filter((filePath) => filePath.startsWith(prefix)));
+  return new Set([...filesByPath].filter((filePath) => isWithinDirectory(filePath, target)));
 }
 
 /** Caches every metrics record it scans into `fileMetricsByPath` (mutated) for the rest of the inspection. */
 function symbolFilePaths(
   root: string,
   target: string,
-  files: ScanEntry[],
+  files: InventoryEntry[],
   fileMetricsByPath: Record<string, FileMetrics | undefined>,
 ): Set<string> {
   const paths = new Set<string>();
-  for (const scanEntry of files) {
-    const relPath = scanEntry.path;
+  for (const inventoryEntry of files) {
+    const relPath = inventoryEntry.path;
     let metrics = fileMetricsByPath[relPath];
     if (metrics === undefined && relPath) {
       metrics = scanFile(path.join(root, relPath), { displayRoot: root });
@@ -91,15 +83,15 @@ function symbolFilePaths(
   return paths;
 }
 
-/** Null when the target names no file, directory, or defined symbol; scans it performs are cached into `fileMetricsByPath`. */
+/** Takes a normalized target; null when it names no file, directory, or defined symbol, and the scans it performs are cached into `fileMetricsByPath`. */
 export function inspectEmitPaths(
   root: string,
-  rawTarget: string,
-  scan: ScanEntry[],
+  target: string,
+  inventory: InventoryEntry[],
   importMap: Record<string, string[] | undefined>,
   fileMetricsByPath: Record<string, FileMetrics | undefined>,
 ): Set<string> | null {
-  const paths = targetFilePaths(root, rawTarget, scan, fileMetricsByPath);
+  const paths = targetFilePaths(root, target, inventory, fileMetricsByPath);
   if (paths.size === 0) {
     return null;
   }
@@ -135,7 +127,7 @@ export function inspectCandidates(graphNodes: GraphNode[], target: string): Grap
 
 export function nodeLabel(node: GraphNode): string {
   if (node.type === "function" || node.type === "class") {
-    const suffix = node.lineRange?.length ? `:${String(node.lineRange[0])}` : "";
+    const suffix = node.lineRange ? `:${node.lineRange[0]}` : "";
     return `${node.name} in ${node.filePath}${suffix}`;
   }
   return node.filePath || node.id;

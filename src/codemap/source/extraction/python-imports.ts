@@ -1,9 +1,9 @@
 /** Resolves Python import statements to project-relative source paths. */
 import path from "node:path";
 
-import type { FileMetrics } from "../scanner/metrics.js";
+import type { FileMetrics } from "../scanner/index.js";
 
-type PythonModuleIndex = Map<string, string[]>;
+export type PythonModuleIndex = Map<string, string[]>;
 
 /** `from pkg import name` points at the `pkg.name` submodule when any imported name is one, and at `pkg` otherwise. */
 export function pythonImportTargets(

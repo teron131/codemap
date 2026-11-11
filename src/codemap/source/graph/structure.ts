@@ -1,9 +1,9 @@
 /** Projects the shared source scan into graph structure without reparsing definitions or call text. */
 import path from "node:path";
 
+import type { InventoryEntry } from "../extraction/index.js";
 import { scanFile } from "../scanner/index.js";
-import type { FileMetrics, SourceCall } from "../scanner/metrics.js";
-import type { ScanEntry } from "./scan.js";
+import { type FileMetrics, type SourceCall } from "../scanner/index.js";
 
 export type StructureEntry = {
   path: string;
@@ -15,7 +15,7 @@ export type StructureEntry = {
 /** Builds file-local graph facts, scanning only when the caller does not already own them. */
 export function structureForFile(
   root: string,
-  entry: ScanEntry,
+  entry: InventoryEntry,
   { metricsByPath = null }: { metricsByPath?: Record<string, FileMetrics> | null } = {},
 ): StructureEntry {
   const metrics =

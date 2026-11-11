@@ -2,24 +2,16 @@
 import path from "node:path";
 
 import { compareText } from "../../text-utils.js";
-import type { StructureEntry } from "../extraction/index.js";
+import type { InventoryEntry } from "../extraction/index.js";
 import { ENTRYPOINT_BASENAMES, isTestPath } from "../scanner/index.js";
 import type { GraphEdge, GraphNode } from "./schema.js";
-
-export type ScanLikeEntry = {
-  path: string;
-  language?: string;
-  fileCategory?: string;
-  sizeLines?: number;
-};
+import type { StructureEntry } from "./structure.js";
 
 type DefinitionSpan = { name: string; startLine: number; endLine: number };
 
-export function classifyTags(scanEntry: ScanLikeEntry): string[] {
-  const filePath = String(scanEntry.path);
-  const category = String(scanEntry.fileCategory ?? "code");
-  const language = String(scanEntry.language ?? "unknown");
-  const tags = new Set([category, language]);
+export function classifyTags(inventoryEntry: InventoryEntry): string[] {
+  const filePath = inventoryEntry.path;
+  const tags = new Set([inventoryEntry.fileCategory, inventoryEntry.language]);
   const lower = filePath.toLowerCase();
   const name = path.basename(filePath);
   const nameLower = name.toLowerCase();
@@ -50,10 +42,10 @@ export function classifyTags(scanEntry: ScanLikeEntry): string[] {
   return [...tags].filter((tag) => tag && tag !== "unknown").sort();
 }
 
-function nodeTypeForFile(scanEntry: ScanLikeEntry): string {
-  const category = String(scanEntry.fileCategory ?? "code");
-  const language = String(scanEntry.language ?? "unknown");
-  const filePath = String(scanEntry.path).toLowerCase();
+function nodeTypeForFile(inventoryEntry: InventoryEntry): string {
+  const category = inventoryEntry.fileCategory;
+  const language = inventoryEntry.language;
+  const filePath = inventoryEntry.path.toLowerCase();
   if (category === "docs") {
     return "document";
   }
@@ -81,15 +73,14 @@ function nodeTypeForFile(scanEntry: ScanLikeEntry): string {
 }
 
 function fileSummary(
-  scanEntry: ScanLikeEntry,
+  inventoryEntry: InventoryEntry,
   structure: StructureEntry | null,
   importTargets: string[],
 ): string {
-  const filePath = String(scanEntry.path);
-  const language = String(scanEntry.language ?? "unknown");
-  const category = String(scanEntry.fileCategory ?? "code");
-  const lines = Number(scanEntry.sizeLines ?? 0) || 0;
-  const bits = [`${category} file in ${language}`, `${lines} lines`];
+  const bits = [
+    `${inventoryEntry.fileCategory} file in ${inventoryEntry.language}`,
+    `${inventoryEntry.sizeLines} lines`,
+  ];
   const counts = [
     structure?.functions.length ? `${structure.functions.length} functions` : null,
     structure?.classes.length ? `${structure.classes.length} classes` : null,
@@ -100,7 +91,7 @@ function fileSummary(
   if (importTargets.length > 0) {
     bits.push(`imports ${importTargets.length} project files`);
   }
-  return `${filePath}: ${bits.join("; ")}.`;
+  return `${inventoryEntry.path}: ${bits.join("; ")}.`;
 }
 
 function addEdge(
@@ -120,18 +111,18 @@ function addEdge(
 
 export function fileNode(
   relPath: string,
-  scanEntry: ScanLikeEntry,
+  inventoryEntry: InventoryEntry,
   fileStructure: StructureEntry | null,
   importTargets: string[],
 ): GraphNode {
-  const nodeType = nodeTypeForFile(scanEntry);
+  const nodeType = nodeTypeForFile(inventoryEntry);
   return {
     id: `${nodeType}:${relPath}`,
     type: nodeType,
     name: path.basename(relPath),
     filePath: relPath,
-    summary: fileSummary(scanEntry, fileStructure, importTargets),
-    tags: classifyTags(scanEntry),
+    summary: fileSummary(inventoryEntry, fileStructure, importTargets),
+    tags: classifyTags(inventoryEntry),
   };
 }
 
@@ -161,11 +152,11 @@ function definitionNode(
  * Structure entries name the emitted files; the complete inventory still resolves import targets outside that emitted set.
  */
 export function buildNodesAndEdges(
-  files: ScanLikeEntry[],
+  files: InventoryEntry[],
   structures: StructureEntry[],
   importMap: Record<string, string[]>,
 ): [GraphNode[], GraphEdge[]] {
-  const filesByPath = new Map(files.map((scanEntry) => [scanEntry.path, scanEntry]));
+  const filesByPath = new Map(files.map((inventoryEntry) => [inventoryEntry.path, inventoryEntry]));
   const nodes: GraphNode[] = [];
   const edges: GraphEdge[] = [];
   const seenEdges = new Set<string>();
@@ -175,12 +166,12 @@ export function buildNodesAndEdges(
     compareText(left.path, right.path),
   )) {
     const relPath = structure.path;
-    const scanEntry = filesByPath.get(relPath);
-    if (scanEntry === undefined) {
+    const inventoryEntry = filesByPath.get(relPath);
+    if (inventoryEntry === undefined) {
       continue;
     }
     const importTargets = importMap[relPath] ?? [];
-    const node = fileNode(relPath, scanEntry, structure, importTargets);
+    const node = fileNode(relPath, inventoryEntry, structure, importTargets);
     nodes.push(node);
     for (const target of importTargets) {
       const targetScanEntry = filesByPath.get(target);

@@ -1,247 +1,47 @@
-/** Assembles `signals` output from current-tree sections. `top` and `all` also carry Codebase Memory function metrics labeled with their freshness. */
-import { existsSync } from "node:fs";
-import path from "node:path";
-
-import {
-  codebaseMemoryFailureReason,
-  codebaseMemoryQueryRows,
-  codebaseMemoryQueryWithProject,
-} from "../codebase-memory/index.js";
-import { DETAILED_ANALYSIS_FILE_LIMIT } from "../common.js";
-import { arrayValue, nonblankString, recordValue } from "../json-utils.js";
-import { runScan } from "../source/extraction/index.js";
-import {
-  discoverFiles,
-  isGeneratedPath,
-  isSupportedSourcePath,
-  isTestPath,
-} from "../source/scanner/index.js";
-import { compareText } from "../text-utils.js";
-import { buildSignalExport, type SignalExportSection } from "./build.js";
+/** Assembles `signals` output from working-tree sections. `top` and `all` also carry Codebase Memory function metrics labeled with their freshness. */
+import { buildDocstringsData } from "../source/docstrings/index.js";
+import { buildInventory } from "../source/extraction/index.js";
+import { DETAILED_ANALYSIS_FILE_LIMIT } from "../source/graph/index.js";
+import { discoverFiles } from "../source/scanner/index.js";
+import { buildSignalSections, type SignalSectionName } from "./build.js";
+import { addBackendFunctionMetrics } from "./codebase-memory.js";
 import { buildLightweightSignalPayload } from "./lightweight.js";
 import { buildSignalPayload, selectPayloadSection } from "./payload.js";
+import type { SignalSection } from "./schema.js";
 
-type SignalViewOptions = {
-  includeTests?: boolean;
-};
-
-type BackendFunctionMetrics = {
-  freshness: "fresh" | "partial" | "degraded";
-  reason: string | null;
-  rows: Record<string, unknown>[];
-};
-
-const BACKEND_FUNCTION_METRICS_COLUMNS = [
-  "name",
-  "file_path",
-  "start_line",
-  "lines",
-  "complexity",
-  "cognitive",
-  "linear_scan_in_loop",
-  "is_test",
-];
-const BACKEND_FUNCTION_METRICS_LIMIT = 100;
-const BACKEND_FUNCTION_METRICS_FILE_LIMIT = 10_000;
-
-/** Throws when current-tree analysis fails; backend failures only mark the payload's `freshness` as degraded. */
+/** Throws when working-tree analysis fails; backend failures only mark the payload's `freshness` as degraded. */
 export function buildSignalView(
   root: string,
-  section: string,
-  options: SignalViewOptions = {},
-): Record<string, unknown> {
-  const payload = buildCurrentTreeSignalPayload(root, section, options);
-  return addBackendFunctionMetrics(payload, section, root, {
-    includeTests: Boolean(options.includeTests),
-  });
-}
-
-/** `top` fills backend rows out with distinct current-tree rows, while `all` carries backend rows alone; above 10,000 eligible files the backend is skipped. */
-function addBackendFunctionMetrics(
-  payload: Record<string, unknown>,
-  section: string,
-  root: string,
+  section: SignalSection,
   { includeTests }: { includeTests: boolean },
 ): Record<string, unknown> {
-  if (section !== "top" && section !== "all") {
-    return payload;
-  }
-  const coverage = recordValue(payload.coverage);
-  if (numericField(coverage.eligibleFiles) > BACKEND_FUNCTION_METRICS_FILE_LIMIT) {
-    return {
-      ...payload,
-      backendStatus: "skipped",
-      backendReason: `eligible source files exceed ${BACKEND_FUNCTION_METRICS_FILE_LIMIT}`,
-    };
-  }
-  const backend = backendFunctionMetrics(root, { includeTests });
-  if (section === "top") {
-    const functionMetrics = mergedFunctionMetrics(backend, arrayValue(payload.functionMetrics));
-    return {
-      ...payload,
-      freshness: backend.freshness,
-      ...(backend.reason === null ? {} : { backendReason: backend.reason }),
-      functionMetrics,
-    };
-  }
-  return {
-    ...payload,
-    freshness: backend.freshness,
-    ...(backend.reason === null ? {} : { backendReason: backend.reason }),
-    functionMetrics: backend.rows,
-  };
+  const payload = buildWorkingTreeSignalPayload(root, section, { includeTests });
+  return addBackendFunctionMetrics(payload, section, root, { includeTests });
 }
 
-/** Fills filtered, partial, or degraded backend rows with distinct current-tree metrics. */
-function mergedFunctionMetrics(
-  backend: BackendFunctionMetrics,
-  localRows: Record<string, unknown>[],
-): Record<string, unknown>[] {
-  if (backend.freshness === "fresh" && backend.rows.length >= BACKEND_FUNCTION_METRICS_LIMIT) {
-    return backend.rows;
-  }
-  const rows = backend.rows.slice();
-  const seen = new Set(rows.map(functionMetricKey));
-  for (const row of localRows) {
-    const key = functionMetricKey(row);
-    if (seen.has(key)) {
-      continue;
-    }
-    seen.add(key);
-    rows.push(row);
-  }
-  return rows;
-}
-
-function functionMetricKey(row: Record<string, unknown>): string {
-  return `${String(row.path ?? "")}\0${String(row.name ?? "")}`;
-}
-
-function backendFunctionMetrics(
+/** The docstring sections skip the detailed-analysis limit: `docstrings` reads reports without scanning, and `docstring-signals` previews at most three files. */
+function buildWorkingTreeSignalPayload(
   root: string,
+  section: SignalSection,
   { includeTests }: { includeTests: boolean },
-): BackendFunctionMetrics {
-  const result = codebaseMemoryQueryWithProject(
-    root,
-    BACKEND_FUNCTION_METRICS_QUERY,
-    BACKEND_FUNCTION_METRICS_LIMIT,
-  );
-  if (result === null) {
-    return {
-      freshness: "degraded",
-      reason: codebaseMemoryFailureReason(root),
-      rows: [],
-    };
-  }
-  const queryRows = codebaseMemoryQueryRows(result.value, BACKEND_FUNCTION_METRICS_COLUMNS);
-  if (queryRows === null) {
-    return {
-      freshness: "degraded",
-      reason: "Codebase Memory returned an unknown function-metrics payload.",
-      rows: [],
-    };
-  }
-  const rows = queryRows
-    .map((row) => functionMetricRow(root, row, { includeTests }))
-    .filter((row) => row !== null)
-    .sort(compareFunctionMetrics)
-    .slice(0, BACKEND_FUNCTION_METRICS_LIMIT);
-  return {
-    freshness: result.freshness === "partial" ? "partial" : "fresh",
-    reason: null,
-    rows,
-  };
-}
-
-const BACKEND_FUNCTION_METRICS_QUERY = [
-  "MATCH (f:Function)",
-  "RETURN f.name AS name, f.file_path AS file_path, f.start_line AS start_line, f.lines AS lines, f.complexity AS complexity, f.cognitive AS cognitive, f.linear_scan_in_loop AS linear_scan_in_loop, f.is_test AS is_test",
-  "ORDER BY coalesce(f.cognitive, 0) DESC, coalesce(f.complexity, 0) DESC, coalesce(f.lines, 0) DESC, f.file_path, f.name",
-].join(" ");
-
-/** Compacts one backend function row after verifying its current source path. */
-function functionMetricRow(
-  root: string,
-  row: Record<string, unknown>,
-  { includeTests }: { includeTests: boolean },
-): Record<string, unknown> | null {
-  const name = nonblankString(row.name);
-  const filePath = nonblankString(row.file_path);
-  if (name === null || filePath === null || !existsSync(path.join(root, filePath))) {
-    return null;
-  }
-  if (
-    !isSupportedSourcePath(filePath) ||
-    isGeneratedPath(filePath) ||
-    (!includeTests && (booleanField(row.is_test) || isTestPath(filePath)))
-  ) {
-    return null;
-  }
-  const cognitive = numericField(row.cognitive);
-  const cyclomatic = numericField(row.complexity);
-  const linearScanInLoop = numericField(row.linear_scan_in_loop);
-  return {
-    name,
-    path: filePath,
-    line: numericField(row.start_line),
-    lines: numericField(row.lines),
-    cognitive,
-    cyclomatic,
-    ...(linearScanInLoop > 0 ? { linearScanInLoop } : {}),
-  };
-}
-
-function compareFunctionMetrics(
-  left: Record<string, unknown>,
-  right: Record<string, unknown>,
-): number {
-  return (
-    numericField(right.cognitive) - numericField(left.cognitive) ||
-    numericField(right.cyclomatic) - numericField(left.cyclomatic) ||
-    numericField(right.lines) - numericField(left.lines) ||
-    compareText(String(left.path), String(right.path)) ||
-    compareText(String(left.name), String(right.name))
-  );
-}
-
-/** Accepts numbers or numeric strings; negative and non-numeric values become 0. */
-function numericField(value: unknown): number {
-  const parsed = typeof value === "number" ? value : Number(value);
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
-}
-
-function booleanField(value: unknown): boolean {
-  return value === true || value === "true" || value === 1 || value === "1";
-}
-
-function buildCurrentTreeSignalPayload(
-  root: string,
-  section: string,
-  options: SignalViewOptions = {},
 ): Record<string, unknown> {
-  if (section === "docstring-signals" || section === "docstrings") {
-    const payload = docstringSignalPayload(root, section);
-    return selectPayloadSection(payload, section);
+  if (section === "docstrings") {
+    return { docstrings: buildDocstringsData(root) };
   }
   const files = discoverFiles(root);
+  if (section === "docstring-signals") {
+    const sections = buildSignalSections(root, { names: ["docstringSignals"], files });
+    return { docstring_signals: sections.docstringSignals ?? {} };
+  }
   if (files.length > DETAILED_ANALYSIS_FILE_LIMIT) {
-    const payload = buildLightweightSignalPayload(runScan(root, files), {
-      includeTests: Boolean(options.includeTests),
+    const payload = buildLightweightSignalPayload(buildInventory(root, files), {
+      includeTests,
       root,
     });
     return selectPayloadSection(payload, section);
   }
-  let signalExport;
-  try {
-    signalExport = buildSignalExport(root, { sectionMode: exportSections(section), files });
-  } catch (error) {
-    throw new Error(
-      `Signals unavailable: ${error instanceof Error ? error.message : String(error)}`,
-      { cause: error },
-    );
-  }
-  const payload = buildSignalPayload(signalExport, {
-    includeTests: Boolean(options.includeTests),
+  const payload = buildSignalPayload(analyzedSections(root, sectionNames(section), files), {
+    includeTests,
   });
   if (section === "all") {
     // `all` keeps the `docstrings` key but leaves full reports to the separate `docstrings` request.
@@ -250,31 +50,28 @@ function buildCurrentTreeSignalPayload(
   return selectPayloadSection(payload, section);
 }
 
-function docstringSignalPayload(
-  root: string,
-  section: "docstring-signals" | "docstrings",
-): Record<string, unknown> {
-  const signalExport = buildSignalExport(root, {
-    sectionMode: section,
-  });
-  const sections = recordValue(signalExport.sections);
-  return {
-    docstring_signals: sections.docstring_signals ?? {},
-    docstrings: sections.docstrings ?? {},
-  };
+function analyzedSections(root: string, names: SignalSectionName[], files: string[]) {
+  try {
+    return buildSignalSections(root, { names, files });
+  } catch (error) {
+    throw new Error(
+      `Signals unavailable: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
+  }
 }
 
 /** Selects collection work before scanning so focused views do not calculate discarded sections. */
-function exportSections(section: string): SignalExportSection[] {
+function sectionNames(section: SignalSection): SignalSectionName[] {
   switch (section) {
     case "all":
-      return ["relationships", "usage", "function-lengths", "file-profiles", "docstring-signals"];
+      return ["relationships", "usage", "functionLengths", "fileProfiles", "docstringSignals"];
     case "relationships":
       return ["relationships"];
     case "files":
-      return ["file-profiles"];
+      return ["fileProfiles"];
     case "lengths":
-      return ["function-lengths"];
+      return ["functionLengths"];
     default:
       return ["usage"];
   }

@@ -1,12 +1,11 @@
-/** `inspect` command: path targets try the current tree first and other targets try Codebase Memory first. Either falls back to the other lane unless `--backend` or `--local` pins one. */
+/** `inspect` command: path targets try the working tree first and other targets try Codebase Memory first. Either falls back to the other lane unless `--backend` or `--local` pins one. */
 import type { Command } from "commander";
 
-import { resolveProjectRoot } from "../common.js";
 import {
   codebaseMemoryInspect,
   inspectPathTargetKind,
   renderCodebaseMemoryInspect,
-  renderCurrentTreeInspection,
+  renderWorkingTreeInspection,
 } from "../inspect/index.js";
 import {
   addProjectRootArgument,
@@ -14,6 +13,7 @@ import {
   limitOption,
   parseIntegerOption,
   type ProjectRootOptions,
+  resolveProjectRoot,
 } from "./options.js";
 
 type InspectOptions = {
@@ -30,7 +30,7 @@ export function addInspectParser(program: Command): void {
     .argument("<target>")
     .option("--limit <count>", "Maximum rows per section.", parseIntegerOption)
     .option("--backend", "Use Codebase Memory backend inspection only.")
-    .option("--local", "Use current-tree local inspection only.")
+    .option("--local", "Use working-tree local inspection only.")
     .action((target: string, options: InspectOptions) => {
       process.exitCode = commandInspect(target, options, program.opts<ProjectRootOptions>());
     });
@@ -42,7 +42,7 @@ export function commandInspect(
   options: InspectOptions,
   rootOptions: ProjectRootOptions = {},
 ): number {
-  const root = resolveProjectRoot(options.projectRoot ?? rootOptions.projectRoot);
+  const root = resolveProjectRoot(options, rootOptions);
   const limit = limitOption(options.limit, DEFAULT_ROW_LIMIT);
   if (options.backend && options.local) {
     console.log("Choose only one inspect lane: --backend or --local.");
@@ -50,7 +50,7 @@ export function commandInspect(
   }
   const pathTarget = !options.backend && inspectPathTargetKind(root, target) !== null;
   if (pathTarget) {
-    const inspection = renderCurrentTreeInspection(root, target, { limit });
+    const inspection = renderWorkingTreeInspection(root, target, { limit });
     if (inspection !== null) {
       console.log(inspection);
       return 0;
@@ -68,7 +68,7 @@ export function commandInspect(
     console.log("Backend: Codebase Memory");
     return 1;
   }
-  const inspection = pathTarget ? null : renderCurrentTreeInspection(root, target, { limit });
+  const inspection = pathTarget ? null : renderWorkingTreeInspection(root, target, { limit });
   if (inspection === null) {
     const quotedTarget = `'${target.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
     console.log(`No match: ${target}`);

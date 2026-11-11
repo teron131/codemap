@@ -1,32 +1,18 @@
-/** `search` command: orders current-tree and Codebase Memory lanes so direct paths and definitions answer first. It also mounts the structural `match`, `calls`, and `rule` subcommands. */
+/** `search` command: validates the lane flags and hands the query to the search lanes. It also mounts the structural `match`, `calls`, and `rule` subcommands. */
 import type { Command } from "commander";
 
-import { DETAILED_ANALYSIS_FILE_LIMIT, resolveProjectRoot } from "../common.js";
 import {
-  type CodebaseMemoryGraphSearchOptions,
-  printCodebaseMemoryGraphSearch,
-  printCodebaseMemorySearch,
-  printCodebaseMemorySemanticSearch,
-} from "../search/codebase-memory.js";
-import {
-  conceptPathMatches,
-  definitionMatches,
-  isImplementationSourceMatch,
-  isImplementationSourcePath,
-  pathMatches,
-  renderGraphMatchLines,
-  sourceFallbackMatches,
-  type SourceFallbackSearch,
-  type SourceMatch,
-  sourceMatches,
+  type GraphSearchFilters,
+  hasGraphFilters,
+  printSearch,
+  type SearchRequest,
 } from "../search/index.js";
-import { currentTreeGraph } from "../source/graph/index.js";
-import { discoverFiles } from "../source/scanner/index.js";
 import {
   addProjectRootArgument,
   limitOption,
   parseIntegerOption,
   type ProjectRootOptions,
+  resolveProjectRoot,
 } from "./options.js";
 import {
   addSearchCallsParser,
@@ -34,31 +20,14 @@ import {
   addSearchRuleParser,
 } from "./search-structural.js";
 
-type SearchOptions = {
+type SearchOptions = GraphSearchFilters & {
   projectRoot?: string;
   limit?: string | number;
   graph?: boolean;
   semantic?: boolean;
-  label?: string;
-  namePattern?: string;
-  qnPattern?: string;
-  filePattern?: string;
-  relationship?: string;
-  minDegree?: number;
-  maxDegree?: number;
-  excludeEntryPoints?: boolean;
-  offset?: number;
   includeTests?: boolean;
 };
 
-type CurrentTreeSourceSearch = {
-  fallback: SourceFallbackSearch | undefined;
-  matches: SourceMatch[];
-  preferFallback: boolean;
-  largeRepo: boolean;
-};
-
-const EXACT_SOURCE_MATCH_LIMIT = 3;
 const DEFAULT_SEARCH_LIMIT = 15;
 
 export function addSearchParser(program: Command): void {
@@ -100,270 +69,33 @@ export function addSearchParser(program: Command): void {
   addSearchRuleParser(search.command("rule"));
 }
 
-/**
- * Lanes run in order, and the first with an answer prints it and returns.
- * 1. `--semantic`: an exact current-tree definition answers before backend ranking.
- * 2. Ordinary search: direct paths, exact definitions, a decisive current-tree candidate set, then up to three exact implementation-text matches for multi-term queries.
- * 3. Codebase Memory search in the chosen lane.
- * 4. `--graph` without a backend answer: the current-tree relationship graph.
- * 5. Otherwise: current-tree concept paths and text, or partial candidates, reusing the step 2 preflight.
- */
 export async function commandSearch(
   searchArgs: string[],
   options: SearchOptions,
   rootOptions: ProjectRootOptions = {},
 ): Promise<number> {
+  const { projectRoot, limit, graph, semantic, includeTests, ...graphFilters } = options;
   if (searchArgs.length === 0) {
     console.log("Search requires text or a search subcommand: match, calls, or rule.");
     return 2;
   }
-  if (options.graph && options.semantic) {
+  if (graph && semantic) {
     console.log("Choose only one search lane: --graph or --semantic.");
     return 2;
   }
-  if (!options.graph && hasGraphOnlyFilters(options)) {
+  if (!graph && hasGraphFilters(graphFilters)) {
     console.log("Graph filters require --graph.");
     return 2;
   }
   const searchText = searchArgs.join(" ");
-  const limit = limitOption(options.limit, DEFAULT_SEARCH_LIMIT);
-  const root = resolveProjectRoot(options.projectRoot ?? rootOptions.projectRoot);
-  const includeTests = Boolean(options.includeTests);
+  const request: SearchRequest = {
+    lane: graph ? "graph" : semantic ? "semantic" : "source",
+    limit: limitOption(limit, DEFAULT_SEARCH_LIMIT),
+    includeTests: Boolean(includeTests),
+    graphFilters,
+  };
+  const root = resolveProjectRoot({ projectRoot }, rootOptions);
   console.log(`Search: ${searchText}`);
-  let fallbackPreflight: SourceFallbackSearch | undefined;
-  if (options.semantic) {
-    const directDefinitions = definitionMatches(root, searchText, {
-      includeTests,
-      limit,
-    });
-    if (directDefinitions.length > 0) {
-      printSourceMatches(directDefinitions, {
-        note: "Exact current-tree definition found; skipped backend semantic search.",
-      });
-      return 0;
-    }
-  }
-  if (!options.graph && !options.semantic) {
-    const directPaths = pathMatches(root, searchText, { limit });
-    if (directPaths.length > 0) {
-      printSourceMatches(directPaths);
-      return 0;
-    }
-    const directDefinitions = definitionMatches(root, searchText, {
-      includeTests,
-      limit,
-    });
-    if (directDefinitions.length > 0) {
-      printSourceMatches(directDefinitions);
-      return 0;
-    }
-    fallbackPreflight = sourceFallbackMatches(root, searchText, {
-      includeTests,
-      limit,
-    });
-    if (fallbackPreflight.fullCoverage) {
-      printSourceFallbackMatches(fallbackPreflight);
-      return 0;
-    }
-    if (
-      fallbackPreflight.queryTerms.length >= 2 &&
-      !fallbackPreflight.hasPathSupplementedCoverage
-    ) {
-      const exactTextMatches = sourceMatches(root, searchText, {
-        includeTests,
-        limit: Math.min(limit, EXACT_SOURCE_MATCH_LIMIT),
-      }).filter(isImplementationSourceMatch);
-      if (exactTextMatches.length > 0) {
-        printSourceMatches(exactTextMatches);
-        return 0;
-      }
-    }
-  }
-  if (
-    options.semantic &&
-    printCodebaseMemorySemanticSearch(root, searchText, limit, { includeTests })
-  ) {
-    return 0;
-  }
-  if (
-    options.graph &&
-    printCodebaseMemoryGraphSearch(root, searchText, limit, graphSearchOptions(options))
-  ) {
-    return 0;
-  }
-  if (options.graph) {
-    const graph = currentTreeGraph(root);
-    console.log(
-      "\nGraph fallback: Codebase Memory graph search returned no answer; used current-tree relationship graph.",
-    );
-    console.log(
-      renderGraphMatchLines(graph, searchText, limit, graphSearchOptions(options)).join("\n"),
-    );
-    return 0;
-  }
-  if (!options.semantic && printCodebaseMemorySearch(root, searchText, limit, { includeTests })) {
-    return 0;
-  }
-  const currentTree = currentTreeSourceSearch(
-    root,
-    searchText,
-    limit,
-    includeTests,
-    fallbackPreflight,
-  );
-  if (options.semantic) {
-    printCurrentTreeSourceSearch(currentTree);
-    console.log("\nSemantic graph matches:");
-    console.log(
-      "  unavailable: Codebase Memory semantic search returned no answer; used current-tree search fallback.",
-    );
-    return 0;
-  }
-  printCurrentTreeSourceSearch(currentTree);
+  printSearch(root, searchText, request);
   return 0;
-}
-
-/** Reuses the ordinary-search preflight when one ran, so the partial-candidate scan happens at most once. */
-function currentTreeSourceSearch(
-  root: string,
-  searchText: string,
-  limit: number,
-  includeTests: boolean,
-  fallbackPreflight: SourceFallbackSearch | undefined,
-): CurrentTreeSourceSearch {
-  const filePaths = discoverFiles(root);
-  const largeRepo = filePaths.length > DETAILED_ANALYSIS_FILE_LIMIT;
-  const conceptPaths = conceptPathMatches(root, searchText, {
-    filePaths,
-    includeTests,
-    limit: Math.min(3, limit),
-  });
-  const textMatches = sourceMatches(root, searchText, {
-    includeTests,
-    limit: limit - conceptPaths.length,
-  });
-  const matches = [...conceptPaths, ...textMatches];
-  const directUseful = matches.some(
-    (match) => match.engine === "path" || isImplementationSourceMatch(match),
-  );
-  const preservePathEvidence = fallbackPreflight?.hasPathSupplementedCoverage ?? false;
-  const fallback =
-    directUseful && !preservePathEvidence
-      ? undefined
-      : (fallbackPreflight ??
-        sourceFallbackMatches(root, searchText, {
-          includeTests,
-          limit,
-        }));
-  const fallbackUseful =
-    fallback?.candidates.some((candidate) => isImplementationSourcePath(candidate.filePath)) ??
-    false;
-  return {
-    fallback,
-    matches,
-    preferFallback: fallbackUseful || matches.length === 0,
-    largeRepo,
-  };
-}
-
-function printCurrentTreeSourceSearch(result: CurrentTreeSourceSearch): void {
-  const notes = [];
-  if (result.largeRepo) {
-    notes.push(
-      result.preferFallback && (result.fallback?.candidates.length ?? 0) > 0
-        ? "Fallback: large repo; structural partial search skipped."
-        : "Fallback: large repo; structural search skipped.",
-    );
-  }
-  if (result.fallback?.scanStatus === "truncated") {
-    notes.push("Collection bound reached; ranking uses the available prefix.");
-  } else if (result.fallback?.scanStatus === "failed") {
-    notes.push("Collection failed; ranking uses the available evidence.");
-  }
-  if (result.preferFallback && result.fallback && result.fallback.candidates.length > 0) {
-    printSourceFallbackMatches(result.fallback, {
-      note: notes.join(" "),
-    });
-    return;
-  }
-  printSourceMatches(result.matches, {
-    note: notes.join(" "),
-  });
-}
-
-function hasGraphOnlyFilters(options: SearchOptions): boolean {
-  return [
-    options.label,
-    options.namePattern,
-    options.qnPattern,
-    options.filePattern,
-    options.relationship,
-    options.minDegree,
-    options.maxDegree,
-    options.excludeEntryPoints,
-    options.offset,
-  ].some((value) => value !== undefined && value !== false);
-}
-
-function printSourceMatches(matches: SourceMatch[], { note = "" }: { note?: string } = {}): void {
-  console.log("\nSource matches:");
-  if (note) {
-    console.log(`  ${note}`);
-  }
-  if (matches.length === 0) {
-    console.log("  none");
-  }
-  for (const item of matches) {
-    if (item.engine === "path") {
-      console.log(`  - ${item.filePath} [file]`);
-      continue;
-    }
-    console.log(`  - ${item.engine} ${item.filePath}:${item.line}:${item.column} [${item.kind}]`);
-    console.log(`      ${item.text}`);
-  }
-}
-
-function printSourceFallbackMatches(
-  result: SourceFallbackSearch,
-  { note = "" }: { note?: string } = {},
-): void {
-  if (result.candidates.length === 0) {
-    return;
-  }
-  console.log(
-    result.fullCoverage
-      ? "\nCurrent-tree source candidates:"
-      : "\nNo whole-query source match; partial candidates:",
-  );
-  if (note) {
-    console.log(`  ${note}`);
-  }
-  for (const candidate of result.candidates) {
-    console.log(
-      `  - ${candidate.filePath} [terms ${candidate.matchedTerms.length}/${result.queryTerms.length}: ${candidate.matchedTerms.join(", ")}]`,
-    );
-    for (const anchor of candidate.anchors) {
-      console.log(`      ${anchor.line}:${anchor.column} ${anchor.text}`);
-    }
-  }
-  if (result.totalCandidates > result.candidates.length) {
-    console.log(`  ... ${result.totalCandidates - result.candidates.length} more candidates`);
-  }
-}
-
-function graphSearchOptions(options: SearchOptions): CodebaseMemoryGraphSearchOptions {
-  return {
-    ...(options.includeTests !== undefined ? { includeTests: options.includeTests } : {}),
-    ...(options.label !== undefined ? { label: options.label } : {}),
-    ...(options.namePattern !== undefined ? { namePattern: options.namePattern } : {}),
-    ...(options.qnPattern !== undefined ? { qnPattern: options.qnPattern } : {}),
-    ...(options.filePattern !== undefined ? { filePattern: options.filePattern } : {}),
-    ...(options.relationship !== undefined ? { relationship: options.relationship } : {}),
-    ...(options.minDegree !== undefined ? { minDegree: options.minDegree } : {}),
-    ...(options.maxDegree !== undefined ? { maxDegree: options.maxDegree } : {}),
-    ...(options.excludeEntryPoints !== undefined
-      ? { excludeEntryPoints: options.excludeEntryPoints }
-      : {}),
-    ...(options.offset !== undefined ? { offset: options.offset } : {}),
-  };
 }

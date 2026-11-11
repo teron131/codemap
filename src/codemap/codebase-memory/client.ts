@@ -1,8 +1,8 @@
-/** Owns one fresh backend snapshot per project operation and attributes provider failures to its lifecycle. */
+/** Owns one fresh backend snapshot per project operation and attributes backend failures to its lifecycle. */
 import { nonblankString, numberField, recordValue } from "../json-utils.js";
+import { canonicalPath } from "../path-utils.js";
 import {
   acquireProjectLock,
-  canonicalPath,
   type CodebaseMemoryLock,
   projectLockPath,
   releaseProjectLock,
@@ -36,7 +36,7 @@ const READY_INDEX_STATUSES = new Set(["complete", "completed", "indexed", "ready
 const activeOperations: ActiveCodebaseMemoryOperation[] = [];
 const failureReasons = new Map<string, string>();
 
-/** Off for `CODEMAP_CODEBASE_MEMORY` values `0`, `false`, and `off`, and off by default under Vitest so tests reach a provider only when they opt in. */
+/** Off for `CODEMAP_CODEBASE_MEMORY` values `0`, `false`, and `off`, and off by default under Vitest so tests reach a backend only when they opt in. */
 function codebaseMemoryEnabled(): boolean {
   const value = process.env.CODEMAP_CODEBASE_MEMORY;
   if (process.env.VITEST === "true" && value === undefined) {
@@ -101,13 +101,13 @@ function runSynchronousProjectOperation<T>(
 ): T {
   if (operation.constructor.name === "AsyncFunction") {
     throw new TypeError(
-      "CodebaseMemory project operations must be synchronous while the cache lock is held.",
+      "Codebase Memory project operations must be synchronous while the cache lock is held.",
     );
   }
   const value = operation(project);
   if (isPromiseLike(value)) {
     throw new TypeError(
-      "CodebaseMemory project operations must be synchronous while the cache lock is held.",
+      "Codebase Memory project operations must be synchronous while the cache lock is held.",
     );
   }
   return value;
@@ -169,7 +169,7 @@ function refreshProject(root: string): CodebaseMemoryRefreshResult {
   };
 }
 
-/** Calls the provider and attributes nested failures to the active project operation. */
+/** Calls the backend and attributes nested failures to the active project operation. */
 export function callCodebaseMemoryTool(
   name: string,
   args: Record<string, unknown>,

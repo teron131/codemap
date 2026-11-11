@@ -8,11 +8,11 @@ Codemap chooses the appropriate evidence source and shapes the results around an
 
 - Keeps graph, exact-text, and structural evidence clearly labeled.
 - Filters, ranks, and deduplicates results to surface the next useful inspection.
-- Keeps output compact and predictable instead of exposing provider payloads.
+- Keeps output compact and predictable instead of exposing backend payloads.
 - Falls back to local evidence when Codebase Memory is unavailable, partial, or stale.
 - Refreshes graph data explicitly without adding persistent artifacts to inspected repositories.
 
-Use Codemap for normal repository navigation and change scoping. Use direct Codebase Memory queries when unrestricted graph exploration or provider-specific diagnostics matter more than compact defaults.
+Use Codemap for normal repository navigation and change scoping. Use direct Codebase Memory queries when unrestricted graph exploration or backend-specific diagnostics matter more than compact defaults.
 
 ## Install
 
@@ -53,14 +53,14 @@ codemap --help
 
 | Command | Primary evidence | Purpose |
 | --- | --- | --- |
-| `summary` | Current-tree README, language mix, package manifests, imports, and public exports, enriched by Codebase Memory | Focused orientation through README purpose and outline, language percentages, a compact package- or feature-level repository skeleton, call-share hotspots, cohesive clusters, and an at-most-three-level hierarchy of public surfaces selected by entry position, import reach, and breadth, with directly exposed modules and defining exports. |
-| `search <text>` | Current-tree paths, exact definitions and text, and decisive locally cohesive multi-term source candidates; then Codebase Memory ranked search and local fallback | Broad path, concept, symbol, and text discovery. |
-| `search --graph <text>` | Codebase Memory graph search, then current-tree graph fallback | Relationship-aware discovery. |
-| `search --semantic <text>` | Exact current-tree definition, then Codebase Memory semantic graph search and current-tree fallback | Vocabulary-bridging discovery without hiding an exact implementation owner. |
+| `summary` | Working-tree README, language mix, package manifests, imports, and public exports, enriched by Codebase Memory | Focused orientation through README purpose and outline, language percentages, a compact package- or feature-level repository skeleton, most-called symbols, cohesive clusters, and an at-most-three-level hierarchy of public surfaces selected by shallowest entry, most importers, and most modules exposed, with directly exposed modules and defining exports. |
+| `search <text>` | Working-tree paths, exact definitions and text, and decisive locally cohesive multi-term source candidates; then Codebase Memory ranked search and local fallback | Broad path, concept, symbol, and text discovery. |
+| `search --graph <text>` | Codebase Memory graph search, then working-tree graph fallback | Relationship-aware discovery. |
+| `search --semantic <text>` | Exact working-tree definition, then Codebase Memory semantic graph search and working-tree fallback | Vocabulary-bridging discovery without hiding an exact implementation owner. |
 | `search calls <name>` | ast-grep | Call-shaped source matches across the bundled language parsers. |
 | `search match` / `search rule` | ast-grep | Built-in JavaScript, TypeScript, and Python structural discovery. |
-| `inspect <target>` | Codebase Memory for symbols, current tree for paths and fallback | Focused in-to-out neighborhood inspection. |
-| `signals` | Codebase Memory function metrics plus current-tree definitions | Ranked source metrics under the shared output ceiling. |
+| `inspect <target>` | Codebase Memory for symbols, working tree for paths and fallback | Focused in-to-out neighborhood inspection. |
+| `signals` | Codebase Memory function metrics plus working-tree definitions | Ranked source metrics under the shared output ceiling. |
 | `backend ...` | Raw Codebase Memory diagnostics | Projects, status, schema, Cypher queries, and change impact. |
 | `index` | Codebase Memory indexing | Explicit refresh timing and status. |
 

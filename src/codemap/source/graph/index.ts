@@ -1,12 +1,11 @@
-/** Exposes current-tree graph construction and entrypoint evidence without persisting analyzed source. */
-export { classifyTags } from "./builder.js";
+/** Working-tree graph construction, per-file structure, and the file-count limit above which commands skip detailed analysis; nothing analyzed is persisted. */
 export {
-  buildCurrentTreeGraph,
-  currentTreeGraph,
+  DETAILED_ANALYSIS_FILE_LIMIT,
+  buildWorkingTreeGraph,
+  workingTreeGraph,
   edgeRelationshipLabel,
   inventoryFileNodes,
   relatedEdges,
-} from "./canonical.js";
-export type { LikelyEntry } from "./likely-entries.js";
-export { buildLikelyEntries, buildPathRankedLikelyEntries } from "./likely-entries.js";
+} from "./working-tree.js";
 export type { GraphEdge, GraphNode, GraphPayload } from "./schema.js";
+export { structureForFile } from "./structure.js";

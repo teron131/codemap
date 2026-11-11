@@ -4,13 +4,13 @@ import path from "node:path";
 
 import { type NapiConfig, type SgNode } from "@ast-grep/napi";
 
-import { astGrepRoot } from "../../ast-grep/adapter.js";
+import { astGrepRoot } from "../../ast-grep.js";
 import { ENTRYPOINT_BASENAMES, TYPESCRIPT_LANG_BY_SUFFIX } from "./constants.js";
 import {
   addSample,
-  addVariableSignal,
-  codeSignalIdentifier,
+  addVariableDefinition,
   createFileMetrics,
+  definitionIdentifier,
   type FileMetrics,
   sourceLineCount,
   type TypeScriptImport,
@@ -99,7 +99,6 @@ function addTypescriptImport(
   }
   metrics.typescriptImports.push({ target, kind });
   if (target.startsWith("./") || target.startsWith("../")) {
-    metrics.typescriptLocalImportTargets.push(target);
     metrics.importsLocal += 1;
     addSample(metrics.samples, target);
   }
@@ -116,7 +115,6 @@ function addTypescriptReexport(
   metrics.typescriptReexportTargets.push(target);
   metrics.typescriptReexports.push({ target, bindings });
   if (target.startsWith("./") || target.startsWith("../")) {
-    metrics.typescriptLocalReexportTargets.push(target);
     metrics.reexportsLocal += 1;
     addSample(metrics.samples, target);
   }
@@ -170,7 +168,7 @@ function addTypescriptFunction(
   metrics.functionNames.push(name);
   metrics.functionSpans.push({
     name,
-    identifier: codeSignalIdentifier(relPath, name),
+    identifier: definitionIdentifier(relPath, name),
     span: spanFor(node),
     startLine: startLineFor(node),
   });
@@ -298,7 +296,6 @@ function scanTypescriptWithAstGrep({
       const base = heritage === null ? null : descendant(heritage, "identifier", "type_identifier");
       if (base !== null) {
         metrics.extends += 1;
-        metrics.typescriptExtendsBases.push(base.text());
         addSample(metrics.samples, base.text());
       }
     } else if (kind === "function_declaration" || kind === "generator_function_declaration") {
@@ -321,7 +318,7 @@ function scanTypescriptWithAstGrep({
       const name = declaratorName(node);
       if (name !== null) {
         metrics.variableNames.push(name);
-        addVariableSignal(metrics, relPath, name, {
+        addVariableDefinition(metrics, relPath, name, {
           startLine: range.start.line + 1,
           moduleLevel: isTypescriptModuleLevelVariable(node),
         });
