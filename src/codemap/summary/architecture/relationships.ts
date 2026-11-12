@@ -3,6 +3,7 @@
 import {
   callCodebaseMemoryTool,
   codebaseMemoryQueryRows,
+  symbolName,
   withFreshCodebaseMemoryProject,
 } from "../../codebase-memory/index.js";
 import { arrayValue, numberField, recordValue, stringField } from "../../json-utils.js";
@@ -25,7 +26,6 @@ export type RelationshipEvidence = {
   relationships: RelationshipRow[];
 };
 
-const JSON_FORMAT = { format: "json" } as const;
 const IMPORT_RELATIONSHIPS_QUERY =
   "MATCH (a:File)-[r:IMPORTS]->(b:Module) RETURN a.file_path AS source, b.file_path AS target, count(r) AS weight";
 const CALL_RELATIONSHIPS_QUERY =
@@ -40,7 +40,6 @@ export function fetchRelationshipEvidence(
     const architectureResult = callCodebaseMemoryTool("get_architecture", {
       project: project.name,
       aspects: ["all"],
-      ...JSON_FORMAT,
     });
     if (!architectureResult.ok || !hasRelationshipEvidence(architectureResult.value)) {
       return null;
@@ -51,7 +50,6 @@ export function fetchRelationshipEvidence(
           project: project.name,
           query,
           max_rows: Math.max(1, sourceFileCount ** 2),
-          ...JSON_FORMAT,
         });
         const rows = result.ok
           ? (codebaseMemoryQueryRows(result.value, ["source", "target", "weight"]) ?? [])
@@ -95,7 +93,7 @@ export function hasRelationshipEvidence(value: unknown): boolean {
     return false;
   }
   return ["node_labels", "edge_types", "hotspots", "clusters"].some(
-    (key) => arrayValue(record[key]).length > 0,
+    (key) => tableRows(record[key]).length > 0,
   );
 }
 
@@ -167,23 +165,23 @@ const GENERIC_BACKEND_NAMES = new Set([
 /** Reads the backend's `hotspots`, dropping generic names; `callShare` is a symbol's fan-in as a fraction of all call edges. */
 function mostCalledSymbols(architecture: Architecture, source: SourceContext): MostCalledSymbol[] {
   const callEdges = namedCount(architecture.edge_types, "type", "CALLS");
-  return arrayValue(architecture.hotspots)
-    .map(recordValue)
-    .filter((row) => {
-      const name = stringField(row.name) ?? stringField(row.qualified_name);
-      return name !== null && !genericBackendName(name);
-    })
-    .map((row) => {
-      const name = stringField(row.name) ?? stringField(row.qualified_name) ?? "unknown";
-      const fanIn = numberField(row.fan_in);
-      const symbol = resolveSourceSymbol(source, name, stringField(row.qualified_name));
-      return {
+  return tableRows(architecture.hotspots).flatMap((row) => {
+    const qualifiedName = stringField(row.qn);
+    const name = qualifiedName === null ? null : symbolName(qualifiedName);
+    if (name === null || genericBackendName(name)) {
+      return [];
+    }
+    const fanIn = numberField(row.fan_in);
+    const symbol = resolveSourceSymbol(source, name, qualifiedName);
+    return [
+      {
         name,
         file: symbol?.file ?? null,
         description: symbolDescription(source, symbol),
         callShare: fanIn !== null && callEdges > 0 ? fanIn / callEdges : null,
-      };
-    });
+      },
+    ];
+  });
 }
 
 /** `symbolShare` is members over analyzed functions, methods, and classes, and `internalCallShare` is the backend's cohesion; both are fractions. */
@@ -194,12 +192,10 @@ function clusterSummaries(architecture: Architecture, source: SourceContext): Cl
       namedCount(architecture.node_labels, "label", "Method") +
       namedCount(architecture.node_labels, "label", "Class"),
   );
-  const clusters = arrayValue(architecture.clusters)
-    .map(recordValue)
-    .filter((row) => {
-      const label = stringField(row.label);
-      return label === null || !isTestPath(label);
-    });
+  const clusters = tableRows(architecture.clusters).filter((row) => {
+    const label = stringField(row.label);
+    return label === null || !isTestPath(label);
+  });
   const clusterCandidates = clusters.flatMap((row) => {
     const topNodes = uniqueStrings(
       arrayValue(row.top_nodes)
@@ -272,13 +268,13 @@ function commonOwnerPath(files: string[]): string | null {
 }
 
 function namedCount(value: unknown, nameKey: string, expectedName: string): number {
-  for (const item of arrayValue(value)) {
-    const row = recordValue(item);
-    if ((stringField(row[nameKey]) ?? stringField(row.name)) === expectedName) {
-      return numberField(row.count) ?? numberField(row.file_count) ?? 0;
-    }
-  }
-  return 0;
+  const row = tableRows(value).find((item) => stringField(item[nameKey]) === expectedName);
+  return numberField(row?.count) ?? 0;
+}
+
+/** Rows of an architecture table, which the transport has expanded into records. */
+function tableRows(value: unknown): Record<string, unknown>[] {
+  return arrayValue(recordValue(value).rows).map(recordValue);
 }
 
 /** Detects generic backend names that do not explain repository structure. */

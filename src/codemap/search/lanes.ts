@@ -46,13 +46,12 @@ export function printSearch(root: string, searchText: string, request: SearchReq
   const { lane, limit, includeTests } = request;
   if (lane === "graph") {
     const options = { ...request.graphFilters, includeTests };
-    if (printCodebaseMemoryGraphSearch(root, searchText, limit, options)) {
+    const fallbackReason = printCodebaseMemoryGraphSearch(root, searchText, limit, options);
+    if (fallbackReason === null) {
       return;
     }
     const graph = workingTreeGraph(root);
-    console.log(
-      "\nGraph fallback: Codebase Memory graph search returned no answer; used working-tree relationship graph.",
-    );
+    console.log(`\nGraph fallback: ${fallbackReason}; used working-tree relationship graph.`);
     console.log(graphMatchLines(graph, searchText, limit, options).join("\n"));
     return;
   }
@@ -64,14 +63,15 @@ export function printSearch(root: string, searchText: string, request: SearchReq
       });
       return;
     }
-    if (printCodebaseMemorySemanticSearch(root, searchText, limit, { includeTests })) {
+    const fallbackReason = printCodebaseMemorySemanticSearch(root, searchText, limit, {
+      includeTests,
+    });
+    if (fallbackReason === null) {
       return;
     }
     printWorkingTreeSearch(workingTreeSearch(root, searchText, limit, includeTests, undefined));
     console.log("\nSemantic graph matches:");
-    console.log(
-      "  unavailable: Codebase Memory semantic search returned no answer; used working-tree search fallback.",
-    );
+    console.log(`  unavailable: ${fallbackReason}; used working-tree search fallback.`);
     return;
   }
   const paths = pathMatches(root, searchText, { limit });

@@ -33,6 +33,7 @@ type CodebaseMemoryRefreshResult =
 const DEFAULT_INDEX_MODE = "full";
 const INDEX_REQUEST_TIMEOUT_MS = 120_000;
 const READY_INDEX_STATUSES = new Set(["complete", "completed", "indexed", "ready"]);
+const PROJECTS_PAGE_LIMIT = 500;
 const activeOperations: ActiveCodebaseMemoryOperation[] = [];
 const failureReasons = new Map<string, string>();
 
@@ -190,21 +191,47 @@ export function callCodebaseMemoryTool(
   return result;
 }
 
-/** Clears the current root's operational cache so deleted symbols cannot survive a full index. */
-function deleteExistingProject(root: string): { ok: true } | { ok: false; reason: string } {
-  const projectsResult = callCodebaseMemoryTool("list_projects", {});
-  if (!projectsResult.ok) {
-    return {
-      ok: false,
-      reason: `Could not list existing projects: ${readableToolReason(projectsResult.reason)}`,
-    };
+/**
+ * Every indexed project, read page by page because the backend returns at most 500 per call.
+ *
+ * `stats` adds node and edge counts at extra cost.
+ */
+export function listCodebaseMemoryProjects(
+  detail: "identity" | "stats",
+): { ok: true; projects: Record<string, unknown>[] } | { ok: false; reason: string } {
+  const projects: Record<string, unknown>[] = [];
+  for (;;) {
+    const result = callCodebaseMemoryTool("list_projects", {
+      detail,
+      limit: PROJECTS_PAGE_LIMIT,
+      offset: projects.length,
+    });
+    if (!result.ok) {
+      return { ok: false, reason: readableToolReason(result.reason) };
+    }
+    const page = recordValue(result.value);
+    if (!Array.isArray(page.projects)) {
+      return { ok: false, reason: "invalid projects payload." };
+    }
+    projects.push(...page.projects.map(recordValue));
+    if (page.has_more !== true || page.projects.length === 0) {
+      return { ok: true, projects };
+    }
   }
-  const projects = recordValue(projectsResult.value).projects;
-  if (!Array.isArray(projects)) {
-    return { ok: false, reason: "Could not list existing projects: invalid projects payload." };
+}
+
+/**
+ * Clears the current root's operational cache so deleted symbols cannot survive a full index.
+ *
+ * Matches the exact root path rather than passing the root to `delete_project`, which resolves a directory to the indexed project that contains it and would delete a parent repository's index.
+ */
+function deleteExistingProject(root: string): { ok: true } | { ok: false; reason: string } {
+  const listing = listCodebaseMemoryProjects("identity");
+  if (!listing.ok) {
+    return { ok: false, reason: `Could not list existing projects: ${listing.reason}` };
   }
   const resolvedRoot = canonicalPath(root);
-  const existing = projects.map(recordValue).find((project) => {
+  const existing = listing.projects.find((project) => {
     const projectRoot = nonblankString(project.root_path);
     return projectRoot !== null && canonicalPath(projectRoot) === resolvedRoot;
   });

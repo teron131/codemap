@@ -15,3 +15,4 @@ export {
   codebaseMemorySchema,
   codebaseMemoryStatus,
 } from "./queries.js";
+export { symbolName } from "./transport.js";

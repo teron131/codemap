@@ -86,6 +86,7 @@ async function run(): Promise<void> {
   process.once("SIGTERM", terminate);
   process.once("SIGINT", terminate);
   let result: unknown;
+  let callFailure: { error: unknown } | null = null;
   const failures: unknown[] = [];
   try {
     await client.connect(transport, { signal: controller.signal, timeout: timeoutMs });
@@ -94,11 +95,7 @@ async function run(): Promise<void> {
       timeout: timeoutMs,
     });
   } catch (error) {
-    failures.push(
-      error instanceof McpError && error.code === ErrorCode.ConnectionClosed
-        ? new Error(stderr.trim() || "missing tool response", { cause: error })
-        : error,
-    );
+    callFailure = { error };
   } finally {
     clearTimeout(timeout);
     await client.close().catch((error: unknown) => {
@@ -106,6 +103,10 @@ async function run(): Promise<void> {
     });
     // SDK close can return immediately after SIGKILL; retain the lock until the OS reaps the backend.
     await exited;
+    // Read only now: the backend's stderr can arrive after the stdout message that failed the call.
+    if (callFailure !== null) {
+      failures.unshift(backendFailure(callFailure.error, stderr));
+    }
     process.removeListener("SIGTERM", terminate);
     process.removeListener("SIGINT", terminate);
     if (lock !== null && !transferProjectLock(lock, parentPid, null)) {
@@ -122,6 +123,25 @@ async function run(): Promise<void> {
     );
   }
   writeAll(1, `${JSON.stringify(result)}\n`);
+}
+
+/**
+ * Prefers the backend's last stderr line, which names the cause, over the SDK's view of the same failure: a closed connection, or a schema error for a message it cannot parse, such as the `id: null` error a backend whose daemon cannot start sends.
+ *
+ * Timeouts and interrupts keep their own message, which callers match to retry.
+ */
+function backendFailure(error: unknown, stderr: string): unknown {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/timed out|interrupted/.test(message)) {
+    return error;
+  }
+  const backendLine = stderr.trim().split("\n").at(-1)?.trim();
+  if (backendLine) {
+    return new Error(backendLine, { cause: error });
+  }
+  return error instanceof McpError && error.code === ErrorCode.ConnectionClosed
+    ? new Error("missing tool response", { cause: error })
+    : error;
 }
 
 void run().catch((error: unknown) => {

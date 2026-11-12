@@ -5,6 +5,7 @@ import { arrayValue, recordValue } from "../json-utils.js";
 import {
   callCodebaseMemoryTool,
   type CodebaseMemoryReadyProject,
+  listCodebaseMemoryProjects,
   withFreshCodebaseMemoryProject,
 } from "./client.js";
 
@@ -33,13 +34,14 @@ type CodebaseMemoryProjectQueryResult = {
   value: unknown;
 };
 
-const JSON_FORMAT = { format: "json" } as const;
 const QUERY_REQUEST_TIMEOUT_MS = 30_000;
+/** The backend's ceiling for changed files and impacted symbols, which default to 20 and 200; Codemap's output budget bounds what is printed. */
+const CHANGE_ROW_LIMIT = 5_000;
 
-export function codebaseMemoryProjects(root: string): unknown | null {
+export function codebaseMemoryProjects(root: string): Record<string, unknown>[] | null {
   return withFreshCodebaseMemoryProject(root, () => {
-    const result = callCodebaseMemoryTool("list_projects", {});
-    return result.ok ? result.value : null;
+    const listing = listCodebaseMemoryProjects("stats");
+    return listing.ok ? listing.projects : null;
   });
 }
 
@@ -47,7 +49,6 @@ export function codebaseMemorySchema(root: string): unknown | null {
   return withFreshCodebaseMemoryProject(root, (project) => {
     const result = callCodebaseMemoryTool("get_graph_schema", {
       project: project.name,
-      ...JSON_FORMAT,
     });
     return result.ok ? result.value : null;
   });
@@ -73,7 +74,6 @@ export function codebaseMemoryQueryWithProject(
       project: project.name,
       query,
       ...(maxRows !== undefined ? { max_rows: maxRows } : {}),
-      ...JSON_FORMAT,
     };
     let result = callCodebaseMemoryTool("query_graph", args, {
       timeoutMs: QUERY_REQUEST_TIMEOUT_MS,
@@ -123,11 +123,12 @@ export function codebaseMemoryChanges(
   return withFreshCodebaseMemoryProject(root, (project) => {
     const result = callCodebaseMemoryTool("detect_changes", {
       project: project.name,
+      changed_limit: CHANGE_ROW_LIMIT,
+      limit: CHANGE_ROW_LIMIT,
       ...(options.scope !== undefined ? { scope: options.scope } : {}),
       ...(options.depth !== undefined ? { depth: options.depth } : {}),
       ...(options.baseBranch !== undefined ? { base_branch: options.baseBranch } : {}),
       ...(options.since !== undefined ? { since: options.since } : {}),
-      ...JSON_FORMAT,
     });
     return result.ok ? result.value : null;
   });
@@ -137,7 +138,6 @@ export function codebaseMemoryStatus(root: string): CodebaseMemoryStatusResult |
   return withFreshCodebaseMemoryProject(root, (project) => {
     const schemaResult = callCodebaseMemoryTool("get_graph_schema", {
       project: project.name,
-      ...JSON_FORMAT,
     });
     const schema = schemaResult.ok ? recordValue(schemaResult.value) : {};
     return {

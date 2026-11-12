@@ -44,8 +44,10 @@ When the local fallback has no whole-query match, it keeps only the files coveri
 Use `--graph` for BM25-ranked relationship context; graph filters apply only in this lane:
 
 ```sh
-codemap search --graph --relationship <type> --file-pattern "<glob>" --limit <count> --project-root <path> "<concept>"
+codemap search --graph --label <label> --file-pattern "<glob>" --limit <count> --project-root <path> "<concept>"
 ```
+
+`--label`, `--file-pattern`, `--name-pattern`, and `--qn-pattern` filter backend rows. `--relationship`, `--min-degree`, `--max-degree`, and `--exclude-entry-points` answer from the working-tree graph under a `Graph fallback:` line, because ranked backend rows carry no edges or degrees.
 
 Use `--semantic` when the repository's vocabulary differs from the clue, never together with `--graph`. An exact working-tree definition answers before semantic ranking, and broader working-tree evidence covers an empty backend answer.
 

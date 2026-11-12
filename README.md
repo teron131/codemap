@@ -23,7 +23,7 @@ Codemap is an opinionated, token-conscious source-inspection CLI for Python and 
 
 Codemap is context as code: what a command prints is the context an agent reasons from, so the selection, order, names, and limits of every result are designed rather than passed through from a tool. Coding agents are its readers, and they also develop it.
 
-![All 630 functions in Codebase Memory as bars sized by cognitive complexity. signals drops the 30 test functions, ranks the rest by cognitive complexity, then cyclomatic, then length, and keeps the first 100; magnified, that head is what the agent reads, under a heading that names the order. A key explains cognitive, cyclomatic, and hidden_quadratic.](docs/images/signals.svg)
+![Every function in Codebase Memory as a bar as long as its cognitive complexity. signals drops the test functions, ranks the rest by cognitive complexity, then cyclomatic, then length, and cuts the ranking at a fixed budget of rows. The rows on either side of the cut are tied, but a running total beside the ranking shows the rows the agent reads already hold most of the complexity while each unread row adds a sliver. Magnified, that head is what the agent reads, under a heading that names the order. A key explains cognitive, cyclomatic, and hidden_quadratic.](docs/images/signals.svg)
 
 Codemap picks the evidence source for each question and shapes the result around the agent's next action:
 
@@ -42,9 +42,11 @@ Node.js 22.12+ is required. Commands below use npm; equivalent pnpm commands als
 
 | Tool | Role | Setup |
 | --- | --- | --- |
-| [Codebase Memory MCP](https://github.com/DeusData/codebase-memory-mcp#installation) | Relationships, architecture, semantic search, and change impact | Install the external `codebase-memory-mcp` binary |
+| [Codebase Memory MCP](https://github.com/DeusData/codebase-memory-mcp#installation) | Relationships, architecture, semantic search, and change impact | Install the external `codebase-memory-mcp` binary, 0.12 or later |
 | [ripgrep](https://github.com/BurntSushi/ripgrep#installation) | Exact-text search and fast file discovery | Install the external `rg` binary |
 | [ast-grep](https://github.com/ast-grep/ast-grep#installation) | Structural search and source parsing | JavaScript, TypeScript, and Python engines bundled; CLI optional for advanced operations outside Codemap |
+
+Codebase Memory runs a daemon behind a Unix socket in `/tmp/cbm-daemon-<uid>`. An agent sandbox must let commands write that directory and use its socket; otherwise graph-backed commands report `backend: unavailable` with the backend's reason and answer from the working tree.
 
 Install the external tools on macOS for full coverage:
 

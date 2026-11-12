@@ -48,6 +48,8 @@ import {
 } from "../src/codemap/search/codebase-memory.js";
 
 const workspaceRoot = process.cwd();
+/** The transport adds these to every tool call. */
+const responseArguments = { format: "json", max_output_tokens: 1_000_000 };
 let workDir: string;
 let serverPath: string;
 
@@ -70,6 +72,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllEnvs();
   rmSync(workDir, { recursive: true, force: true });
+  rmSync(toolLogPath(), { force: true });
 });
 
 describe("Codebase Memory integration", () => {
@@ -149,9 +152,13 @@ describe("Codebase Memory integration", () => {
         mode: "full",
         persistence: false,
         repo_path: workDir,
+        ...responseArguments,
       },
     ]);
-    expect(readDeleteCalls()).toEqual([{ project: "mock-project" }]);
+    expect(readDeleteCalls()).toEqual([{ project: "mock-project", ...responseArguments }]);
+    expect(toolCallArguments("list_projects")).toEqual([
+      { detail: "identity", limit: 500, offset: 0, ...responseArguments },
+    ]);
   });
 
   it("performs one clean refresh per top-level operation", () => {
@@ -168,11 +175,13 @@ describe("Codebase Memory integration", () => {
         mode: "full",
         persistence: false,
         repo_path: workDir,
+        ...responseArguments,
       },
       {
         mode: "full",
         persistence: false,
         repo_path: workDir,
+        ...responseArguments,
       },
     ]);
   });
@@ -358,8 +367,12 @@ describe("Codebase Memory integration", () => {
 
       expect(output).toContain("Codebase Memory code matches:");
       expect(output).toContain("results: 1");
-      expect(output).toContain("- needle");
-      expect(output).not.toContain('"results"');
+      expect(output).toContain("grep matches: 3");
+      expect(output).toContain(
+        "- needle (src/needle.ts:4-8, Function) — export function needle() {",
+      );
+      expect(output).not.toContain("mock-project.src.needle");
+      expect(output).not.toContain('"rows"');
     } finally {
       logSpy.mockRestore();
     }
@@ -854,8 +867,12 @@ describe("Codebase Memory integration", () => {
     vi.stubEnv("CODEBASE_MEMORY_MOCK_EMPTY_GRAPH", "1");
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     try {
-      expect(printCodebaseMemoryGraphSearch(workDir, "needle", 1)).toBe(false);
-      expect(printCodebaseMemorySemanticSearch(workDir, "needle", 1)).toBe(false);
+      expect(printCodebaseMemoryGraphSearch(workDir, "needle", 1)).toBe(
+        "Codebase Memory graph search returned no answer",
+      );
+      expect(printCodebaseMemorySemanticSearch(workDir, "needle", 1)).toBe(
+        "Codebase Memory semantic search returned no answer",
+      );
       expect(logSpy).not.toHaveBeenCalled();
     } finally {
       logSpy.mockRestore();
@@ -865,14 +882,14 @@ describe("Codebase Memory integration", () => {
   it("prints compact backend graph search rows", () => {
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     try {
-      expect(printCodebaseMemoryGraphSearch(workDir, "needle", 1)).toBe(true);
+      expect(printCodebaseMemoryGraphSearch(workDir, "needle", 1)).toBeNull();
       const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
 
       expect(output).toContain("Codebase Memory graph matches:");
-      expect(output).toContain("mode: graph");
+      expect(output).toContain("mode: bm25");
       expect(output).toContain("results: 1");
-      expect(output).toContain("- needle");
-      expect(output).not.toContain('"results"');
+      expect(output).toContain("- needle (src/needle.ts:4-8, Function)");
+      expect(output).not.toContain('"rows"');
     } finally {
       logSpy.mockRestore();
     }
@@ -885,21 +902,32 @@ describe("Codebase Memory integration", () => {
       expect(
         printCodebaseMemoryGraphSearch(workDir, "Runner", 3, {
           label: "Class",
+          namePattern: "^Runner$",
         }),
-      ).toBe(true);
+      ).toBeNull();
       const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
 
+      expect(toolCallArguments("search_graph")).toEqual([
+        {
+          project: "mock-project",
+          query: "Runner",
+          label: "Class",
+          limit: 100,
+          ...responseArguments,
+        },
+      ]);
       expect(output).toContain("results: 1");
       expect(output).toContain("hidden filtered: 1");
       expect(output).toContain("- Runner (");
       expect(output).toContain(", Class)");
       expect(output).not.toContain("- __init__");
+      expect(output).not.toContain("RunnerConfig");
     } finally {
       logSpy.mockRestore();
     }
   });
 
-  it("applies relationship and degree filters to backend graph rows before rendering", () => {
+  it("skips ranked backend graph search for relationship and degree filters", () => {
     vi.stubEnv("CODEBASE_MEMORY_MOCK_MIXED_GRAPH_ROWS", "1");
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     try {
@@ -908,28 +936,38 @@ describe("Codebase Memory integration", () => {
           minDegree: 2,
           relationship: "CALLS",
         }),
-      ).toBe(true);
-      const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
-
-      expect(output).toContain("results: 1");
-      expect(output).toContain("hidden filtered: 1");
-      expect(output).toContain("- Runner");
-      expect(output).not.toContain("- __init__");
+      ).toBe("Codebase Memory ranked graph search cannot apply --relationship, --min-degree");
+      expect(logSpy).not.toHaveBeenCalled();
+      expect(readToolCalls()).toEqual([]);
     } finally {
       logSpy.mockRestore();
     }
   });
 
-  it("falls back when backend graph degree filters hide every row", () => {
-    vi.stubEnv("CODEBASE_MEMORY_MOCK_MIXED_GRAPH_ROWS", "1");
+  it("answers structural graph filters from the working-tree graph", async () => {
+    mkdirSync(path.join(workDir, "src"), { recursive: true });
+    writeFileSync(
+      path.join(workDir, "src", "runner.ts"),
+      "export function runRunner() {\n  return 1;\n}\n",
+      "utf8",
+    );
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     try {
-      expect(
-        printCodebaseMemoryGraphSearch(workDir, "Runner", 3, {
+      await expect(
+        commandSearch(["runRunner"], {
+          projectRoot: workDir,
+          graph: true,
           maxDegree: 0,
+          excludeEntryPoints: true,
         }),
-      ).toBe(false);
-      expect(logSpy).not.toHaveBeenCalled();
+      ).resolves.toBe(0);
+      const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+
+      expect(output).toContain(
+        "Graph fallback: Codebase Memory ranked graph search cannot apply --max-degree, --exclude-entry-points; used working-tree relationship graph.",
+      );
+      expect(output).not.toContain("Codebase Memory graph matches:");
+      expect(toolCallArguments("search_graph")).toEqual([]);
     } finally {
       logSpy.mockRestore();
     }
@@ -943,24 +981,23 @@ describe("Codebase Memory integration", () => {
         printCodebaseMemoryGraphSearch(workDir, "Runner", 3, {
           label: "Variable",
         }),
-      ).toBe(false);
+      ).toBe("Codebase Memory graph search returned no answer");
       expect(logSpy).not.toHaveBeenCalled();
     } finally {
       logSpy.mockRestore();
     }
   });
 
-  it("suppresses negative backend scores in graph search rows", () => {
-    vi.stubEnv("CODEBASE_MEMORY_MOCK_SCORE_LIKE_RANK", "1");
+  it("never shows the BM25 rank as a graph search score", () => {
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     try {
-      expect(printCodebaseMemoryGraphSearch(workDir, "needle", 1)).toBe(true);
+      expect(printCodebaseMemoryGraphSearch(workDir, "needle", 1)).toBeNull();
       const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
 
       expect(output).toContain("- needle (");
       expect(output).toContain(", Function)");
-      expect(output).not.toContain("score=-19.058");
-      expect(output).not.toContain("rank=-19");
+      expect(output).not.toContain("score=");
+      expect(output).not.toContain("-19");
     } finally {
       logSpy.mockRestore();
     }
@@ -1044,18 +1081,25 @@ describe("Codebase Memory integration", () => {
     }
   });
 
-  it("prints compact semantic graph search rows from semantic_results", () => {
+  it("prints compact semantic graph search rows from the semantic table", () => {
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     try {
-      expect(printCodebaseMemorySemanticSearch(workDir, "needle", 2)).toBe(true);
+      expect(printCodebaseMemorySemanticSearch(workDir, "needle", 2)).toBeNull();
       const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
 
       expect(output).toContain("Codebase Memory semantic matches:");
       expect(output).toContain("mode: semantic");
       expect(output).toContain("semantic results: 1");
-      expect(output).toContain("- semanticNeedle");
-      expect(output).toContain("score=0.987");
-      expect(output).not.toContain('"results"');
+      expect(output).toContain("- semanticNeedle (src/semantic-needle.ts, Function, score=0.987)");
+      expect(output).not.toContain('"rows"');
+      expect(toolCallArguments("search_graph")).toEqual([
+        {
+          project: "mock-project",
+          semantic_query: ["needle"],
+          semantic_limit: 100,
+          ...responseArguments,
+        },
+      ]);
     } finally {
       logSpy.mockRestore();
     }
@@ -1086,7 +1130,9 @@ describe("Codebase Memory integration", () => {
     vi.stubEnv("CODEBASE_MEMORY_MOCK_LOW_SEMANTIC", "1");
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     try {
-      expect(printCodebaseMemorySemanticSearch(workDir, "needle", 2)).toBe(false);
+      expect(printCodebaseMemorySemanticSearch(workDir, "needle", 2)).toBe(
+        "Codebase Memory semantic search returned no answer",
+      );
       expect(logSpy).not.toHaveBeenCalled();
     } finally {
       logSpy.mockRestore();
@@ -1097,7 +1143,9 @@ describe("Codebase Memory integration", () => {
     vi.stubEnv("CODEBASE_MEMORY_MOCK_TEST_ONLY", "1");
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     try {
-      expect(printCodebaseMemorySemanticSearch(workDir, "needle", 2)).toBe(false);
+      expect(printCodebaseMemorySemanticSearch(workDir, "needle", 2)).toBe(
+        "Codebase Memory semantic search matched only tests, which are hidden (use --include-tests)",
+      );
       expect(logSpy).not.toHaveBeenCalled();
     } finally {
       logSpy.mockRestore();
@@ -1138,11 +1186,38 @@ describe("Codebase Memory integration", () => {
       filePath: "src/needle.ts",
       startLine: 4,
       endLine: 8,
-      metricFacts: ["cyclomatic=2", "cognitive=3", "lines=5"],
+      metricFacts: ["cyclomatic=2", "cognitive=3", "lines=5", "callers=1", "callees=1"],
       signature: "function needle(): string",
       source: "export function needle() {\n  return 'needle';\n}",
       callers: ["callerOne"],
       callees: ["calleeOne"],
+    });
+    const inspectCalls = readToolCalls().slice(-4);
+    expect(inspectCalls.map((call) => call.name)).toEqual([
+      "search_graph",
+      "get_code_snippet",
+      "query_graph",
+      "trace_path",
+    ]);
+    expect(inspectCalls[0]?.arguments).toEqual({
+      project: "mock-project",
+      query: "needle",
+      limit: 2,
+      ...responseArguments,
+    });
+    expect(inspectCalls[1]?.arguments).toEqual({
+      project: "mock-project",
+      qualified_name: "mock-project.src.needle",
+      source_mode: "full",
+      ...responseArguments,
+    });
+    expect(inspectCalls[2]?.arguments).toMatchObject({
+      query: expect.stringContaining('WHERE n.qualified_name = "mock-project.src.needle"'),
+    });
+    expect(inspectCalls[3]?.arguments).toMatchObject({
+      function_name: "mock-project.src.needle",
+      depth: 2,
+      limit: 5000,
     });
     expect(readDeleteCalls()).toHaveLength(1);
     expect(readIndexCalls()).toHaveLength(1);
@@ -1169,7 +1244,7 @@ describe("Codebase Memory integration", () => {
     const output = renderCodebaseMemoryInspect(result, { limit: 2 });
 
     expect(output).toContain("Source: src/needle.ts:4-8");
-    expect(output).toContain("Metrics: cyclomatic=2, cognitive=3, lines=5");
+    expect(output).toContain("Metrics: cyclomatic=2, cognitive=3, lines=5, callers=1, callees=1");
     expect(output).toContain("## Calls");
     expect(output).not.toContain("Qualified:");
     expect(output).not.toContain("Match:");
@@ -1268,6 +1343,7 @@ describe("Codebase Memory integration", () => {
   });
 
   it("prints project lists through the backend command surface", () => {
+    vi.stubEnv("CODEBASE_MEMORY_MOCK_PROJECTS_PAGE_SIZE", "4");
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     try {
       expect(commandBackendProjects({ projectRoot: workDir })).toBe(0);
@@ -1279,6 +1355,11 @@ describe("Codebase Memory integration", () => {
       expect(output).toContain("other projects:");
       expect(output).not.toContain("mock-work");
       expect(output).toContain("other-8");
+      expect(
+        toolCallArguments("list_projects")
+          .filter((args) => args.detail === "stats")
+          .map((args) => args.offset),
+      ).toEqual([0, 4, 8]);
       expect(readIndexCalls()).toHaveLength(1);
     } finally {
       logSpy.mockRestore();
@@ -1437,8 +1518,26 @@ describe("Codebase Memory integration", () => {
       ).toBe(0);
       const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
 
-      expect(output).toContain("Codebase Memory changed-code impact:");
-      expect(output).toContain("src/needle.ts");
+      expect(output).toContain(
+        [
+          "Codebase Memory changed-code impact:",
+          "changed files: 1",
+          "- src/needle.ts",
+          "impacted symbols: 3",
+          "- calleeOne (Function, src/callee.ts)",
+          "- ...",
+        ].join("\n"),
+      );
+      expect(toolCallArguments("detect_changes")).toEqual([
+        {
+          project: "mock-project",
+          changed_limit: 5000,
+          limit: 5000,
+          depth: 2,
+          since: "HEAD~1",
+          ...responseArguments,
+        },
+      ]);
       expect(readIndexCalls()).toHaveLength(1);
     } finally {
       logSpy.mockRestore();
@@ -1459,7 +1558,6 @@ describe("Codebase Memory integration", () => {
 
       expect(output).toContain("Codebase Memory changed-code impact:");
       expect(output).toContain("none");
-      expect(output).toContain("depth: 2");
       expect(output).not.toContain('"changed_files"');
     } finally {
       logSpy.mockRestore();
@@ -1518,6 +1616,7 @@ describe("Codebase Memory integration", () => {
       expect(output).toContain("# Ranked Source Metrics");
       expect(readQueryCalls()[0]).toMatchObject({
         max_rows: 100,
+        query: expect.stringContaining("f.is_test = false"),
       });
       expect(readIndexCalls()).toHaveLength(1);
     } finally {
@@ -1642,6 +1741,29 @@ function readIndexCalls(): unknown[] {
 
 function readDeleteCalls(): unknown[] {
   const logPath = path.join(workDir, "delete-calls.jsonl");
+  if (!existsSync(logPath)) {
+    return [];
+  }
+  return readFileSync(logPath, "utf8")
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+}
+
+/** Arguments of every call to one tool, in call order. */
+function toolCallArguments(name: string): Record<string, unknown>[] {
+  return readToolCalls()
+    .filter((call) => call.name === name)
+    .map((call) => call.arguments);
+}
+
+/** Outside the project root, so working-tree search cannot match logged query arguments. */
+function toolLogPath(): string {
+  return `${workDir}-tool-calls.jsonl`;
+}
+
+function readToolCalls(): { name: string; arguments: Record<string, unknown> }[] {
+  const logPath = toolLogPath();
   if (!existsSync(logPath)) {
     return [];
   }
@@ -1828,6 +1950,60 @@ if (operationId) {
   }
   appendEvent("end");
 }
+fs.appendFileSync(${JSON.stringify(toolLogPath())}, JSON.stringify({ name: toolName, arguments: toolArgs }) + "\\n");
+const allProjects = [
+  { name: "mock-project", root_path: root, nodes: 12, edges: 34 },
+  { name: "mock-work", root_path: ${JSON.stringify(path.join(workDir, "test", ".work", "old"))}, nodes: 4, edges: 3 },
+  ...Array.from({ length: 9 }, (_, index) => ({
+    name: "other-" + index,
+    root_path: ${JSON.stringify(workspaceRoot)} + "/other-" + index,
+    nodes: index,
+    edges: index + 1,
+  })),
+];
+const projectOffset = toolArgs.offset ?? 0;
+const projectPageSize = Number(process.env.CODEBASE_MEMORY_MOCK_PROJECTS_PAGE_SIZE ?? toolArgs.limit ?? allProjects.length);
+const codeColumns = ["qn", "label", "file", "lines", "matches", "matches_omitted", "in", "out", "context"];
+const codeRow = (qn, file) => [qn, "Function", file, "4-8", [5], 0, 1, 1, { context: "export function needle() {\\n  return 'needle';\\n", context_start: 4 }];
+const graphColumns = ["qn", "label", "file", "lines", "rank"];
+const graphRows =
+  process.env.CODEBASE_MEMORY_MOCK_EMPTY_GRAPH === "1"
+    ? []
+    : process.env.CODEBASE_MEMORY_MOCK_MIXED_GRAPH_ROWS === "1"
+      ? [
+          ["mock-project.src.Runner.__init__", "Method", "src/runner.ts", "2-4", -12.5],
+          ["mock-project.src.Runner", "Class", "src/runner.ts", "1-9", -11.25],
+          ["mock-project.src.RunnerConfig", "Class", "src/runner.ts", "11-14", -10.5],
+        ].filter((row) => toolArgs.label === undefined || row[1] === toolArgs.label)
+      : [
+          ["mock-project.src.needle", "Function", "src/needle.ts", "4-8", -19.05778987685244],
+          ...(process.env.CODEBASE_MEMORY_MOCK_AMBIGUOUS_INSPECT === "1"
+            ? [["mock-project.other.needle", "Function", "src/other.ts", "1-3", -18.5]]
+            : []),
+        ];
+const semanticRows =
+  process.env.CODEBASE_MEMORY_MOCK_EMPTY_GRAPH === "1"
+    ? []
+    : process.env.CODEBASE_MEMORY_MOCK_MANY_SEMANTIC === "1"
+      ? Array.from({ length: 20 }, (_, index) => [
+          "mock-project.src.semanticNeedle" + index,
+          "Function",
+          "src/semantic-needle.ts",
+          0.987 - index / 1000,
+        ])
+      : [
+          [
+            process.env.CODEBASE_MEMORY_MOCK_TEST_ONLY === "1"
+              ? "mock-project.tests.semanticNeedle"
+              : "mock-project.src.semanticNeedle",
+            "Function",
+            process.env.CODEBASE_MEMORY_MOCK_TEST_ONLY === "1"
+              ? "tests/semantic-needle.test.ts"
+              : "src/semantic-needle.ts",
+            process.env.CODEBASE_MEMORY_MOCK_LOW_SEMANTIC === "1" ? 0.49 : 0.987,
+          ],
+        ];
+const traceRule = 'qn = qn_prefix == "" ? name : qn_prefix + "." + name';
 const payloads = {
   index_repository: {
 	project: process.env.CODEBASE_MEMORY_MOCK_NO_INDEX_PROJECT === "1" ? null : "mock-project",
@@ -1837,26 +2013,8 @@ const payloads = {
     status: process.env.CODEBASE_MEMORY_MOCK_INDEX_FAIL === "1" ? "failed" : process.env.CODEBASE_MEMORY_MOCK_INDEX_STATUS === "" ? undefined : process.env.CODEBASE_MEMORY_MOCK_INDEX_STATUS ?? "ready",
   },
   list_projects: {
-    projects: [
-      {
-        name: "mock-project",
-        root_path: root,
-        nodes: 12,
-        edges: 34,
-      },
-      {
-        name: "mock-work",
-        root_path: ${JSON.stringify(path.join(workDir, "test", ".work", "old"))},
-        nodes: 4,
-        edges: 3,
-      },
-      ...Array.from({ length: 9 }, (_, index) => ({
-        name: "other-" + index,
-        root_path: ${JSON.stringify(workspaceRoot)} + "/other-" + index,
-        nodes: index,
-        edges: index + 1,
-      })),
-    ],
+    projects: allProjects.slice(projectOffset, projectOffset + projectPageSize),
+    has_more: projectOffset + projectPageSize < allProjects.length,
   },
   delete_project: {
     project: "mock-project",
@@ -1884,81 +2042,31 @@ const payloads = {
           project: "mock-project",
           total_nodes: 24,
           total_edges: 32,
-          node_labels: [
-            {
-              label: "File",
-              count: 12,
-            },
-            {
-              label: "Module",
-              count: 12,
-            },
-          ],
-          edge_types: [
-            {
-              type: "DEFINES",
-              count: 12,
-            },
-          ],
+          node_labels: { cols: ["label", "count"], rows: [["File", 12], ["Module", 12]] },
+          edge_types: { cols: ["type", "count"], rows: [["DEFINES", 12]] },
         }
       : {
           project: "mock-project",
           total_nodes: 12,
           total_edges: 34,
-          node_labels: [
-            {
-              label: "Function",
-              count: 7,
-            },
-            {
-              label: "File",
-              count: 5,
-            },
-          ],
-          edge_types: [
-            {
-              type: "CALLS",
-              count: 9,
-            },
-          ],
-          languages: [
-            {
-              language: "TypeScript",
-              file_count: 2,
-            },
-          ],
-          hotspots: [
-            {
-              name: "get",
-              fan_in: 9,
-              qualified_name: "mock-project.store.get",
-            },
-            {
-              name: "needle",
-              fan_in: 3,
-              qualified_name: "mock-project.src.needle",
-            },
-          ],
-          clusters: [
-            {
-              label: "core",
-              members: 4,
-              cohesion: 0.75,
-              top_nodes: ["needle", "get", "needle", "callerOne", "hiddenTestHelper"],
-            },
-          ],
-          entry_points: [
-            {
-              name: "main",
-              file: "src/main.ts",
-            },
-          ],
-          file_tree: [
-            {
-              path: "src/needle.ts",
-              type: "file",
-            },
-          ],
+          node_labels: { cols: ["label", "count"], rows: [["Function", 7], ["File", 5]] },
+          edge_types: { cols: ["type", "count"], rows: [["CALLS", 9]] },
+          languages: { cols: ["language", "files"], rows: [["TypeScript", 2]] },
+          hotspots: {
+            cols: ["qn", "fan_in"],
+            rows: [
+              ["mock-project.store.get", 9],
+              ["mock-project.src.needle", 3],
+            ],
+          },
+          clusters: {
+            cols: ["id", "label", "members", "cohesion", "top_nodes", "packages", "edge_types"],
+            rows: [
+              [1, "core", 4, 0.75, ["needle", "get", "needle", "callerOne", "hiddenTestHelper"], ["src"], ["CALLS"]],
+            ],
+          },
+          entry_points: { cols: ["qn", "file"], rows: [["mock-project.src.main", "src/main.ts"]] },
+          file_tree: { cols: ["path", "type", "children"], rows: [["src/needle.ts", "file", 0]] },
           ...(process.env.CODEBASE_MEMORY_MOCK_LARGE_ARCHITECTURE === "1"
             ? { transport_padding: "x".repeat(128 * 1024) }
             : {}),
@@ -1967,236 +2075,88 @@ const payloads = {
 	process.env.CODEBASE_MEMORY_MOCK_UNKNOWN_SEARCH === "1"
 	  ? { status: "ambiguous", suggestions: ["mock-project.src.needle"] }
 	  : process.env.CODEBASE_MEMORY_MOCK_EMPTY_SEARCH === "1"
-      ? {
-          results: [],
-          raw_matches: [],
-          total_results: 0,
-          raw_match_count: 0,
-        }
+      ? { cols: codeColumns, rows: [], total_grep_matches: 0, has_more: false }
       : {
-          results: [
+          cols: codeColumns,
+          rows: [
             ...(process.env.CODEBASE_MEMORY_MOCK_TEST_WORDS === "1"
               ? [
-                  { node: "testament", qualified_name: "mock-project.src.testament" },
-                  { node: "testParser", qualified_name: "mock-project.src.testParser" },
+                  codeRow("mock-project.src.testament", "src/testament.ts"),
+                  codeRow("mock-project.src.testParser", "src/parser.ts"),
                 ]
               : []),
             ...(process.env.CODEBASE_MEMORY_MOCK_TEST_FIRST === "1"
-              ? [
-                  {
-                    node: "testNeedle",
-                    qualified_name: "mock-project.tests.testNeedle",
-                    file: ${JSON.stringify(path.join(workDir, "tests", "needle.test.ts"))},
-                  },
-                ]
+              ? [codeRow("mock-project.tests.testNeedle", "tests/needle.test.ts")]
               : []),
             ...(process.env.CODEBASE_MEMORY_MOCK_TEST_ONLY === "1"
-              ? [
-                  {
-                    node: "testNeedle",
-                    qualified_name: "mock-project.tests.testNeedle",
-                    file: ${JSON.stringify(path.join(workDir, "tests", "needle.test.ts"))},
-                  },
-                ]
-              : [
-                  {
-                    node: "needle",
-                    qualified_name: "mock-project.src.needle",
-                  },
-                ]),
+              ? [codeRow("mock-project.tests.testNeedle", "tests/needle.test.ts")]
+              : [codeRow("mock-project.src.needle", "src/needle.ts")]),
           ],
-          raw_matches: [],
-          total_results:
-            process.env.CODEBASE_MEMORY_MOCK_TEST_FIRST === "1" ? 2 : 1,
-          raw_match_count: 0,
+          total_grep_matches: 3,
+          has_more: false,
         },
   search_graph:
     typeof toolArgs.semantic_query === "string"
       ? 'semantic_query must be an array of keyword strings, e.g. ["send","pubsub","publish"]'
-      : process.env.CODEBASE_MEMORY_MOCK_EMPTY_GRAPH === "1"
-      ? {
-          results: [],
-          semantic_results: [],
-          total_results: 0,
-        }
       : Array.isArray(toolArgs.semantic_query)
       ? {
-          search_mode: "semantic",
-          total: process.env.CODEBASE_MEMORY_MOCK_MANY_SEMANTIC === "1" ? 20 : 1,
-          results: [],
-          semantic_results:
-            process.env.CODEBASE_MEMORY_MOCK_MANY_SEMANTIC === "1"
-              ? Array.from({ length: 20 }, (_, index) => ({
-                  name: "semanticNeedle" + index,
-                  qualified_name: "mock-project.src.semanticNeedle" + index,
-                  label: "Function",
-                  file_path: ${JSON.stringify(path.join(workDir, "src", "semantic-needle.ts"))},
-                  score: 0.987 - index / 1000,
-                }))
-              : [
-                  {
-                    name: "semanticNeedle",
-                    qualified_name:
-                      process.env.CODEBASE_MEMORY_MOCK_TEST_ONLY === "1"
-                        ? "mock-project.tests.semanticNeedle"
-                        : "mock-project.src.semanticNeedle",
-			        label: "Function",
-                    file_path:
-                      process.env.CODEBASE_MEMORY_MOCK_TEST_ONLY === "1"
-                        ? ${JSON.stringify(path.join(workDir, "tests", "semantic-needle.test.ts"))}
-                        : ${JSON.stringify(path.join(workDir, "src", "semantic-needle.ts"))},
-                    score: process.env.CODEBASE_MEMORY_MOCK_LOW_SEMANTIC === "1" ? 0.49 : 0.987,
-                  },
-                ],
-          has_more: process.env.CODEBASE_MEMORY_MOCK_MANY_SEMANTIC === "1",
+          groups: [],
+          semantic: { cols: ["qn", "label", "file", "score"], rows: semanticRows },
+          semantic_has_more: process.env.CODEBASE_MEMORY_MOCK_MANY_SEMANTIC === "1",
         }
-      : process.env.CODEBASE_MEMORY_MOCK_MIXED_GRAPH_ROWS === "1"
-      ? {
-          search_mode: "graph",
-          results: [
-            {
-              name: "__init__",
-              qualified_name: "mock-project.src.Runner.__init__",
-              file_path: ${JSON.stringify(path.join(workDir, "src", "runner.ts"))},
-              label: "Method",
-              relationships: [{ type: "DEFINES" }],
-              degree: 1,
-            },
-            {
-              name: "Runner",
-              qualified_name: "mock-project.src.Runner",
-              file_path: ${JSON.stringify(path.join(workDir, "src", "runner.ts"))},
-              label: "Class",
-              relationships: [{ type: "CALLS" }, { type: "DEFINES" }],
-              degree: 2,
-            },
-          ],
-          semantic_results: [],
-          total_results: 2,
-        }
-      : {
-          results: [
-            {
-              name: "needle",
-              qualified_name: "mock-project.src.needle",
-              file_path: ${JSON.stringify(path.join(workDir, "src", "needle.ts"))},
-              start_line: 4,
-              end_line: 8,
-              rank: process.env.CODEBASE_MEMORY_MOCK_SCORE_LIKE_RANK === "1" ? -19.05778987685244 : 1,
-              rerank_score: process.env.CODEBASE_MEMORY_MOCK_SCORE_LIKE_RANK === "1" ? undefined : 0.87,
-              label: "Function",
-              language: "TypeScript",
-            },
-			...(process.env.CODEBASE_MEMORY_MOCK_AMBIGUOUS_INSPECT === "1"
-			  ? [
-			      {
-			        name: "needle",
-			        qualified_name: "mock-project.other.needle",
-			        file_path: ${JSON.stringify(path.join(workDir, "src", "other.ts"))},
-			        start_line: 1,
-			        end_line: 3,
-			        label: "Function",
-			      },
-			    ]
-			  : []),
-          ],
-          connected_nodes: [
-            {
-              relationship: "CALLS",
-              qualified_name: "mock-project.src.calleeOne",
-            },
-          ],
-          semantic_results: [],
-          total_results: 1,
-        },
+      : { cols: graphColumns, rows: graphRows, search_mode: "bm25", has_more: false },
   get_code_snippet:
     process.env.CODEBASE_MEMORY_MOCK_UNKNOWN_SNIPPET === "1"
       ? { message: "ok" }
       : {
-    name: "needle",
-    qualified_name: "mock-project.src.needle",
-    file_path: ${JSON.stringify(path.join(workDir, "src", "needle.ts"))},
-    start_line: 4,
-    end_line: 8,
-    complexity: 2,
-    cognitive: 3,
-    lines: 5,
-    signature:
-      process.env.CODEBASE_MEMORY_MOCK_ARGUMENT_SIGNATURE === "1"
-        ? "( *, value: string, )"
-        : "function needle()",
-    return_type: process.env.CODEBASE_MEMORY_MOCK_BARE_RETURN_TYPE === "1" ? "string" : ": string",
-    source: "export function needle() {\\n  return 'needle';\\n}",
-		  caller_names: ["callerOne"],
-		  callee_names: ["calleeOne"],
-		},
-  trace_path:
-    process.env.CODEBASE_MEMORY_MOCK_EMPTY_TRACE === "1"
-      ? {
-          paths: [],
-          total_paths: 0,
-        }
-      : {
-          function: toolArgs.function_name,
-          direction: toolArgs.direction,
-          mode: toolArgs.mode,
-          callers: [
-            {
-              name: toolArgs.function_name,
-              hop: 1,
-              risk: "HIGH",
-            },
-            {
-              name: "callerOne",
-              hop: 1,
-              risk: "HIGH",
-            },
-            {
-              name: "callerOne",
-              hop: 1,
-              risk: "HIGH",
-            },
-          ],
-          callees: [
-            {
-              name: toolArgs.function_name,
-              hop: 1,
-              risk: "MEDIUM",
-            },
-            {
-              name: "calleeOne",
-              hop: 1,
-              risk: "MEDIUM",
-            },
-            ...(process.env.CODEBASE_MEMORY_MOCK_GENERIC_TRACE === "1"
-              ? [
-                  {
-                    name: "append",
-                    hop: 2,
-                    risk: "HIGH",
-                  },
-                  {
-                    name: "get",
-                    hop: 2,
-                    risk: "HIGH",
-                  },
-                ]
-              : []),
-          ],
-          paths: [
-            {
-              from: "mock-project.src.caller",
-              to: "mock-project.src.needle",
-            },
-          ],
-          total_paths: 1,
+          name: "needle",
+          qualified_name: "mock-project.src.needle",
+          label: "Function",
+          file_path: ${JSON.stringify(path.join(workDir, "src", "needle.ts"))},
+          start_line: 4,
+          end_line: 8,
+          source_mode: "full",
+          source: "export function needle() {\\n  return 'needle';\\n}",
+          callers: 1,
+          callees: 1,
         },
+  trace_path: {
+    function: toolArgs.function_name,
+    direction: toolArgs.direction,
+    mode: toolArgs.mode,
+    callers: {
+      qn_rule: traceRule,
+      cols: ["name", "hop"],
+      groups: [{ qn_prefix: "mock-project.src", rows: [["needle", 1], ["callerOne", 1], ["callerOne", 1]] }],
+    },
+    callees: {
+      qn_rule: traceRule,
+      cols: ["name", "hop"],
+      groups: [{ qn_prefix: "mock-project.src", rows: [["needle", 1], ["calleeOne", 1]] }],
+    },
+  },
   query_graph:
 	process.env.CODEBASE_MEMORY_MOCK_UNKNOWN_QUERY === "1"
 	  ? { message: "ok" }
+	  : toolArgs.query?.includes("WHERE n.qualified_name =")
+	  ? {
+	      columns: ["signature", "return_type", "complexity", "cognitive", "lines"],
+	      rows: [
+	        [
+	          process.env.CODEBASE_MEMORY_MOCK_ARGUMENT_SIGNATURE === "1"
+	            ? "(\\\\n  *,\\\\n  value: string,\\\\n)"
+	            : "function needle()",
+	          process.env.CODEBASE_MEMORY_MOCK_BARE_RETURN_TYPE === "1" ? "string" : ": string",
+	          "2",
+	          "3",
+	          "5",
+	        ],
+	      ],
+	      total: 1,
+	    }
 	  : toolArgs.query?.includes("f.cognitive") &&
 	toolArgs.max_rows === 100 &&
-	toolArgs.query?.includes("MATCH (f:Function)") &&
+	toolArgs.query?.includes("MATCH (f:Function|Method)") &&
 	toolArgs.query?.includes("ORDER BY") &&
 	!toolArgs.query?.includes("LIMIT")
 	  ? {
@@ -2208,8 +2168,6 @@ const payloads = {
 	        "complexity",
 	        "cognitive",
 	        "linear_scan_in_loop",
-	        "is_exported",
-	        "is_test",
 	      ],
 	      rows: process.env.CODEBASE_MEMORY_MOCK_TEST_HEAVY_METRICS === "1"
 	        ? [
@@ -2221,8 +2179,6 @@ const payloads = {
 	              200 - index,
 	              300 - index,
 	              0,
-	              false,
-	              false,
 	            ]),
 	            ...Array.from({ length: 20 }, (_, index) => [
 	              "production" + index,
@@ -2232,8 +2188,6 @@ const payloads = {
 	              20 - index,
 	              30 - index,
 	              0,
-	              true,
-	              false,
 	            ]),
 	          ]
 	        : process.env.CODEBASE_MEMORY_MOCK_TWENTY_METRICS === "1"
@@ -2245,10 +2199,8 @@ const payloads = {
 	            11 + index,
 	            20 + index,
 	            0,
-	            true,
-	            false,
 	          ])
-	        : [["app", "src/app.ts", 1, 3, 11, 20, 0, true, false]],
+	        : [["app", "src/app.ts", 1, 3, 11, 20, 0]],
 	      total: 1,
 	    }
 	  : process.env.CODEBASE_MEMORY_MOCK_JSON_STRING_QUERY === "1"
@@ -2278,17 +2230,19 @@ const payloads = {
     process.env.CODEBASE_MEMORY_MOCK_EMPTY_CHANGES === "1"
       ? {
           changed_files: [],
-          changed_count: 0,
-          impacted_symbols: [],
-          depth: 2,
+          changed_total: 0,
+          changed_has_more: false,
+          impacted: [],
+          impacted_total: 0,
+          impacted_has_more: false,
         }
       : {
-          changes: [
-            {
-              file: "src/needle.ts",
-              impact: "calleeOne",
-            },
-          ],
+          changed_files: ["src/needle.ts"],
+          changed_total: 1,
+          changed_has_more: false,
+          impacted: [{ qn: "mock-project.src.calleeOne", label: "Function", file: "src/callee.ts", hop: 1 }],
+          impacted_total: 3,
+          impacted_has_more: true,
         },
 };
 if (toolName === "index_repository") {

@@ -16,12 +16,12 @@ describe("Codebase Memory architecture rendering", () => {
       project: "sparse-project",
       total_nodes: 10,
       total_edges: 8,
-      node_labels: [
+      node_labels: table([
         { label: "Folder", count: 3 },
         { label: "File", count: 2 },
         { label: "Module", count: 2 },
-      ],
-      edge_types: [{ type: "DEFINES", count: 4 }],
+      ]),
+      edge_types: table([{ type: "DEFINES", count: 4 }]),
     });
 
     expect(output).toBe("# sparse-project\n");
@@ -34,26 +34,22 @@ describe("Codebase Memory architecture rendering", () => {
       project: "busy-project",
       total_nodes: 100,
       total_edges: 200,
-      node_labels: [
+      node_labels: table([
         { label: "Function", count: 6 },
         { label: "Method", count: 3 },
         { label: "Class", count: 1 },
-      ],
-      edge_types: [{ type: "CALLS", count: 40 }],
-      hotspots: [
-        { name: "get", fan_in: 30 },
-        { name: "reject", fan_in: 20 },
-        { name: "expect", fan_in: 18 },
-        { name: "describe", fan_in: 17 },
-        { name: "lower", fan_in: 16 },
-        { name: "#runExclusive", fan_in: 15 },
-        {
-          name: "handleRequest",
-          fan_in: 12,
-          qualified_name: "app.server.handleRequest",
-        },
-      ],
-      clusters: [
+      ]),
+      edge_types: table([{ type: "CALLS", count: 40 }]),
+      hotspots: table([
+        { qn: "app.http.get", fan_in: 30 },
+        { qn: "app.http.reject", fan_in: 20 },
+        { qn: "app.tests.expect", fan_in: 18 },
+        { qn: "app.tests.describe", fan_in: 17 },
+        { qn: "app.text.lower", fan_in: 16 },
+        { qn: "app.lock.#runExclusive", fan_in: 15 },
+        { qn: "app.server.handleRequest", fan_in: 12 },
+      ]),
+      clusters: table([
         {
           label: "tests",
           members: 2,
@@ -66,7 +62,7 @@ describe("Codebase Memory architecture rendering", () => {
           cohesion: 0.8,
           top_nodes: ["get", "send", "handleRequest", "routeRequest"],
         },
-      ],
+      ]),
     });
 
     expect(output).toContain("handleRequest · — · 30%");
@@ -81,18 +77,19 @@ describe("Codebase Memory architecture rendering", () => {
     expect(output).toContain("└─ handleRequest, routeRequest");
     expect(output).not.toContain("total_nodes");
     expect(output).not.toContain("fan_in");
+    expect(output).not.toContain("app.server");
   });
 
   it("keeps every supplied row instead of imposing a second display limit", () => {
     const hotspots = Array.from({ length: 14 }, (_, index) => ({
-      name: `operation${index + 1}`,
+      qn: `app.operations.operation${index + 1}`,
       fan_in: 1,
     }));
     const output = renderCodebaseMemoryArchitectureSummary({
       project: "complete-project",
-      node_labels: [{ label: "Function", count: 14 }],
-      edge_types: [{ type: "CALLS", count: 14 }],
-      hotspots,
+      node_labels: table([{ label: "Function", count: 14 }]),
+      edge_types: table([{ type: "CALLS", count: 14 }]),
+      hotspots: table(hotspots),
     });
 
     expect(output).toContain("operation1 · — · 7.1%");
@@ -102,17 +99,22 @@ describe("Codebase Memory architecture rendering", () => {
   it("disambiguates repeated cluster labels with representative symbols", () => {
     const output = renderCodebaseMemoryArchitectureSummary({
       project: "clustered-project",
-      node_labels: [{ label: "Function", count: 10 }],
-      clusters: [
+      node_labels: table([{ label: "Function", count: 10 }]),
+      clusters: table([
         { label: "src", members: 5, top_nodes: ["alpha", "beta"] },
         { label: "src", members: 4, top_nodes: ["gamma", "delta"] },
-      ],
+      ]),
     });
 
     expect(output).toContain("src — alpha · 50% · —");
     expect(output).toContain("src — gamma · 40% · —");
   });
 });
+
+/** Wraps records the way the transport expands a backend `{cols, rows}` table. */
+function table(rows: Record<string, unknown>[]): { rows: Record<string, unknown>[] } {
+  return { rows };
+}
 
 /** Renders architecture-only fixtures through the production projections and presentation. */
 function renderCodebaseMemoryArchitectureSummary(value: unknown): string {

@@ -1,4 +1,4 @@
-/** Codebase Memory function metrics for `top` and `all`: one ranked query, each row checked against the working tree, and the merge with working-tree rows. */
+/** Codebase Memory function metrics for `top` and `all`: one query ranked in the backend, each row checked against the working tree, and the merge with working-tree rows. */
 import { existsSync } from "node:fs";
 import path from "node:path";
 
@@ -8,7 +8,13 @@ import {
   codebaseMemoryQueryWithProject,
 } from "../codebase-memory/index.js";
 import { arrayValue, nonblankString, recordValue } from "../json-utils.js";
-import { isGeneratedPath, isSupportedSourcePath, isTestPath } from "../source/scanner/index.js";
+import {
+  isGeneratedPath,
+  isSupportedSourcePath,
+  isTestPath,
+  PYTHON_SUFFIXES,
+  TYPESCRIPT_SUFFIXES,
+} from "../source/scanner/index.js";
 import { compareText } from "../text-utils.js";
 import type { SignalSection } from "./schema.js";
 
@@ -26,7 +32,6 @@ const BACKEND_FUNCTION_METRICS_COLUMNS = [
   "complexity",
   "cognitive",
   "linear_scan_in_loop",
-  "is_test",
 ];
 const BACKEND_FUNCTION_METRICS_LIMIT = 100;
 const BACKEND_FUNCTION_METRICS_FILE_LIMIT = 10_000;
@@ -98,7 +103,7 @@ function backendFunctionMetrics(
 ): BackendFunctionMetrics {
   const result = codebaseMemoryQueryWithProject(
     root,
-    BACKEND_FUNCTION_METRICS_QUERY,
+    functionMetricsQuery({ includeTests }),
     BACKEND_FUNCTION_METRICS_LIMIT,
   );
   if (result === null) {
@@ -119,8 +124,7 @@ function backendFunctionMetrics(
   const rows = queryRows
     .map((row) => functionMetricRow(root, row, { includeTests }))
     .filter((row) => row !== null)
-    .sort(compareFunctionMetrics)
-    .slice(0, BACKEND_FUNCTION_METRICS_LIMIT);
+    .sort(compareFunctionMetrics);
   return {
     freshness: result.freshness === "partial" ? "partial" : "fresh",
     reason: null,
@@ -128,11 +132,20 @@ function backendFunctionMetrics(
   };
 }
 
-const BACKEND_FUNCTION_METRICS_QUERY = [
-  "MATCH (f:Function)",
-  "RETURN f.name AS name, f.file_path AS file_path, f.start_line AS start_line, f.lines AS lines, f.complexity AS complexity, f.cognitive AS cognitive, f.linear_scan_in_loop AS linear_scan_in_loop, f.is_test AS is_test",
-  "ORDER BY coalesce(f.cognitive, 0) DESC, coalesce(f.complexity, 0) DESC, coalesce(f.lines, 0) DESC, f.file_path, f.name",
-].join(" ");
+/** Ranks functions and methods in the backend so its row limit keeps the true top rows, filtering by language there so the limit is not spent on rows `functionMetricRow` drops; the backend orders by returned aliases only, so metrics are coalesced in `RETURN`. */
+function functionMetricsQuery({ includeTests }: { includeTests: boolean }): string {
+  // Uppercase suffixes, which `isSupportedSourcePath` accepts, are left out: the backend cannot lowercase a value before `ENDS WITH`.
+  const suffixes = [...PYTHON_SUFFIXES, ...TYPESCRIPT_SUFFIXES].map(
+    (suffix) => `f.file_path ENDS WITH '${suffix}'`,
+  );
+  const conditions = [`(${suffixes.join(" OR ")})`, ...(includeTests ? [] : ["f.is_test = false"])];
+  return [
+    "MATCH (f:Function|Method)",
+    `WHERE ${conditions.join(" AND ")}`,
+    "RETURN f.name AS name, f.file_path AS file_path, f.start_line AS start_line, coalesce(f.lines, 0) AS lines, coalesce(f.complexity, 0) AS complexity, coalesce(f.cognitive, 0) AS cognitive, f.linear_scan_in_loop AS linear_scan_in_loop",
+    "ORDER BY cognitive DESC, complexity DESC, lines DESC, file_path, name",
+  ].join(" ");
+}
 
 /** Compacts one backend function row after verifying its current source path. */
 function functionMetricRow(
@@ -148,7 +161,7 @@ function functionMetricRow(
   if (
     !isSupportedSourcePath(filePath) ||
     isGeneratedPath(filePath) ||
-    (!includeTests && (booleanField(row.is_test) || isTestPath(filePath)))
+    (!includeTests && isTestPath(filePath))
   ) {
     return null;
   }
@@ -183,8 +196,4 @@ function compareFunctionMetrics(
 function numericField(value: unknown): number {
   const parsed = typeof value === "number" ? value : Number(value);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
-}
-
-function booleanField(value: unknown): boolean {
-  return value === true || value === "true" || value === 1 || value === "1";
 }

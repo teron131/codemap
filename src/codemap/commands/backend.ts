@@ -11,6 +11,7 @@ import {
   codebaseMemorySchema,
   codebaseMemoryStatus,
   type CodebaseMemoryStatusResult,
+  symbolName,
 } from "../codebase-memory/index.js";
 import { arrayValue, numberField, recordValue, stringField } from "../json-utils.js";
 import { canonicalPath } from "../path-utils.js";
@@ -226,10 +227,8 @@ function renderBackendStatus(result: CodebaseMemoryStatusResult): string {
 }
 
 /** Lists the active root first and hides projects rooted under `test/.work/`, where Codemap's test fixtures live. */
-function renderBackendProjects(value: unknown, currentRoot: string): string {
-  const projects = arrayValue(recordValue(value).projects)
-    .map(projectRecord)
-    .filter((project) => project !== null);
+function renderBackendProjects(records: Record<string, unknown>[], currentRoot: string): string {
+  const projects = records.map(projectRecord).filter((project) => project !== null);
   const currentRootPath = canonicalPath(currentRoot);
   const currentProject = projects.find(
     (project) => project.root !== null && canonicalPath(project.root) === currentRootPath,
@@ -360,31 +359,25 @@ function renderBackendChanges(value: unknown): string {
   const changedFiles = arrayValue(record.changed_files).filter(
     (item): item is string => typeof item === "string" && item.length > 0,
   );
-  if (changedFiles.length > 0) {
-    lines.push(`changed files: ${changedFiles.length}`);
-    appendRows(lines, changedFiles, (item) => item);
-  }
-  const impactedSymbols = arrayValue(record.impacted_symbols);
-  if (impactedSymbols.length > 0) {
-    lines.push(`impacted symbols: ${impactedSymbols.length}`);
-    appendRows(lines, impactedSymbols, symbolImpactRow);
-  }
-  const rows = [
-    ...arrayValue(record.changes),
-    ...arrayValue(record.impacts),
-    ...arrayValue(record.results),
-  ];
-  if (rows.length === 0) {
-    if (changedFiles.length === 0 && impactedSymbols.length === 0) {
-      lines.push("none");
-      const depth = numberField(record.depth);
-      if (depth !== null) {
-        lines.push(`depth: ${depth}`);
-      }
-    }
+  const impactedSymbols = arrayValue(record.impacted);
+  if (changedFiles.length === 0 && impactedSymbols.length === 0) {
+    lines.push("none");
     return lines.join("\n");
   }
-  appendRows(lines, rows, (row) => JSON.stringify(row));
+  if (changedFiles.length > 0) {
+    lines.push(`changed files: ${numberField(record.changed_total) ?? changedFiles.length}`);
+    appendRows(lines, changedFiles, (item) => item);
+    if (record.changed_has_more === true) {
+      lines.push("- ...");
+    }
+  }
+  if (impactedSymbols.length > 0) {
+    lines.push(`impacted symbols: ${numberField(record.impacted_total) ?? impactedSymbols.length}`);
+    appendRows(lines, impactedSymbols, symbolImpactRow);
+    if (record.impacted_has_more === true) {
+      lines.push("- ...");
+    }
+  }
   return lines.join("\n");
 }
 
@@ -396,9 +389,10 @@ function appendRows<T>(lines: string[], rows: T[], render: (row: T) => string): 
 
 function symbolImpactRow(value: unknown): string {
   const record = recordValue(value);
-  const name = stringField(record.name) ?? JSON.stringify(value);
-  const label = stringField(record.label);
-  const file = stringField(record.file);
-  const detail = [label, file].filter((item) => item !== null);
+  const qualifiedName = stringField(record.qn);
+  const name = qualifiedName === null ? JSON.stringify(value) : symbolName(qualifiedName);
+  const detail = [stringField(record.label), stringField(record.file)].filter(
+    (item) => item !== null,
+  );
   return `${name}${detail.length > 0 ? ` (${detail.join(", ")})` : ""}`;
 }

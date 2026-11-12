@@ -73,7 +73,7 @@ Judge maintainability separately from public output. Look for fewer competing ow
 
 - Follow the ownership map and settled direction in `docs/IDEAS.md`; do not restate them here.
 - Share scalar scanner facts across graph and inspection consumers without retaining native syntax trees between files.
-- Change the full public boundary when needed: parser, implementation, renderer, exports, docs, skill, and public tests. The README figures in `docs/images/` draw the evidence stack and `signals` ordering from live data; when a change alters what one shows, recheck the sources its evidence comment lists and redraw it.
+- Change the full public boundary when needed: parser, implementation, renderer, exports, docs, skill, and public tests. The README figures in `docs/images/` draw the evidence stack and `signals` ordering from live data; when a change alters what one shows, recheck the sources its evidence comment lists and redraw it. They show mechanisms, never this repository's counts, scores, or symbol names, which tell a reader nothing about Codemap.
 - Keep executable output factual and compact. Put usage in `skills/codemap/SKILL.md`, public behavior in `README.md`, and durable decisions in `docs/IDEAS.md`.
 
 ## Log the Work

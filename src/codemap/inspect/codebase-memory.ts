@@ -3,6 +3,7 @@ import path from "node:path";
 
 import {
   callCodebaseMemoryTool,
+  codebaseMemoryQueryRows,
   withFreshCodebaseMemoryProject,
 } from "../codebase-memory/index.js";
 import { arrayValue, numberField, recordValue, stringField } from "../json-utils.js";
@@ -20,8 +21,10 @@ export type CodebaseMemoryInspectResult = {
   callees: string[];
 };
 
-const JSON_FORMAT = { format: "json" } as const;
 const TRACE_DEPTH = 2;
+/** The backend's own ceiling; Codemap's `--limit` bounds what is printed. */
+const TRACE_ROW_LIMIT = 5_000;
+const NODE_PROPERTY_COLUMNS = ["signature", "return_type", "complexity", "cognitive", "lines"];
 
 export function codebaseMemoryInspect(
   root: string,
@@ -36,126 +39,98 @@ export function codebaseMemoryInspect(
       project: project.name,
       query: target,
       limit,
-      include_connected: true,
-      ...JSON_FORMAT,
     });
     if (!searchResult.ok) {
       return null;
     }
-    const match = uniqueGraphMatch(searchResult.value, target);
-    const qualifiedName = stringField(match.qualified_name);
+    const qualifiedName = uniqueQualifiedName(searchResult.value, target);
     if (qualifiedName === null) {
       return null;
     }
     const snippetResult = callCodebaseMemoryTool("get_code_snippet", {
       project: project.name,
       qualified_name: qualifiedName,
-      include_neighbors: true,
-      ...JSON_FORMAT,
+      source_mode: "full",
     });
-    if (!snippetResult.ok || !hasSnippetAnswer(snippetResult.value)) {
+    const snippet = snippetResult.ok ? recordValue(snippetResult.value) : {};
+    const source = stringField(snippet.source);
+    if (source === null) {
       return null;
     }
+    const nodeResult = callCodebaseMemoryTool("query_graph", {
+      project: project.name,
+      query: nodePropertiesQuery(qualifiedName),
+    });
+    const nodeRows = nodeResult.ok
+      ? codebaseMemoryQueryRows(nodeResult.value, NODE_PROPERTY_COLUMNS)
+      : null;
+    const node = recordValue(nodeRows?.[0]);
     const traceResult = callCodebaseMemoryTool("trace_path", {
       project: project.name,
       function_name: qualifiedName,
       mode: "calls",
       direction: "both",
       depth: TRACE_DEPTH,
+      limit: TRACE_ROW_LIMIT,
       risk_labels: false,
-      ...JSON_FORMAT,
     });
-    return inspectResultFromPayloads(
-      target,
-      root,
-      match,
-      snippetResult.value,
-      traceResult.ok ? traceResult.value : null,
-    );
+    const trace = traceResult.ok ? recordValue(traceResult.value) : {};
+    const name = stringField(snippet.name) ?? target;
+    const excludedNames = excludedTraceNames([name, qualifiedName]);
+    return {
+      name,
+      filePath: displayFilePath(stringField(snippet.file_path), root),
+      startLine: numberField(snippet.start_line),
+      endLine: numberField(snippet.end_line),
+      metricFacts: metricFacts({ ...node, callers: snippet.callers, callees: snippet.callees }),
+      signature: signatureText(node, name),
+      source,
+      callers: traceRows(recordValue(trace.callers).rows, excludedNames),
+      callees: traceRows(recordValue(trace.callees).rows, excludedNames),
+    };
   });
 }
 
-function hasSnippetAnswer(value: unknown): boolean {
-  return stringField(recordValue(value).source) !== null;
+/** Node properties the snippet leaves out; the qualified name is quoted as a Cypher string literal, whose escapes match JSON's. */
+function nodePropertiesQuery(qualifiedName: string): string {
+  return `MATCH (n) WHERE n.qualified_name = ${JSON.stringify(qualifiedName)} RETURN n.signature AS signature, n.return_type AS return_type, n.complexity AS complexity, n.cognitive AS cognitive, n.lines AS lines`;
 }
 
-function inspectResultFromPayloads(
-  target: string,
-  root: string,
-  match: Record<string, unknown>,
-  snippetValue: unknown,
-  traceValue: unknown,
-): CodebaseMemoryInspectResult {
-  const snippet = recordValue(snippetValue);
-  const trace = recordValue(traceValue);
-  const name = stringField(snippet.name) ?? stringField(match.name) ?? target;
-  const qualifiedName =
-    stringField(snippet.qualified_name) ?? stringField(match.qualified_name) ?? target;
-  const excludedNames = excludedTraceNames([name, qualifiedName]);
-  const filePath = displayFilePath(
-    stringField(snippet.file_path) ?? stringField(match.file_path),
-    root,
+/** Null unless exactly one qualified name matches the target by full name or `.target` suffix. */
+function uniqueQualifiedName(value: unknown, target: string): string | null {
+  const matches = new Set(
+    arrayValue(recordValue(value).rows)
+      .map((row) => stringField(recordValue(row).qn))
+      .filter(
+        (qualifiedName) =>
+          qualifiedName !== null &&
+          (qualifiedName === target || qualifiedName.endsWith(`.${target}`)),
+      ),
   );
-  return {
-    name,
-    filePath,
-    startLine: numberField(snippet.start_line) ?? numberField(match.start_line),
-    endLine: numberField(snippet.end_line) ?? numberField(match.end_line),
-    metricFacts: metricFacts({ ...match, ...snippet }),
-    signature: signatureText(snippet, name),
-    source: stringField(snippet.source),
-    callers: traceRows(trace.callers, excludedNames),
-    callees: traceRows(trace.callees, excludedNames),
-  };
+  return matches.size === 1 ? ([...matches][0] ?? null) : null;
 }
 
-/** Returns `{}` unless exactly one qualified name matches the target by name, full qualified name, or `.target` suffix. */
-function uniqueGraphMatch(value: unknown, target: string): Record<string, unknown> {
-  const record = recordValue(value);
-  const candidates: Record<string, unknown>[] = [];
-  for (const key of ["results", "semantic_results"]) {
-    for (const item of arrayValue(record[key])) {
-      const itemRecord = recordValue(item);
-      if (stringField(itemRecord.qualified_name) !== null) {
-        candidates.push(itemRecord);
-      }
-      const nested = recordValue(itemRecord.node);
-      if (stringField(nested.qualified_name) !== null) {
-        candidates.push(nested);
-      }
-    }
-  }
-  const exact = new Map<string, Record<string, unknown>>();
-  for (const candidate of candidates) {
-    const name = stringField(candidate.name);
-    const qualifiedName = stringField(candidate.qualified_name);
-    if (
-      qualifiedName !== null &&
-      (name === target || qualifiedName === target || qualifiedName.endsWith(`.${target}`))
-    ) {
-      exact.set(qualifiedName, candidate);
-    }
-  }
-  return exact.size === 1 ? ([...exact.values()][0] ?? {}) : {};
-}
-
-/** The backend stores cyclomatic complexity as `complexity`. */
-function metricFacts(snippet: Record<string, unknown>): string[] {
+/** The backend stores cyclomatic complexity as `complexity` and returns metrics as numeric strings. */
+function metricFacts(node: Record<string, unknown>): string[] {
   return [
-    ["cyclomatic", numberField(snippet.complexity)],
-    ["cognitive", numberField(snippet.cognitive)],
-    ["lines", numberField(snippet.lines)],
-    ["callers", numberField(snippet.callers)],
-    ["callees", numberField(snippet.callees)],
+    ["cyclomatic", node.complexity],
+    ["cognitive", node.cognitive],
+    ["lines", node.lines],
+    ["callers", node.callers],
+    ["callees", node.callees],
   ]
-    .filter((item): item is [string, number] => item[1] !== null)
+    .map(([name, value]) => [
+      name,
+      typeof value === "string" && value !== "" ? Number(value) : value,
+    ])
+    .filter((item): item is [string, number] => Number.isFinite(item[1]))
     .map(([name, value]) => `${name}=${value}`);
 }
 
 /** Appends the return type unless the signature already ends with it, as in `(root)` with `str` → `run(root) -> str`. */
-function signatureText(snippet: Record<string, unknown>, name: string): string | null {
-  const signature = stringField(snippet.signature);
-  const returnType = stringField(snippet.return_type);
+function signatureText(node: Record<string, unknown>, name: string): string | null {
+  const signature = stringField(node.signature);
+  const returnType = stringField(node.return_type);
   if (signature === null) {
     return null;
   }
@@ -166,10 +141,10 @@ function signatureText(snippet: Record<string, unknown>, name: string): string |
   return compactSignature(`${signature}${separator}${returnType}`, name);
 }
 
-/** Collapses whitespace and a trailing comma and prepends a missing name, as in `(\n  a,\n  b,\n)` → `run(a, b)`. */
+/** Collapses whitespace, including the escaped `\n` the backend stores, and a trailing comma, and prepends a missing name, as in `(\n  a,\n  b,\n)` → `run(a, b)`. */
 function compactSignature(signature: string, name: string): string {
   const text = signature
-    .replace(/\s+/g, " ")
+    .replace(/(?:\\n|\s)+/g, " ")
     .replace(/\(\s+/g, "(")
     .replace(/\s+\)/g, ")")
     .replace(/,\s*\)/g, ")")
@@ -193,11 +168,11 @@ function traceRows(value: unknown, excluded: Set<string> = new Set()): string[] 
     arrayValue(value)
       .map((item) => {
         const record = recordValue(item);
-        const name = stringField(record.name) ?? stringField(record.qualified_name);
+        const name = stringField(record.name);
         if (name === null) {
           return null;
         }
-        const qualifiedName = stringField(record.qualified_name);
+        const qualifiedName = stringField(record.qn);
         if (excluded.has(name) || (qualifiedName !== null && excluded.has(qualifiedName))) {
           return null;
         }

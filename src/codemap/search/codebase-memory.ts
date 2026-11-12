@@ -1,50 +1,76 @@
-/** Codebase Memory code, graph, and semantic search lanes. Each printer returns false without printing when the backend has no usable answer, so the caller can fall back. */
+/** Codebase Memory code, graph, and semantic search lanes. Each printer prints nothing when the backend has no usable answer, so the caller can fall back; the graph and semantic printers also return why, for the caller's fallback line. */
 
 import {
   callCodebaseMemoryTool,
+  symbolName,
   withFreshCodebaseMemoryProject,
 } from "../codebase-memory/index.js";
-import { arrayValue, numberField, recordValue, stringField } from "../json-utils.js";
-import { uniqueStrings } from "../text-utils.js";
 import {
-  type GraphSearchFilters,
-  type GraphSearchOptions,
-  matchesGlobFilter,
-  matchesTextFilter,
-} from "./filters.js";
+  arrayValue,
+  nonblankString,
+  numberField,
+  recordValue,
+  stringField,
+} from "../json-utils.js";
+import { type GraphSearchFilters, type GraphSearchOptions, matchesTextFilter } from "./filters.js";
 
 type CodebaseMemoryRenderOptions = {
   includeTests?: boolean;
 };
 
-type SearchRowSelection = {
-  allRows: unknown[];
-  testFilteredRows: unknown[];
-  visibleRows: unknown[];
+/** One backend match, parsed from a `search_code` or `search_graph` table row. */
+type SearchRow = {
+  name: string;
+  qualifiedName: string;
+  label: string | null;
+  filePath: string | null;
+  startLine: number | null;
+  endLine: number | null;
+  /** Semantic similarity; ranked graph search reports a BM25 cost instead, which is not shown. */
+  score: number | null;
+  context: string | null;
 };
 
-type SemanticSearchResult = {
-  rows: unknown[];
+type SearchRowSelection = {
+  allRows: SearchRow[];
+  visibleRows: SearchRow[];
+};
+
+type SearchTable = {
+  rows: SearchRow[];
   hasMore: boolean;
 };
 
 const MIN_SEMANTIC_SCORE = 0.5;
 const BACKEND_SEARCH_CANDIDATE_LIMIT = 100;
-const JSON_FORMAT = { format: "json" } as const;
+/** Ranked graph search ignores these, and its rows carry no degrees or edges to check them against. */
+const STRUCTURAL_GRAPH_FILTERS = [
+  ["relationship", "--relationship"],
+  ["minDegree", "--min-degree"],
+  ["maxDegree", "--max-degree"],
+  ["excludeEntryPoints", "--exclude-entry-points"],
+] as const satisfies readonly (readonly [keyof GraphSearchFilters, string])[];
 
-function codebaseMemorySearch(root: string, searchText: string, limit: number): unknown | null {
+function codebaseMemorySearch(
+  root: string,
+  searchText: string,
+  limit: number,
+): (SearchTable & { grepMatches: number | null }) | null {
   return withFreshCodebaseMemoryProject(root, (project) => {
     const result = callCodebaseMemoryTool("search_code", {
       project: project.name,
       pattern: searchText,
       limit,
       context: 1,
-      ...JSON_FORMAT,
     });
-    if (!result.ok || !hasSearchAnswer(result.value, ["results", "raw_matches"])) {
+    if (!result.ok) {
       return null;
     }
-    return result.value;
+    const record = recordValue(result.value);
+    return {
+      ...searchTable(record),
+      grepMatches: numberField(record.total_grep_matches),
+    };
   });
 }
 
@@ -53,23 +79,21 @@ function codebaseMemoryGraphSearch(
   searchText: string,
   limit: number,
   options: GraphSearchFilters,
-): unknown | null {
+): (SearchTable & { mode: string | null }) | null {
   return withFreshCodebaseMemoryProject(root, (project) => {
     const result = callCodebaseMemoryTool("search_graph", {
       project: project.name,
       query: searchText,
-      ...graphSearchArgs(options),
+      ...(options.label !== undefined ? { label: options.label } : {}),
+      ...(options.filePattern !== undefined ? { file_pattern: options.filePattern } : {}),
+      ...(options.offset !== undefined ? { offset: options.offset } : {}),
       limit,
-      include_connected: true,
-      ...JSON_FORMAT,
     });
-    if (
-      !result.ok ||
-      !hasSearchAnswer(result.value, ["results", "semantic_results", "raw_matches"])
-    ) {
+    if (!result.ok) {
       return null;
     }
-    return result.value;
+    const record = recordValue(result.value);
+    return { ...searchTable(record), mode: stringField(record.search_mode) };
   });
 }
 
@@ -77,46 +101,58 @@ function codebaseMemorySemanticSearch(
   root: string,
   searchText: string,
   limit: number,
-): SemanticSearchResult | null {
+): SearchTable | null {
   return withFreshCodebaseMemoryProject(root, (project) => {
     const result = callCodebaseMemoryTool("search_graph", {
       project: project.name,
       semantic_query: semanticTerms(searchText),
-      limit,
-      include_connected: true,
-      ...JSON_FORMAT,
+      semantic_limit: limit,
     });
     if (!result.ok) {
       return null;
     }
     const record = recordValue(result.value);
-    const rows = arrayValue(record.semantic_results).filter((item) => {
-      const score = numberField(recordValue(item).score);
-      return score !== null && score >= MIN_SEMANTIC_SCORE;
-    });
-    return rows.length > 0 ? { rows, hasMore: record.semantic_has_more === true } : null;
+    return {
+      rows: searchTable(recordValue(record.semantic)).rows.filter(
+        (row) => row.score !== null && row.score >= MIN_SEMANTIC_SCORE,
+      ),
+      hasMore: record.semantic_has_more === true,
+    };
   });
 }
 
-function hasSearchAnswer(value: unknown, arrayKeys: string[]): boolean {
-  const record = recordValue(value);
-  return arrayKeys.some((key) => arrayValue(record[key]).length > 0);
+function searchTable(record: Record<string, unknown>): SearchTable {
+  return {
+    rows: arrayValue(record.rows)
+      .map(searchRow)
+      .filter((row) => row !== null),
+    hasMore: record.has_more === true,
+  };
 }
 
-function graphSearchArgs(options: GraphSearchFilters): Record<string, unknown> {
+function searchRow(value: unknown): SearchRow | null {
+  const row = recordValue(value);
+  const qualifiedName = nonblankString(row.qn);
+  if (qualifiedName === null) {
+    return null;
+  }
+  const [startLine, endLine] = lineSpan(row.lines);
   return {
-    ...(options.label !== undefined ? { label: options.label } : {}),
-    ...(options.namePattern !== undefined ? { name_pattern: options.namePattern } : {}),
-    ...(options.qnPattern !== undefined ? { qn_pattern: options.qnPattern } : {}),
-    ...(options.filePattern !== undefined ? { file_pattern: options.filePattern } : {}),
-    ...(options.relationship !== undefined ? { relationship: options.relationship } : {}),
-    ...(options.minDegree !== undefined ? { min_degree: options.minDegree } : {}),
-    ...(options.maxDegree !== undefined ? { max_degree: options.maxDegree } : {}),
-    ...(options.excludeEntryPoints !== undefined
-      ? { exclude_entry_points: options.excludeEntryPoints }
-      : {}),
-    ...(options.offset !== undefined ? { offset: options.offset } : {}),
+    name: symbolName(qualifiedName),
+    qualifiedName,
+    label: stringField(row.label),
+    filePath: stringField(row.file),
+    startLine,
+    endLine,
+    score: numberField(row.score),
+    context: stringField(recordValue(row.context).context),
   };
+}
+
+/** Reads the backend's inclusive line range: `"212-219"` → `[212, 219]`; anything else is unknown. */
+function lineSpan(value: unknown): [number | null, number | null] {
+  const match = typeof value === "string" ? /^(\d+)-(\d+)$/.exec(value) : null;
+  return match === null ? [null, null] : [Number(match[1]), Number(match[2])];
 }
 
 function semanticTerms(searchText: string): string[] {
@@ -138,30 +174,35 @@ export function printCodebaseMemorySearch(
   if (result === null) {
     return false;
   }
-  const record = recordValue(result);
-  const selection = searchRowSelection(record.results, options);
+  const selection = searchRowSelection(result.rows, options);
   if (selection.visibleRows.length === 0) {
     return false;
   }
   const shown = selection.visibleRows.slice(0, limit);
   const lines = [`results: ${shown.length}`, ...hiddenTestLines(selection)];
-  const grepTotal = numberField(record.total_grep_matches);
-  if (grepTotal !== null) {
-    lines.push(`grep matches: ${grepTotal}`);
+  if (result.grepMatches !== null) {
+    lines.push(`grep matches: ${result.grepMatches}`);
   }
-  appendSearchRows(lines, shown, selection.visibleRows.length > shown.length);
+  appendSearchRows(lines, shown, result.hasMore || selection.visibleRows.length > shown.length);
   console.log("\nCodebase Memory code matches:");
   console.log(lines.join("\n"));
   return true;
 }
 
+/** Prints backend graph matches and returns null, or prints nothing and returns why the working-tree graph answers instead. */
 export function printCodebaseMemoryGraphSearch(
   root: string,
   searchText: string,
   limit: number,
   options: GraphSearchOptions = {},
-): boolean {
+): string | null {
   const { includeTests = false, ...filters } = options;
+  const structuralFlags = STRUCTURAL_GRAPH_FILTERS.filter(
+    ([key]) => filters[key] !== undefined && filters[key] !== false,
+  ).map(([, flag]) => flag);
+  if (structuralFlags.length > 0) {
+    return `Codebase Memory ranked graph search cannot apply ${structuralFlags.join(", ")}`;
+  }
   const result = codebaseMemoryGraphSearch(
     root,
     searchText,
@@ -169,43 +210,47 @@ export function printCodebaseMemoryGraphSearch(
     filters,
   );
   if (result === null) {
-    return false;
+    return "Codebase Memory graph search returned no answer";
   }
-  const record = recordValue(result);
-  const selection = searchRowSelection(record.results, { includeTests });
-  const filteredRows = selection.visibleRows.filter((row) => graphSearchRowMatches(row, filters));
+  const selection = searchRowSelection(result.rows, { includeTests });
+  const filteredRows = selection.visibleRows.filter(
+    (row) =>
+      matchesTextFilter(row.name, filters.namePattern) &&
+      matchesTextFilter(row.qualifiedName, filters.qnPattern),
+  );
   if (filteredRows.length === 0) {
-    return false;
+    return noAnswerReason("graph", selection);
   }
   const shown = filteredRows.slice(0, limit);
   const lines = [
-    `mode: ${stringField(record.search_mode) ?? "graph"}`,
+    `mode: ${result.mode ?? "graph"}`,
     `results: ${shown.length}`,
     ...hiddenTestLines(selection),
   ];
-  const hiddenFilterRows = selection.testFilteredRows.length - filteredRows.length;
+  const hiddenFilterRows = selection.visibleRows.length - filteredRows.length;
   if (hiddenFilterRows > 0) {
     lines.push(`hidden filtered: ${hiddenFilterRows}`);
   }
-  appendSearchRows(lines, shown, Boolean(record.has_more) || filteredRows.length > shown.length);
+  appendSearchRows(lines, shown, result.hasMore || filteredRows.length > shown.length);
   console.log("\nCodebase Memory graph matches:");
   console.log(lines.join("\n"));
-  return true;
+  return null;
 }
 
+/** Prints backend semantic matches and returns null, or prints nothing and returns why the working-tree search answers instead. */
 export function printCodebaseMemorySemanticSearch(
   root: string,
   searchText: string,
   limit: number,
   options: CodebaseMemoryRenderOptions = {},
-): boolean {
+): string | null {
   const result = codebaseMemorySemanticSearch(root, searchText, backendFetchLimit(limit, options));
   if (result === null) {
-    return false;
+    return "Codebase Memory semantic search returned no answer";
   }
   const selection = searchRowSelection(result.rows, options);
   if (selection.visibleRows.length === 0) {
-    return false;
+    return noAnswerReason("semantic", selection);
   }
   const shown = selection.visibleRows.slice(0, limit);
   const lines = [
@@ -216,211 +261,56 @@ export function printCodebaseMemorySemanticSearch(
   appendSearchRows(lines, shown, result.hasMore || selection.visibleRows.length > shown.length);
   console.log("\nCodebase Memory semantic matches:");
   console.log(lines.join("\n"));
-  return true;
+  return null;
+}
+
+/** Names an answer made only of hidden test rows, since `--include-tests` would show it. */
+function noAnswerReason(lane: "graph" | "semantic", selection: SearchRowSelection): string {
+  return selection.visibleRows.length === 0 && selection.allRows.length > 0
+    ? `Codebase Memory ${lane} search matched only tests, which are hidden (use --include-tests)`
+    : `Codebase Memory ${lane} search returned no answer`;
 }
 
 function hiddenTestLines(selection: SearchRowSelection): string[] {
-  const hiddenRows = selection.allRows.length - selection.testFilteredRows.length;
+  const hiddenRows = selection.allRows.length - selection.visibleRows.length;
   return hiddenRows > 0 ? [`hidden tests: ${hiddenRows} (use --include-tests)`] : [];
 }
 
-function appendSearchRows(lines: string[], shown: unknown[], hasMore: boolean): void {
-  if (shown.length === 0) {
-    lines.push("  none");
-    return;
-  }
-  for (const item of shown) {
-    lines.push(...renderSearchRow(item));
+function appendSearchRows(lines: string[], shown: SearchRow[], hasMore: boolean): void {
+  for (const row of shown) {
+    lines.push(renderSearchRow(row));
   }
   if (hasMore) {
     lines.push("- ...");
   }
 }
 
-/** Checks output-side graph filters when the backend returns broader rows. */
-function graphSearchRowMatches(value: unknown, options: GraphSearchFilters): boolean {
-  const row = recordValue(value);
-  const nested = recordValue(row.node);
-  const label = stringField(row.label) ?? stringField(nested.label);
-  const name = searchRowName(value);
-  const qualifiedName = stringField(row.qualified_name) ?? stringField(nested.qualified_name);
-  const filePath =
-    stringField(row.file) ?? stringField(row.file_path) ?? stringField(nested.file_path);
-  const degree = graphSearchRowDegree(row, nested);
-  return (
-    matchesTextFilter(label, options.label, { exact: true }) &&
-    matchesTextFilter(name, options.namePattern) &&
-    matchesTextFilter(qualifiedName, options.qnPattern) &&
-    matchesGlobFilter(filePath, options.filePattern) &&
-    graphSearchRowMatchesRelationship(row, nested, options.relationship) &&
-    (options.minDegree === undefined || degree >= options.minDegree) &&
-    (options.maxDegree === undefined || degree <= options.maxDegree) &&
-    (options.excludeEntryPoints !== true || !graphSearchRowIsEntryPoint(row, nested))
-  );
-}
-
-/** Reads a best-effort graph degree from common backend row shapes. */
-function graphSearchRowDegree(
-  row: Record<string, unknown>,
-  nested: Record<string, unknown>,
-): number {
-  return (
-    numberField(row.degree) ??
-    numberField(nested.degree) ??
-    sumDegreeFields(row) ??
-    sumDegreeFields(nested) ??
-    graphSearchRelationshipRows(row, nested).length
-  );
-}
-
-function sumDegreeFields(row: Record<string, unknown>): number | null {
-  const inDegree = numberField(row.in_degree);
-  const outDegree = numberField(row.out_degree);
-  if (inDegree === null && outDegree === null) {
-    return null;
-  }
-  return (inDegree ?? 0) + (outDegree ?? 0);
-}
-
-function graphSearchRowMatchesRelationship(
-  row: Record<string, unknown>,
-  nested: Record<string, unknown>,
-  relationship: string | undefined,
-): boolean {
-  if (relationship === undefined) {
-    return true;
-  }
-  return graphSearchRelationshipRows(row, nested).some((candidate) => candidate === relationship);
-}
-
-function graphSearchRelationshipRows(
-  row: Record<string, unknown>,
-  nested: Record<string, unknown>,
-): string[] {
-  const direct = [
-    stringField(row.relationship),
-    stringField(row.relationship_type),
-    stringField(row.edge_type),
-    stringField(nested.relationship),
-    stringField(nested.relationship_type),
-    stringField(nested.edge_type),
-  ];
-  const relatedRows = [
-    ...arrayValue(row.relationships),
-    ...arrayValue(row.edges),
-    ...arrayValue(row.connected_edges),
-    ...arrayValue(nested.relationships),
-    ...arrayValue(nested.edges),
-  ];
-  return uniqueStrings(
-    [...direct, ...relatedRows.flatMap(relationshipNames)].filter(
-      (item): item is string => item !== null,
-    ),
-  );
-}
-
-function relationshipNames(value: unknown): string[] {
-  if (typeof value === "string") {
-    return [value];
-  }
-  const record = recordValue(value);
-  return [
-    stringField(record.relationship),
-    stringField(record.relationship_type),
-    stringField(record.edge_type),
-    stringField(record.type),
-  ].filter((item): item is string => item !== null);
-}
-
-function graphSearchRowIsEntryPoint(
-  row: Record<string, unknown>,
-  nested: Record<string, unknown>,
-): boolean {
-  const textFields = [
-    stringField(row.label),
-    stringField(row.kind),
-    stringField(row.type),
-    stringField(nested.label),
-    stringField(nested.kind),
-    stringField(nested.type),
-    ...arrayValue(row.tags).filter((item): item is string => typeof item === "string"),
-    ...arrayValue(nested.tags).filter((item): item is string => typeof item === "string"),
-  ].filter((item): item is string => item !== null);
-  return textFields.some((item) => item.toLowerCase().startsWith("entry"));
-}
-
 function searchRowSelection(
-  value: unknown,
+  rows: SearchRow[],
   options: CodebaseMemoryRenderOptions,
 ): SearchRowSelection {
-  const allRows = arrayValue(value);
-  const testFilteredRows = allRows.filter(
-    (item) => options.includeTests === true || !testLikeSearchRow(item),
-  );
-  const visibleRows = testFilteredRows.filter((item) => searchRowName(item) !== null);
-  return { allRows, testFilteredRows, visibleRows };
+  return {
+    allRows: rows,
+    visibleRows: rows.filter((row) => options.includeTests === true || !testLikeSearchRow(row)),
+  };
 }
 
-function searchRowName(value: unknown): string | null {
-  const row = recordValue(value);
-  const nested = recordValue(row.node);
-  return (
-    stringField(row.name) ??
-    stringField(row.node) ??
-    stringField(nested.name) ??
-    stringField(row.qualified_name) ??
-    stringField(nested.qualified_name)
-  );
-}
-
-function renderSearchRow(value: unknown): string[] {
-  const row = recordValue(value);
-  const nested = recordValue(row.node);
-  const name = searchRowName(value);
-  if (name === null) {
-    return [];
-  }
-  const filePath =
-    stringField(row.file) ?? stringField(row.file_path) ?? stringField(nested.file_path);
-  const startLine = numberField(row.start_line) ?? numberField(nested.start_line);
-  const endLine = numberField(row.end_line) ?? numberField(nested.end_line);
-  const score =
-    nonNegativeNumberField(row.rerank_score) ??
-    nonNegativeNumberField(row.score) ??
-    nonNegativeNonOrdinalRank(row.rank);
-  const label = stringField(row.label) ?? stringField(nested.label);
+function renderSearchRow(row: SearchRow): string {
   const detail = [
-    filePath !== null
-      ? `${filePath}${startLine !== null ? `:${startLine}` : ""}${endLine !== null && endLine !== startLine ? `-${endLine}` : ""}`
+    row.filePath !== null
+      ? `${row.filePath}${row.startLine !== null ? `:${row.startLine}` : ""}${row.endLine !== null && row.endLine !== row.startLine ? `-${row.endLine}` : ""}`
       : null,
-    label,
-    score !== null ? `score=${formatScore(score)}` : null,
+    row.label,
+    row.score !== null ? `score=${formatScore(row.score)}` : null,
   ].filter((item) => item !== null);
-  let line = `- ${name}${detail.length > 0 ? ` (${detail.join(", ")})` : ""}`;
-  const context = stringField(row.context);
-  if (context !== null) {
-    const contextLine = context.trim().split(/\r?\n/).find(Boolean);
-    if (contextLine !== undefined) {
-      line += ` — ${contextLine.trim()}`;
-    }
-  }
-  return [line];
+  const line = `- ${row.name}${detail.length > 0 ? ` (${detail.join(", ")})` : ""}`;
+  const contextLine = row.context?.trim().split(/\r?\n/).find(Boolean);
+  return contextLine === undefined ? line : `${line} — ${contextLine.trim()}`;
 }
 
-/** Tests every name and path field together because row shapes vary: `tests/test_cli.py` and `src/app.spec.ts` count, while `src/latest.ts` does not. */
-function testLikeSearchRow(value: unknown): boolean {
-  const row = recordValue(value);
-  const nested = recordValue(row.node);
-  const text = [
-    stringField(row.name),
-    stringField(row.node),
-    stringField(row.qualified_name),
-    stringField(row.file),
-    stringField(row.file_path),
-    stringField(nested.name),
-    stringField(nested.qualified_name),
-    stringField(nested.file_path),
-  ]
+/** Tests the name, qualified name, and path together: `tests/test_cli.py` and `src/app.spec.ts` count, while `src/latest.ts` does not. */
+function testLikeSearchRow(row: SearchRow): boolean {
+  const text = [row.name, row.qualifiedName, row.filePath]
     .filter((item) => item !== null)
     .join(" ");
   return (
@@ -443,16 +333,4 @@ function backendFetchLimit(
 /** Trims three decimals of trailing zeros: `0.5` → `0.5`, `0.123456` → `0.123`, `1` → `1`. */
 function formatScore(value: number): string {
   return value.toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
-}
-
-/** Reads a nonnegative numeric score while rejecting backend cost/rank values. */
-function nonNegativeNumberField(value: unknown): number | null {
-  const parsed = numberField(value);
-  return parsed !== null && parsed >= 0 ? parsed : null;
-}
-
-/** Positive integer ranks are list positions rather than scores and are dropped; fractional ranks pass. */
-function nonNegativeNonOrdinalRank(value: unknown): number | null {
-  const parsed = nonNegativeNumberField(value);
-  return parsed !== null && (!Number.isInteger(parsed) || parsed <= 0) ? parsed : null;
 }

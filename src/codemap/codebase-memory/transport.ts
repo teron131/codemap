@@ -17,6 +17,12 @@ export type CodebaseMemoryToolOptions = {
 
 const DEFAULT_COMMAND = "codebase-memory-mcp";
 const REQUEST_TIMEOUT_MS = 8_000;
+/**
+ * Sent with every call; tools without these parameters ignore them.
+ *
+ * The backend replies in compact text unless asked for JSON, and its byte ceiling, about 3,200 tokens by default, would cut rows that a call's own `limit` asked for; Codemap's output budget bounds what is printed.
+ */
+const RESPONSE_ARGUMENTS = { format: "json", max_output_tokens: 1_000_000 } as const;
 
 /** Blocks while a fresh supervisor child starts the backend, makes this one call, and exits; with `lock`, the child holds the lock until its backend has exited. */
 export function callTool(
@@ -41,7 +47,7 @@ export function callTool(
       // Outside the project, so the backend's own watcher and auto-indexing cannot race the explicit refresh.
       cwd: homedir(),
       env: codebaseMemoryChildEnv(),
-      input: JSON.stringify({ name, arguments: args }),
+      input: JSON.stringify({ name, arguments: { ...args, ...RESPONSE_ARGUMENTS } }),
       encoding: "utf8",
       maxBuffer: 16 * 1024 * 1024,
     },
@@ -67,7 +73,48 @@ export function callTool(
   if (payloadError !== null) {
     return { ok: false, reason: payloadError };
   }
-  return { ok: true, value: payload };
+  return { ok: true, value: expandTables(payload) };
+}
+
+/** A symbol's own name, the segment after the last dot of its backend qualified name: `pkg.mod.Client.run` → `run`. */
+export function symbolName(qualifiedName: string): string {
+  return qualifiedName.slice(qualifiedName.lastIndexOf(".") + 1);
+}
+
+/**
+ * Expands the backend's compact tables into records at any depth: an object with `cols` drops it, and its `rows`, or the rows of its `groups`, become records keyed by column.
+ *
+ * Grouped rows also take their group's `file` and the `qn` its `qn_rule` builds from `qn_prefix`, so `{cols: ["name"], groups: [{qn_prefix: "pkg.mod", file: "mod.ts", rows: [["run"]]}]}` → `{rows: [{name: "run", file: "mod.ts", qn: "pkg.mod.run"}]}`. Query results name their columns `columns` and pass through unchanged.
+ */
+function expandTables(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(expandTables);
+  }
+  if (!isRecord(value)) {
+    return value;
+  }
+  const record = Object.fromEntries(
+    Object.entries(value).map(([key, item]) => [key, expandTables(item)]),
+  );
+  if (!Array.isArray(record.cols)) {
+    return record;
+  }
+  const { cols, rows, groups, qn_rule: _qnRule, ...rest } = record;
+  const columns = arrayValue(cols).map(String);
+  const rowRecord = (row: unknown) =>
+    Object.fromEntries(columns.map((column, index) => [column, arrayValue(row)[index]]));
+  const tableRows =
+    groups === undefined
+      ? arrayValue(rows).map(rowRecord)
+      : arrayValue(groups).flatMap((group) => {
+          const { qn_prefix: prefix, rows: groupRows, ...groupFields } = recordValue(group);
+          return arrayValue(groupRows).map((row) => {
+            const fields = rowRecord(row);
+            const name = String(fields.name ?? "");
+            return { ...fields, ...groupFields, qn: prefix ? `${String(prefix)}.${name}` : name };
+          });
+        });
+  return { ...rest, rows: tableRows };
 }
 
 /** Locates the compiled supervisor, or loads its TypeScript source during development. */
