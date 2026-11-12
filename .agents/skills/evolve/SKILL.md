@@ -5,7 +5,7 @@ description: Improve Codemap through realistic agent use, compact output design,
 
 # Evolve Codemap
 
-Use Codemap as its user and owner. Start from the requested outcome and a material friction point, make the smallest coherent improvement, and try to disprove it on real repositories. Internal work can succeed through clearer ownership or less repeated work while preserving the existing features; it does not need a new command or output field.
+Use Codemap as its user and owner. Start from the requested outcome and a material friction point, make the smallest coherent improvement, and try to disprove it on real repositories. Internal work can succeed through clearer ownership or less repeated work alone; it needs no new command or output field.
 
 ## Workflow
 
@@ -32,7 +32,7 @@ For each case, keep one compact record of the task, expected target, affected la
 
 For behavior-preserving work, compare stdout, stderr, and exit status before and after on identical fixtures. Include affected ordering, language variants, candidate limits, degraded results, and JSON truncation. For performance claims, take repeated measurements and interleave baseline and changed runs when practical; distinguish local source work, process startup, and backend refresh. Measure through process exit so native parser teardown and backend shutdown are included. A single faster run or a reduced evidence set does not establish an optimization.
 
-For parser or resolver changes, verify the affected declarations, documentation anchors, call ownership, and local import edges against source or an independent language parser. Choose relevant cases such as multiline or nested syntax, inherited and nested TypeScript configurations, package import/require conditions, unavailable configuration, and edits between commands. Check that comments and string examples do not fabricate declarations or calls and dependency targets outside the inspected inventory do not become local edges.
+For parser or resolver changes, verify declarations, documentation anchors, call ownership, and local import edges against source or an independent parser, using relevant cases such as nested syntax, inherited and nested TypeScript configurations, package import/require conditions, missing configuration, and edits between commands. Comments and string examples must not fabricate declarations or calls, and targets outside the inspected inventory must not become local edges.
 
 Run special probes only when relevant: disable the backend for fallback work; add, edit, rename, and delete toy code for lifecycle work; parse JSON directly and with `jq`; run the installed command outside the repository when the executable or companion skill changes.
 
@@ -51,9 +51,9 @@ Use regular references to judge useful defaults, the optional library case for l
 | [Transformers](https://github.com/huggingface/transformers) | Python stress case | Python | 740k | XL | Repeated model families, large classes, lazy imports, generated source, and substantial tests. |
 | [OpenClaw](https://github.com/openclaw/openclaw) | Extreme stress case only | Mainly TypeScript; Swift, Kotlin | 3.4M | XXL | Very large trees, multiple runtimes, traversal cost, output limits, and degraded behavior. |
 
-Hermes and DeepSeek Harness cover frontier agent systems despite their different scale. Use focused Hermes tasks for ordinary navigation checks. DeepSeek's [Cordis architecture](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/architecture.md) adds service and event registration paths that direct import or call graphs cannot fully explain; it takes the regular TypeScript-agent slot while LangChain JS remains optional. OpenClaw is an extreme stress test and should not determine everyday defaults or serve as a reference architecture.
+Use focused Hermes tasks for ordinary navigation checks. DeepSeek's [Cordis architecture](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/architecture.md) adds service and event registration that import or call graphs cannot fully explain, so it holds the regular TypeScript-agent slot while LangChain JS stays optional. OpenClaw tests extremes only and should not set everyday defaults.
 
-Sizes are rounded nonblank source lines including comments, with tests, fixtures, examples, documentation, benchmarks, vendored dependencies, build output, and obvious generated files excluded heuristically. They describe approximate repository scale rather than exact executable LOC or Codemap's eligible-file counts. M is 50k–200k lines, L is 200k–500k, XL is 500k–2M, and XXL is above 2M. These are size bands, not class-declaration counts. Native-language files contribute to size; supported analysis remains Python and TypeScript/JavaScript. Full scans can be substantially larger when tests and generated files are included. Use current checkouts and refresh estimates only when scale affects the choice of case.
+Sizes are rounded nonblank source lines, comments included, excluding tests, fixtures, examples, documentation, benchmarks, vendored code, build output, and obvious generated files; they show approximate scale, not Codemap's eligible-file counts. M is 50k–200k lines, L 200k–500k, XL 500k–2M, and XXL above 2M. Refresh them only when scale affects the choice of case.
 
 Useful task seeds include tracing a Hermes tool call, locating DeepSeek's tool registration and execution, following a Django model save, finding Excalidraw's deletion/history update, or tracing Cal.diy booking behavior across frontend and server packages. Verify the expected target from source before treating a seed as a regression case; record focused path queries separately from whole-repository traversals.
 
@@ -65,22 +65,20 @@ Prefer working-tree correctness and freshness, earlier useful targets, explicit 
 
 Reject changes that add noise, opaque scores, backend payloads, repository-specific policy, unmeasured lifecycle machinery, extension-only language support, or new formats without changing the agent's next action. Revise changes that work only on one repository, hide evidence behind truncation, misstate freshness, break JSON, or suppress useful fallback results.
 
+Judge wording and layout as output, because agents read both as context: terms an agent already knows rather than backend field names or coined labels, headings that claim exactly what the layout does, and every bound, substitution, omission, or cut stated.
+
 Judge maintainability separately from public output. Look for fewer competing owners, simpler caller contracts, and less repeated work. Keep cohesive workflows and idiomatic code when a rewrite only adds helpers, type indirection, or navigation.
 
 ## Keep Boundaries Clear
 
-- Follow the ownership map in `docs/IDEAS.md`: keep project refresh and failure attribution in the client, with cache ownership and lock recovery in their shared owner. The official MCP SDK owns negotiation and messages inside the supervised worker. Wait for backend exit before returning lock ownership, and retain the operation failure if cleanup also fails.
-- Keep backend arguments, eligibility, ranking, fallback, composition, and rendering with the owning feature.
-- Delegate syntax, module resolution, and document structure to established libraries while keeping relevance and coverage decisions in Codemap. Resolve imports in the importing file's configuration and module context, then filter to the inspected source inventory.
-- Reuse target discovery, source reads, and parsed facts within one operation, then rediscover current evidence on the next command. Share scalar scanner facts across graph and inspection consumers without retaining native syntax trees between files. Keep graph extraction sequencing with its graph owner and select signal collection before computing sections.
-- Keep work bounds local to the expensive operation and final stdout budgeting in `commands/output.ts`. Preserve independent rule limits and deterministic ordering when batching work.
-- Change the full public boundary when needed: parser, implementation, renderer, exports, docs, skill, and public tests.
+- Follow the ownership map and settled direction in `docs/IDEAS.md`; do not restate them here.
+- Share scalar scanner facts across graph and inspection consumers without retaining native syntax trees between files.
+- Change the full public boundary when needed: parser, implementation, renderer, exports, docs, skill, and public tests. The README figures in `docs/images/` draw the evidence stack and `signals` ordering from live data; when a change alters what one shows, recheck the sources its evidence comment lists and redraw it.
 - Keep executable output factual and compact. Put usage in `skills/codemap/SKILL.md`, public behavior in `README.md`, and durable decisions in `docs/IDEAS.md`.
-- Preserve the established output and truncation contracts. Do not duplicate detailed product rules here.
 
 ## Log the Work
 
-Keep a concise temporary `LOGBOOK.md` while evolving Codemap. Record material tasks, expectations, evidence, decisions, results, edge cases, limitations, and verification. Keep fixtures and benchmark artifacts under the repository's `.cache/`. Retain durable decisions and their useful evidence in `docs/IDEAS.md`; leave usage guidance in the companion skill. Do not dump raw command transcripts or repeated probes.
+Keep a concise temporary `LOGBOOK.md` of material tasks, expectations, evidence, decisions, results, and limitations, without raw transcripts or repeated probes. Keep fixtures and benchmark artifacts under `.cache/`, and move durable decisions into `docs/IDEAS.md`.
 
 ## Verify and Finish
 

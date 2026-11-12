@@ -7,11 +7,19 @@ description: Navigate and scope Python and TypeScript code using Codebase Memory
 
 Use this workflow only for Python and TypeScript code, including within mixed-language repositories; use `rg`, focused reads, and language-native tools for other languages.
 
-Route relationship and semantic questions to Codebase Memory, exact text to `rg`, and syntax patterns to ast-grep. Prefer compact readable output for agent work; use normalized JSON only on stable row surfaces such as `signals`, `search calls`, `search match`, and `search rule`. Every command applies one final conservative 10,000-token stdout ceiling; text reports truncation inline, while JSON remains valid for `jq` and reports truncation on stderr.
+Route relationship and semantic questions to Codebase Memory, exact text to `rg`, and syntax patterns to ast-grep. Read compact text by default; use JSON only on the stable row surfaces `signals`, `search calls`, `search match`, and `search rule`. Every command caps its output at about 10,000 tokens: text reports truncation inline, and JSON stays valid for `jq` and reports truncation on stderr.
 
-Graph-backed commands explicitly refresh one non-persistent snapshot per operation and do not write graph data into the inspected repository. An explicit `CBM_CACHE_DIR` remains authoritative; an unwritable default cache falls back to a private OS temporary cache. Local `rg`, ast-grep, and working-tree evidence remain independently verifiable fallbacks.
+Graph-backed commands refresh one non-persistent snapshot per operation and write nothing into the inspected repository. An explicit `CBM_CACHE_DIR` wins, and an unwritable default cache falls back to a private temporary one. Evidence is rebuilt on every command, so rerun it after editing source, TypeScript configuration, or package exports.
 
-Local target inventories, parsed source facts, and import resolution are reused only within a command. After editing source, TypeScript configuration, or package exports, rerun the affected command to inspect current evidence.
+## Read The Output
+
+Output is designed as context, so read its form as well as its rows.
+
+- A heading states what the section selected and its row fields' order, as in `## Most Called — symbol · location · share of all calls`. A ranked list follows exactly those criteria and judges nothing.
+- A selected view is not an inventory: `Structural Signals` shows at most one boundary per role, `Most Called` drops generic names such as `get` or `map`, and `Public API` shows only the surfaces its heading selects.
+- Rows name their source: `ast-grep`, `regex`, or `rg` on working-tree rows, `[file]` for a path match, and a `Codebase Memory ... matches:` block for backend rows.
+- Status lines say what the evidence does not cover: `backend: unavailable`, `backend: partial index`, or `backend: skipped`; `coverage: bounded working tree; parsed=N, eligible=N`; `Fallback: ...`; and `hidden tests: N`.
+- `- ...`, `... N more candidates`, and `... output truncated: shown=N, total=N, ...` mean more rows exist. Working-tree search rows stop at `--limit` without a marker, so raise the limit before concluding nothing else matches.
 
 ## Orient Before Substantial Work
 
@@ -19,7 +27,7 @@ Local target inventories, parsed source facts, and import resolution are reused 
 codemap summary --project-root <path>
 ```
 
-Use `summary` for a focused repository overview of README purpose, language mix, structural roles, most-called symbols, clusters, and the selected public API. If the session hook already provided it for the working tree, do not run it again. Continue with `search` to find a target, `inspect` to expand one known target, and `signals` to compare ranked source metrics.
+`summary` covers README purpose, language mix, structural signals, most-called symbols, clusters, and the public API. Skip it if the session hook already provided it for this working tree. Then `search` finds a target, `inspect` expands one, and `signals` compares ranked metrics.
 
 ## Find Source From A Clue
 
@@ -29,21 +37,19 @@ codemap search --graph --project-root <path> "<concept>"
 codemap search --semantic --project-root <path> "<concept>"
 ```
 
-Use default search for paths, exact names, and ordinary concepts. Direct paths, exact symbol definitions, and up to three exact multi-word implementation-text matches resolve from the working tree. A multi-term clue also stays local when every meaningful term occurs in source within one 50-line window, at least two terms share a line, and the evidence produces at most three complete candidates or one uniquely path-aligned complete candidate. Path affinity ranks candidates but does not supply missing term coverage. Other queries prioritize backend code search and fall back to local ast-grep plus fixed-string, case-insensitive `rg` when the backend has no usable answer. Likely test rows are omitted across backend and local evidence unless `--include-tests` is set.
+Default search handles paths, exact names, and ordinary concepts. Paths, exact definitions, and decisive multi-word source matches resolve from the working tree: up to three exact text matches, or every meaningful term within one 50-line window with two on one line, in at most three files or one whose path matches. Other queries go to backend code search and fall back to ast-grep plus fixed-string, case-insensitive `rg`. Likely test rows are omitted unless `--include-tests` is set.
 
-In the local fallback, a multi-term phrase with no useful whole-query implementation match prefers supported source files and keeps the strongest distinct normalized query-term coverage tier instead of printing weaker isolated hits. It retains at most eight multi-term candidates or two single-term candidates and reports the omitted count. Within that tier, path usefulness still ranks first; files whose matched terms meet in a narrower block, with at least two on one line, then precede files that mention them far apart, and their anchors come from that block. `Collection bound reached; ranking uses the available prefix.` means the scan or this ordering covered only a bounded prefix of a very large candidate set. Each deduplicated file candidate shows at most two concrete anchors; repeated engine and row-kind labels are omitted because this lane is already explicitly working-tree source evidence. Incidental documentation, configuration, and generated-only text hits do not suppress this source-oriented partial pass; Codemap retains them when no supported source candidate emerges.
+When the local fallback has no whole-query match, it keeps only the files covering the most query terms: at most eight multi-term or two single-term files, with an omitted count and at most two anchors each. Within that tier, path usefulness ranks first, then how tightly the terms cluster. `Collection bound reached; ranking uses the available prefix.` means only part of a very large candidate set was ranked. Documentation, configuration, and generated-only hits appear only when no source file matches.
 
-Use `--graph` when the result needs BM25-ranked relationship context. Add graph filters only in this lane:
+Use `--graph` for BM25-ranked relationship context; graph filters apply only in this lane:
 
 ```sh
 codemap search --graph --relationship <type> --file-pattern "<glob>" --limit <count> --project-root <path> "<concept>"
 ```
 
-Use `--semantic` when repository vocabulary differs from the clue. Do not combine `--graph` and `--semantic`. Codemap returns an exact working-tree definition before consulting semantic ranking, and falls back to broader working-tree evidence when the backend has no useful answer.
+Use `--semantic` when the repository's vocabulary differs from the clue, never together with `--graph`. An exact working-tree definition answers before semantic ranking, and broader working-tree evidence covers an empty backend answer.
 
-Source, graph, and semantic search return at most 15 matches by default. Add `--limit <count>` when a different result window is useful.
-
-Default search does not evaluate regular expressions. Use raw `rg` for regex completeness:
+These three lanes show 15 matches by default; change that with `--limit <count>`. Default search takes no regular expressions, so use raw `rg` when regex completeness matters:
 
 ```sh
 rg -n "<regex>" <path>
@@ -58,11 +64,11 @@ codemap search match --json --project-root <path> --lang <lang> --pattern '<patt
 codemap search rule --json --project-root <path> --rule <rule.yml> [paths...]
 ```
 
-Use `search calls` only for source call-shaped matches such as `print(...)`, `logger.info(...)`, or `console.log(...)`; a bare method name matches calls on any receiver, while a dotted target remains exact. Backend availability never changes it into a caller/callee trace. JSON returns compact `{total,matches}` data. Call searches select at most 1,000 matches by default; `--limit` changes that selection before the final output ceiling applies.
+`search calls` finds call-shaped matches such as `print(...)`, `logger.info(...)`, or `console.log(...)`: a bare method name matches any receiver, and a dotted target is exact. It stays syntax matching even when the backend is available, so it never traces callers. JSON is compact `{total,matches}`, and at most 1,000 matches are selected unless `--limit` says otherwise.
 
-Scope `[paths...]` to known files or directories to reduce work and noise. Calls and patterns infer languages from those targets when `--lang` is omitted; YAML rules supply their own language. Single-quote patterns containing `$NAME` or `$$$ARGS` so the shell passes ast-grep placeholders literally.
+Scope `[paths...]` to known files or directories. Without `--lang`, calls and patterns infer languages from those targets; YAML rules declare their own. Single-quote patterns containing `$NAME` or `$$$ARGS` so the shell passes them literally.
 
-Use `search match` for one structural pattern and `search rule` for a reusable YAML rule. Pattern JSON is an array of match rows; rule JSON wraps matches with rule metadata. Built-in matching covers JavaScript, TypeScript, and Python. Use raw ast-grep for rewrite previews, fixes, interactive authoring, detailed parse dumps, or engine options Codemap does not expose.
+`search match` takes one pattern, and its JSON is an array of rows; `search rule` takes a reusable YAML rule, and its JSON wraps matches with rule metadata. Both cover JavaScript, TypeScript, and Python. Use raw ast-grep for rewrites, fixes, interactive authoring, parse dumps, or engine options Codemap does not expose.
 
 ## Inspect One Known Target
 
@@ -72,11 +78,11 @@ codemap inspect --local --project-root <path> <path-or-symbol>
 codemap inspect --backend --project-root <path> <symbol>
 ```
 
-Use `inspect` after search identifies one likely target. Prefer a file or directory when a short symbol may be ambiguous. Paths use working-tree evidence. Unambiguous symbols use a fresh backend snippet and call trace; ambiguous or unavailable backend matches fall back locally. Use `--local` for working-tree-only detail and `--backend` when backend resolution itself is under inspection.
+Use `inspect` once search has found one likely target, and prefer a path when a short symbol may be ambiguous. Paths use working-tree evidence; unambiguous symbols use a fresh backend snippet and call trace, and ambiguous or missing backend matches fall back locally. `--local` forces working-tree detail, `--backend` isolates backend resolution, and `--limit <count>` bounds each section, 1,000 rows by default.
 
-Local function and method inspection keeps the target's location, documentation, relationships, and file context without listing every function in the owning file. Inspect that file path when its function inventory is useful; class inspection also retains the inventory for method discovery. Local inspection can still build repository-wide source relationships even for one target. For a call-site or syntax lookup in a large tree, use `search calls` or `search match` with explicit file or directory paths.
+Function inspection leaves out the owning file's function inventory; inspect the file or the class for it. Local inspection may still build repository-wide relationships, so for a call-site or syntax lookup in a large tree use `search calls` or `search match` with explicit paths.
 
-Working-tree TypeScript/JavaScript import edges use the importing file's configuration, including inherited and nested tsconfig aliases, and distinguish package `import` and `require` conditions. Only resolved targets in the inspected source inventory become edges. For a missing relationship, check the import statement, project configuration, and target eligibility before drawing a conclusion about usage.
+TypeScript/JavaScript import edges resolve through the importing file's tsconfig, including inherited and nested aliases, and package `import` and `require` conditions; only targets inside the inspected source become edges. Before concluding a relationship is missing, check the import, the configuration, and whether the target is eligible.
 
 ## Compare Source Metrics
 
@@ -85,54 +91,48 @@ codemap signals --project-root <path>
 codemap signals --json --project-root <path> | jq '{stats, functionMetrics, functionsByMentions, variablesByNameLength}'
 ```
 
-Start with the default. Codemap sorts all measured rows before the shared final-output budget is applied; categories do not have separate presentation caps. Whole-population working-tree statistics precede the rankings with `count`, `mean`, sample `std`, percentiles through `p90`, extrema, and automatically sized `bins` spanning each observed population. Backend top-function rows do not contribute to those population statistics.
+Start with the default. Rankings have no per-section caps, so text is cut in reading order and on larger repositories can end inside `Function Metrics`; JSON truncation keeps the head of every ranking, so use the `jq` form to compare all three. Working-tree statistics come first: `count`, `mean`, sample `std`, percentiles to `p90`, extrema, and data-sized `bins` over every measured function and variable. Backend rows do not feed them.
 
-- `functionMetrics`: backend rows sort by cognitive complexity, cyclomatic complexity, and length; working-tree fallback rows sort by length and mentions when available.
-- `functionsByMentions`: all function definitions sort by lexical mentions ascending, then length ascending.
-- `variablesByNameLength`: all variable definitions sort by identifier length descending, then lexical mentions ascending.
+- `functionMetrics`: backend rows by cognitive complexity, then cyclomatic complexity, then length; working-tree rows by length, then fewest mentions.
+- `functionsByMentions`: every function definition by fewest mentions, then shortest.
+- `variablesByNameLength`: every variable by longest name, then fewest mentions.
 
-Interpret compact fields directly:
+Fields:
 
-- `cognitive`: cognitive complexity from the backend, control flow raised by nesting and branching.
-- `cyclomatic`: cyclomatic complexity from the backend, an approximation of independent control-flow paths.
-- `lines`: physical source lines spanned by the function.
-- `hiddenQuadratic` in JSON, rendered as `hidden_quadratic` in text: search calls such as `indexOf` or `includes` that the backend detects inside loops, a lead toward quadratic time, not runtime iterations or proof of a large collection.
-- `nameLength` in JSON, rendered as `name_length` in text: characters in a variable's identifier.
-- `mentions`: lexical identifier occurrences, not graph edges or compiler references.
+- `cognitive`: cognitive complexity, raised by nesting and branching.
+- `cyclomatic`: cyclomatic complexity, roughly the number of independent paths.
+- `lines`: source lines the function spans.
+- `hidden_quadratic` (`hiddenQuadratic` in JSON): searches such as `indexOf` or `includes` inside loops, a lead toward quadratic time rather than proof of it.
+- `name_length` (`nameLength` in JSON): characters in a variable's name.
+- `mentions`: lexical occurrences of the name, not graph edges or compiler references.
 
-Backend metric values pass through unchanged. Fresh `functionMetrics` uses backend rows; partial results fill remaining capacity with distinct working-tree rows; degraded results use working-tree rows. Mention and name-length rankings always come from the working tree. The rows describe ordering criteria, not refactor instructions.
+Backend values pass through unchanged. `functionMetrics` holds at most 100 backend rows, alone when the index is fresh and 100 remain after source filtering; otherwise every distinct working-tree row follows them, and with no backend only working-tree rows remain. Its heading names which mix you got. Mention and name-length rankings always come from the working tree. Rankings order rows; they do not prescribe refactors.
 
-Above the detailed-graph threshold, the fallback scans the 100 largest eligible source files and reports parsed versus eligible file counts. Its statistics describe only parsed rows. Treat its function-length and file rows as bounded working-tree evidence; relationship and mention coverage are not complete. Above 10,000 eligible files, default signals skip backend metric enrichment; use explicit backend commands only when that graph cost is justified.
+Above 5,000 files, signals parse only the 100 largest eligible files and report parsed versus eligible counts; treat those rows as a bounded sample with incomplete relationship and mention coverage. Above 10,000 eligible files, they skip backend metrics.
 
-Use a detailed lane when the question is already specific or the default points there:
+For a specific question, request one section:
 
 ```sh
 codemap signals --project-root <path> <section>
 ```
 
-- `relationships`: broader import and call relationships.
-- `files` or `lengths`: density and size measurements.
+- `relationships`: import and call relationships.
+- `files` or `lengths`: density and size.
 - `functions`, `variables`, or `usage`: definition and lexical-usage tables.
 - `docstring-signals` or `docstrings`: documentation coverage or full docstring rows.
-- `all`: the detailed metric sections and documentation coverage, plus backend function metrics, without repeating the compact `top` projection. Full docstring rows require `docstrings` separately.
+- `all`: every detailed section, documentation coverage, and backend function metrics, without the `top` projection; full docstrings still need `docstrings`.
 
-Prefer the relevant section over requesting `all` and discarding most of it. Focused sections skip unrelated analysis; only `top` and `all` request backend function metrics. Use `docstrings` directly when the task needs documentation text.
-
-Detailed row surfaces filter generated or bundled paths where source-specific and use the same final-output budget. Add `--include-tests` only when tests are the target. Text and JSON expose the same normalized facts; compact JSON is intended for `jq` and pipelines.
+A focused section skips unrelated analysis, and only `top` and `all` query the backend. Detailed sections drop generated and bundled paths and share the same output cap. Add `--include-tests` only when tests are the target. Text and JSON carry the same facts.
 
 ## Work In Python
 
-Treat extracted relative and absolute imports, functions, classes, file containment, same-file call-like edges, and docstring/comment signals as syntax-level leads rather than compiler facts. Start from likely entries such as `__main__.py`, `cli.py`, `main.py`, and `app.py`.
+Treat extracted imports, functions, classes, containment, same-file call edges, and docstrings as syntax-level leads, not compiler facts. Start from likely entries such as `__main__.py`, `cli.py`, `main.py`, and `app.py`.
 
-Python declarations, multiline imports, assignment binders, call sites, and structural patterns use Codemap's bundled ast-grep parser. Calls in comments or string examples do not become call edges; dynamic dispatch still needs source verification.
-
-Use a structural pattern to locate definitions:
+Python parsing uses Codemap's bundled ast-grep parser, so calls in comments or strings never become edges; dynamic dispatch still needs source verification. To locate definitions:
 
 ```sh
 codemap search match --project-root <path> --lang python --pattern 'def $NAME($$$ARGS): $$$BODY' [paths...]
 ```
-
-Python `search calls`, `search match`, and `search rule` use structural syntax matching. Use raw ast-grep for rewrite or fix rules and engine options Codemap does not expose.
 
 ## Diagnose Freshness Or Change Impact
 
@@ -145,8 +145,8 @@ codemap backend changes --since <ref> --depth <count> --project-root <path>
 codemap backend query --json --max-rows <count> --project-root <path> "<read-only Cypher>"
 ```
 
-Use `index` to measure explicit refresh timing, `status` or `schema` to diagnose backend readiness, `changes` for backend changed-code impact, and raw `query --json` only as an escape hatch. A partial index may retain useful backend evidence; an unavailable backend degrades to working-tree evidence where a local answer exists.
+`index` measures refresh timing, `status` and `schema` diagnose backend readiness, `changes` reports changed-code impact, and raw `query --json` is the escape hatch. A partial index may still help; an unavailable backend degrades to working-tree evidence where a local answer exists.
 
 ## Boundaries
 
-Treat Codemap output as syntax-level facts and indexed relationship leads, not compiler-grade reachability, complete call graphs, framework semantics, dataflow proof, or proof that a symbol is dead. Verify consequential conclusions with focused reads, `rg`, ast-grep, and repository tests.
+Codemap output is syntax-level facts and indexed relationship leads, not compiler-grade reachability, complete call graphs, framework semantics, dataflow proof, or proof that a symbol is dead. Verify consequential conclusions with focused reads, `rg`, ast-grep, and the repository's tests.

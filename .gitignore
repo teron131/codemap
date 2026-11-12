@@ -4,6 +4,8 @@ __pycache__/
 .ruff_cache/
 uv.lock
 .work/
+.playwright-cli/
+.claude/
 
 
 # Byte-compiled / optimized / DLL files

@@ -1,33 +1,41 @@
 # Codemap Ideas
 
-This document records the reasoning behind Codemap's design and the principles that should guide its evolution.
-Retain lasting decisions, tradeoffs, and criteria for revisiting them here; keep individual runs, repository-specific failures, and measurements in the temporary logbook and regression tests.
-The README remains the user-facing contract.
+Why Codemap is built the way it is, and the principles that guide its evolution.
+Keep lasting decisions, trade-offs, and the criteria for revisiting them here; individual runs, repository-specific failures, and measurements belong in the temporary logbook and regression tests.
+The README is the user-facing contract.
+
+## Premise
+
+- **Context as code.** What a command prints is the context an agent reasons from. Selection, order, naming, layout, and limits are therefore code: designed, tested, and versioned, never a pass-through of what a tool returned.
+- **Agents read it and agents develop it.** Judge output by the next action an agent takes from it. Keep the repository's own structure, names, and documents so that an agent that opened only a few files makes a change that is right for the whole.
+- **Named evidence sources, one backend.** Codebase Memory MCP supplies graph evidence; ripgrep and ast-grep supply exact text and syntax from the working tree. Each keeps its product name in code and in output, so a reader can always tell which source produced a row. "Backend" is only the role word for the CLI switch and status lines.
+- **Vocabulary from general professional knowledge.** A term should be one an agent already knows from the field, so output needs no glossary. The backend's schema and coined labels are not that vocabulary, which is why its field names stop at the code that reads them.
+- **Output is implicit context.** Every part of a result reads as a claim: a descending top list says these matter most, a heading says what the section is, and a list without a marker reads as the whole. The layout must claim exactly what the selection did, so state the criteria, label the source, and report whatever was bounded, substituted, omitted, or cut.
 
 ## Journey So Far
 
-Codemap began as a compact, opinionated layer over `rg` and ast-grep. Those tools established the baseline: exact text and syntax-aware matches should remain fast, working-tree-first, and independently verifiable.
+Codemap began as a compact layer over `rg` and ast-grep, which set the baseline: exact text and syntax matches stay fast, working-tree-first, and independently verifiable.
 
-Codebase Memory later became the primary source for repository structure, symbol neighborhoods, semantic search, change impact, and function metrics. Codemap kept ownership of selection and presentation instead of exposing backend payloads directly. This made it possible to combine stronger graph evidence with stable, token-conscious output.
+Codebase Memory then became the primary source for structure, symbol neighborhoods, semantic search, change impact, and function metrics, while Codemap kept selection and presentation instead of exposing backend payloads.
 
-Search and inspection settled into complementary lanes. Search starts from any clue and narrows toward source: paths and exact definitions resolve from the working tree, ordinary concept and text queries prioritize ranked backend code search, graph and semantic modes stay explicit, and local ast-grep plus `rg` remain the verifiable fallback. Inspect starts from one known target and expands outward, using backend snippets and relationships only when the match is unambiguous and structurally recognized.
+Search and inspection settled into complementary lanes: search narrows from any clue toward source, and inspect expands outward from one known target, using backend snippets and relationships only for unambiguous, structurally recognized matches.
 
-Signal provenance also became explicit. Backend `cognitive`, `cyclomatic`, and `hiddenQuadratic` values are Codebase Memory properties passed through after numeric normalization, under Codemap's own names. Partial or degraded backend results may be completed with working-tree function rows containing source lines and lexical mentions. Function-mention and variable-name-length rankings also come from working-tree lexical analysis. Codemap owns path eligibility, deterministic ordering, field naming, and display limits; headings state the primary and tie-break criteria instead of labeling ranked definitions as problems.
+Signal provenance became explicit: backend metrics pass through under Codemap's names, working-tree rows complete partial or degraded results, and Codemap owns eligibility, ordering, naming, and display limits.
 
-The backend's session auto-indexing proved unreliable across a working session. The current lifecycle therefore serializes graph-backed operations by project root, clears the matching operational cache entry, indexes once with `persistence: false`, and reuses that clean snapshot for every backend query in the operation. Short-lived MCP children start outside the target repository so the backend's watching and auto-index behavior cannot race the explicit refresh. An explicit Codebase Memory cache path remains authoritative; an unwritable default user cache falls back to a private OS temporary cache.
+The backend's session auto-indexing proved unreliable, so graph-backed operations serialize per project root, clear the matching cache entry, index once with `persistence: false`, and reuse that snapshot for every query in the operation. Short-lived MCP children start outside the target repository so the backend's watchers cannot race the refresh.
 
-Once the command surface stabilized, Codemap became a globally installable npm CLI with a separate companion skill. The executable owns behavior and output; the skill owns when to use each command, how to interpret compact metrics, and which caveats matter to an agent. Source installation works with npm or pnpm, while `npm install -g .` provides the linked global command.
+Once the commands stabilized, Codemap became a globally installable npm CLI with a separate companion skill: the executable owns behavior and output, and the skill owns when to use each command and how to read it. Source installs work with npm or pnpm, and `npm install -g .` links the global command.
 
-The next performance pass preserved the command surface while separating backend lifecycle, cache locking, transport, and final output budgeting into their owning modules. Structural search began sharing target discovery and related rule parsing, graph inspection reused import-source evidence, and signal selection moved ahead of collection. Comparisons on fixed Python and TypeScript fixtures and production repositories preserved stdout, stderr, and exit status while measured search and signal timings improved. This established reuse within an operation as the first place to look for wasted work while retaining fresh evidence on the next command.
+A later performance pass gave backend lifecycle, cache locking, transport, and output budgeting their own modules and shared parsing within each operation, without changing output. Reuse within an operation is the first place to look for wasted work; each command still rediscovers fresh evidence.
 
 ## Settled Direction
 
 - Do not add persistent Codemap data to the inspected repository.
 - Treat Codebase Memory's system-cache storage as operational state, not a human-reviewed artifact or source of truth.
-- Preserve an explicit `CBM_CACHE_DIR`. Fall back from an unwritable default user cache to a private OS temporary cache, and surface the concrete backend or lifecycle reason when backend work still fails.
+- Preserve an explicit `CBM_CACHE_DIR`, fall back from an unwritable default user cache to a private OS temporary cache, and surface the concrete backend or lifecycle reason when backend work still fails.
 - Keep explicit refresh as the default until the backend's lifecycle behavior is demonstrably reliable.
 - Keep Codebase Memory, working-tree scanning, `rg`, and ast-grep as distinct evidence sources with clear labels.
-- Keep the detailed-graph threshold separate from signal availability. Above it, scan the 100 largest eligible source files and report parsed versus eligible counts for bounded function-length and file evidence without claiming complete relationship or mention coverage.
+- Keep the detailed-analysis limit of 5,000 files separate from signal availability. Above it, scan the 100 largest eligible source files and report parsed versus eligible counts for bounded function-length and file evidence without claiming complete relationship or mention coverage.
 - Skip default backend function-metric enrichment above 10,000 eligible source files. Keep the bounded working-tree signal useful and leave expensive graph work to explicit backend commands.
 - Keep `src/codemap/codebase-memory` responsible for transport, freshness, serialization, generic tool-result validation, and reusable diagnostic/query operations.
 - Within that boundary, keep project refresh, cache ownership, and failure attribution in Codemap while the official SDK handles MCP negotiation and messages inside the supervised process. Backend exit must precede lock handback, and cleanup failures must retain the original operation failure.
@@ -42,12 +50,12 @@ The next performance pass preserved the command surface while separating backend
 - Keep commands to parsing flags, resolving the project root, and exit codes: `search/lanes.ts` owns the order in which search lanes answer, and each feature keeps its Codebase Memory lane in its own `codebase-memory.ts`, named for the product like `ripgrep.ts` and `ast-grep.ts` because that code is tied to its tools and payloads.
 - Import another module only through its `index.ts`; when a caller needs an inner symbol, export it from the entry or move the boundary.
 - Delegate language syntax, module resolution, and document structure to established libraries while retaining relevance and coverage decisions in Codemap. Resolve imports in the importing file's configuration and module context, then retain only targets in the inspected project inventory.
-- Keep `summary` focused on repository purpose through introductory README content and a three-level outline with common setup and project-administration subtrees omitted. Follow with an authored-source language mix, a hierarchical repository skeleton, non-generic most-called symbols by share of all calls, production clusters described by analyzed-symbol share and internal-call share, and a focused public API skeleton.
+- Keep `summary` focused on repository purpose through introductory README content and a three-level outline with common setup and project-administration subtrees omitted. Follow with an authored-source language mix, structural signals for the repository skeleton, non-generic most-called symbols by share of all calls, production clusters described by analyzed-symbol share and internal-call share, and a focused public API skeleton.
 - Infer natural repository granularity rather than ranking every barrel equally: use authored package boundaries for workspaces and the dominant importable source root's first feature level in one-package repositories. Establish the skeleton from package dependencies and resolved working-tree imports, then enrich it with bulk Codebase Memory imports and calls. Retain only distinct entry, coordination, core, and shared-foundation roles. Compress repeated same-parent paths as counted groups labeled with their item count and sorted first, middle, and last examples; insert ellipses only where those samples omit siblings, without claiming that the grouped modules are semantically alike. Recursively expand selected one-package paths only while expansion is shorter than a counted group, preserve direct files at the selected boundary, and render every compressed branch on its own line.
 - Present the public API as an at-most-three-level hierarchy of public surfaces selected by shallowest entry, most working-tree importers, and most modules exposed, plus modules directly exposed through them. Nest already selected descendant surfaces relative to their closest selected ancestor without collecting additional entries, merging repeated module paths so the added depth expresses relationships rather than volume. Deeply nested surfaces must earn inclusion through import centrality rather than export volume. Resolve re-exports to their defining paths, collapse deeper paths to the first meaningful module below the surface, and retain only non-dominated module groups across fan-in, implementation evidence, and defining-module breadth. Retain named exports only when one name uniquely identifies its selected module or names strongly match the module's public role; allow an additional name-bearing module only when its fan-in or implementation breadth is a data-derived upper outlier among its peers. These module labels are structural compression, not semantic capability classifications or recommended next steps. Omit exhaustive symbol lists, positional export samples, repeated origins, unresolved relative re-exports, and test-only modules.
 - Keep local skeleton evidence available when Codebase Memory degrades. Put the outline first within Overview, then structural roles before most-called symbols and clusters, and graph insight or its explicit degradation status before the public API. Do not repeat raw graph inventory, repeat the package root inside its own skeleton, or rely on the shared stdout ceiling to select summary content.
 - Pass backend metric values through unchanged and use explicit deterministic tie-breakers for Codemap-owned ordering.
-- Name every output term for its reader rather than for the backend's schema: keep an established term such as `cyclomatic` or `cognitive`, and otherwise use a plain name for what the number points to, such as `hidden_quadratic` for the backend's `linear_scan_in_loop`. Backend field names stop at the code that reads them, and one concept keeps one name across text, JSON, code, and the skill. A heading claims exactly what its layout does: a ranked or selected view is a signal, and a plain measured number is a metric.
+- Name output terms for the reader: an established term such as `cyclomatic` or `cognitive`, otherwise a plain name for what the number points to, such as `hidden_quadratic` for the backend's `linear_scan_in_loop`. One concept keeps one name across text, JSON, code, and the skill. A ranked or selected view is a signal; a plain measured number is a metric.
 - Keep population statistics on homogeneous numeric measurements before presentation truncation: `count`, `mean`, sample `std`, `min`, `p25`, `p50`, `p75`, `p90`, `max`, and data-derived `bins`. Use the shared Sturges-sized binning heuristic with at most ten equal-width ranges and no metric-specific thresholds. Do not summarize source line positions or treat backend top-N rows as a population; bounded scans describe only their parsed rows.
 - Omit likely test rows by default across backend and local discovery. `--include-tests` opts in, while explicit paths and exact symbol definitions remain direct working-tree targets.
 - Keep direct paths, exact symbol definitions, and bounded exact multi-word implementation text working-tree-first. Also prefer working-tree candidates when every meaningful term occurs in source within one 50-line window, at least two terms share a line, and the result is decisive: at most three complete candidates or one uniquely path-aligned complete candidate. Path affinity ranks candidates but never supplies missing source coverage. Render that evidence once per file with coverage and concrete anchors. For weaker ordinary source search, prioritize Codebase Memory code search and reuse the working-tree preflight when the backend is unavailable or has no usable answer. Keep relationship and vocabulary-bridging work in the explicit `--graph` and `--semantic` lanes, while allowing an exact working-tree definition to end semantic search before noisy backend ranking can hide it.
@@ -62,8 +70,7 @@ The next performance pass preserved the command surface while separating backend
 - Prefer readable compact text for agent use and object-row JSON for stable surfaces that benefit from `jq` or scripts. Let composed summaries borrow TOON's schema-once principle by declaring field order in section headings, emitting compact positional records, and using trees for hierarchy; token efficiency alone does not justify a third public encoding.
 - Treat 10,000 conservatively estimated tokens as the overflow ceiling for every command, not a target commands should fill. Apply it once to final stdout and report total, shown, and truncated counts. Keep JSON valid and `jq`-compatible by reporting its truncation on stderr. Do not stack presentation caps or repeat compact summary projections in broad detailed views. Bound expensive collection or enrichment separately only to limit work.
 - Emit measurements rather than prompts or recommendations. Ranking headings should state their criteria without classifying the rows as good, bad, or in need of refactoring.
-- Keep interpretation rules and metric caveats in the companion skill rather than repeating explanatory prose in every command result.
-- Keep the installed command as the behavior surface and the companion skill as a thin agent operating contract.
+- Keep interpretation rules and metric caveats in the companion skill, a thin operating contract, rather than in every command result.
 - Keep Python and TypeScript/JavaScript, including frontend source, as the supported language scope.
 - Bundle Python structural matching through ast-grep's dynamic NAPI language package so normal patterns, rules, and call searches do not depend on a separately installed CLI.
 
@@ -108,13 +115,13 @@ The current lock and child-supervision machinery is containment for an unreliabl
 
 ### Output Contracts
 
-Additional fields should improve ranking, interpretation, or verification. Backend metadata, duplicate labels, verbose explanations, and values that do not change an agent's next inspection should stay out of normal output.
+A field earns its place by improving ranking, interpretation, or verification; backend metadata, duplicate labels, verbose explanations, and values that do not change the next inspection stay out.
 
 Backend-derived fields must retain their value and meaning under Codemap's name, while Codemap-derived fields must be identifiable from the owning command or skill. Composite ranking scores should remain internal unless they become independently interpretable evidence rather than merely ordering machinery.
 
-Text and JSON do not need artificial parity everywhere. Row-oriented commands may support both from one normalized shape; composed orientation and inspection may remain text-only when a second public structure would add maintenance without improving use.
+Text and JSON need no artificial parity: row-oriented commands may offer both from one normalized shape, while composed orientation and inspection stay text-only when a second structure would add maintenance without improving use.
 
-TOON has been trialed and showed no material advantage over column-oriented compact JSON; both use the same schema-once, positional-row idea. Keep JSON output minified and object-oriented for `jq` and scripts, and keep compact text as the token-efficient agent surface. Do not add TOON as a third public encoding or wrap internal MCP JSON transport.
+TOON was trialed and showed no material advantage over compact JSON, which shares its schema-once, positional-row idea. Keep JSON minified and object-oriented for `jq`, keep compact text as the agent surface, and do not add TOON as a third encoding or wrap internal MCP JSON transport.
 
 ### Language Scope
 
@@ -122,7 +129,7 @@ Do not expand language coverage by recognizing file extensions alone. A new lang
 
 ## Evaluation Standard
 
-Design from the agent user's next action under the settled philosophy, then use repository evaluation to falsify that design. Do not average unrelated repository quirks into an incoherent default merely because the corpus is diverse.
+Design from the agent user's next action under the premise above, then use repository evaluation to falsify that design. Do not average unrelated repository quirks into an incoherent default merely because the corpus is diverse.
 
 Choose the smallest representative corpus that can expose a regression. The [evolve skill's public repository pool](../.agents/skills/evolve/SKILL.md#public-repository-pool) records the selected frontier-agent, framework, application, optional library, and stress cases with their languages and approximate sizes. Use ordinary references to judge useful defaults and extreme repositories to test bounds and degradation. Shared extraction needs both supported language families; backend lifecycle work needs edits, renames, deletions, and failure recovery. Expand when the evidence disagrees.
 
@@ -130,6 +137,6 @@ Behavior-preserving changes should compare stdout, stderr, and exit status on id
 
 For output or ranking changes, judge the first useful target, result-source mix, row count, output size, and the next action an agent can take. Inspect readable output, parse exposed JSON, and keep regression coverage on public behavior and lifecycle invariants. Verify installed execution outside the repository when packaging or executable behavior changes, and check companion-skill examples against the live CLI when usage changes.
 
-Use `.agents/skills/evolve/SKILL.md` for the evaluation loop. Keep experiment details in the temporary logbook and reproducible failures in regression tests; distill the reasoning that should guide future work here. Assess clearer ownership separately from public behavior so a passing test suite alone does not justify a structural change.
+Use `.agents/skills/evolve/SKILL.md` for the evaluation loop. Assess clearer ownership separately from public behavior, so a passing test suite alone does not justify a structural change.
 
-The useful stopping point is a compact default that gives enough evidence to choose a focused next inspection. More available backend data is not, by itself, a reason to print more data.
+Stop at a compact default that gives enough evidence to choose a focused next inspection; more available backend data is not by itself a reason to print more.
