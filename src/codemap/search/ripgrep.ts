@@ -14,9 +14,8 @@ import type { SourceMatch } from "./source.js";
 
 const SOURCE_MATCH_TEXT_LIMIT = 240;
 const SOURCE_SEARCH_BUFFER_LIMIT = 16 * 1024 * 1024;
-const SOURCE_CODE_GLOBS = [...PYTHON_SUFFIXES, ...TYPESCRIPT_SUFFIXES].map(
-  (suffix) => `*${suffix}`,
-);
+const SOURCE_CODE_SUFFIXES = [...PYTHON_SUFFIXES, ...TYPESCRIPT_SUFFIXES];
+const SOURCE_CODE_GLOBS = SOURCE_CODE_SUFFIXES.map((suffix) => `*${suffix}`);
 
 export type RipgrepScanStatus = "complete" | "failed" | "truncated";
 
@@ -36,7 +35,7 @@ export type RipgrepFileCollection = {
 export function ripgrepDefinitionMatches(
   root: string,
   symbol: string,
-  { limit }: { limit: number },
+  { limit, paths }: { limit: number; paths: string[] },
 ): SourceMatch[] {
   const escaped = escapeRegExp(symbol);
   const declaration =
@@ -59,7 +58,8 @@ export function ripgrepDefinitionMatches(
       declaration,
       "-e",
       pythonAssignment,
-      ".",
+      "--",
+      ...paths,
     ],
     root,
     (event) => {
@@ -68,6 +68,35 @@ export function ripgrepDefinitionMatches(
     },
     { limit },
   );
+}
+
+/** Source files that declare a class named `owner`, or whose name is `owner` before its first dot; both match case-sensitively. */
+export function ripgrepOwnerFiles(root: string, owner: string): string[] {
+  const declaring = ripgrepFileList(root, [
+    "--files-with-matches",
+    ...SOURCE_CODE_GLOBS.flatMap((glob) => ["--glob", glob]),
+    ...ripgrepExcludeArgs(),
+    "-e",
+    String.raw`\bclass\s+${escapeRegExp(owner)}\b`,
+    ".",
+  ]);
+  const named = ripgrepFileList(root, [
+    "--files",
+    "--glob",
+    `${owner}.*`,
+    ...ripgrepExcludeArgs(),
+    ".",
+  ]).filter((filePath) => SOURCE_CODE_SUFFIXES.some((suffix) => filePath.endsWith(suffix)));
+  return [...new Set([...declaring, ...named])];
+}
+
+function ripgrepFileList(root: string, args: string[]): string[] {
+  const result = spawnSync("rg", args, {
+    cwd: root,
+    encoding: "utf8",
+    maxBuffer: SOURCE_SEARCH_BUFFER_LIMIT,
+  });
+  return (result.stdout ?? "").split(/\r?\n/).filter(Boolean).map(projectRelativePath);
 }
 
 /** Finds all candidate file paths for one term without collecting repeated match rows. */

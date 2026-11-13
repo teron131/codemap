@@ -5,7 +5,13 @@ import path from "node:path";
 import { expandUser, isDirectory, isWithinDirectory } from "../path-utils.js";
 import type { InventoryEntry } from "../source/extraction/index.js";
 import type { GraphNode } from "../source/graph/index.js";
-import { type FileMetrics, scanFile } from "../source/scanner/index.js";
+import {
+  type FileMetrics,
+  isMemberOf,
+  type QualifiedName,
+  qualifiedName,
+  scanFile,
+} from "../source/scanner/index.js";
 
 type InspectTargetKind = "directory" | "file";
 
@@ -63,6 +69,7 @@ function symbolFilePaths(
   fileMetricsByPath: Record<string, FileMetrics | undefined>,
 ): Set<string> {
   const paths = new Set<string>();
+  const qualified = qualifiedName(target);
   for (const inventoryEntry of files) {
     const relPath = inventoryEntry.path;
     let metrics = fileMetricsByPath[relPath];
@@ -75,12 +82,19 @@ function symbolFilePaths(
       (metrics.functionNames.includes(target) ||
         metrics.classSpans.some((span) => span.name === target) ||
         metrics.variableNames.includes(target) ||
-        metrics.exportedNames.includes(target))
+        metrics.exportedNames.includes(target) ||
+        (qualified !== null && definesMember(metrics, qualified)))
     ) {
       paths.add(relPath);
     }
   }
   return paths;
+}
+
+function definesMember(metrics: FileMetrics, { owner, member }: QualifiedName): boolean {
+  return [...metrics.functionSpans, ...metrics.classSpans].some(
+    (span) => span.name === member && isMemberOf(metrics, owner, span.startLine),
+  );
 }
 
 /** Takes a normalized target; null when it names no file, directory, or defined symbol, and the scans it performs are cached into `fileMetricsByPath`. */
@@ -109,8 +123,27 @@ export function inspectEmitPaths(
   return paths;
 }
 
-/** Case-insensitive exact matches on id, path, or name come before substring matches. */
-export function inspectCandidates(graphNodes: GraphNode[], target: string): GraphNode[] {
+/** A qualified name such as `Model.save` selects only the definitions of `save` that belong to `Model`, when any exist; otherwise case-insensitive exact matches on id, path, or name come before substring matches. */
+export function inspectCandidates(
+  graphNodes: GraphNode[],
+  target: string,
+  fileMetricsByPath: Record<string, FileMetrics | undefined>,
+): GraphNode[] {
+  const qualified = qualifiedName(target);
+  if (qualified !== null) {
+    const members = graphNodes.filter((node) => {
+      const metrics = fileMetricsByPath[node.filePath];
+      return (
+        node.name === qualified.member &&
+        node.lineRange !== undefined &&
+        metrics !== undefined &&
+        isMemberOf(metrics, qualified.owner, node.lineRange[0])
+      );
+    });
+    if (members.length > 0) {
+      return members;
+    }
+  }
   const lowered = target.toLowerCase();
   const exact: GraphNode[] = [];
   const partial: GraphNode[] = [];

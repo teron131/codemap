@@ -8,6 +8,8 @@ export {
   TYPESCRIPT_SUFFIXES,
 } from "./constants.js";
 export { discoverFiles, relativePath } from "./discovery.js";
+export type { QualifiedName } from "./membership.js";
+export { isMemberOf, qualifiedName } from "./membership.js";
 export { isGeneratedPath, isSupportedSourcePath, isTestPath } from "./path-policy.js";
 export type { FileMetrics, FunctionSpan, SourceCall, TypeScriptImport } from "./metrics.js";
 export { sourceLineCount } from "./metrics.js";

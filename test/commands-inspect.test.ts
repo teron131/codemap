@@ -120,6 +120,27 @@ describe("inspect command handler", () => {
     expect(output).toContain("file: src/target.ts, lines: 1-3");
   });
 
+  it("inspects a qualified name as that class's member rather than a same-named method", () => {
+    writeFileSync(
+      path.join(workDir, "src", "stores.py"),
+      [
+        "class Cache:",
+        "    def save(self):",
+        '        """Cache it."""',
+        "",
+        "class Store:",
+        "    def save(self):",
+        '        """Persist it."""',
+      ].join("\n"),
+    );
+
+    expect(commandInspect("Store.save", { local: true, projectRoot: workDir })).toBe(0);
+    const output = logLines().join("\n");
+    expect(output.startsWith("# save in src/stores.py:6\n")).toBe(true);
+    expect(output).toContain("Persist it.");
+    expect(output).not.toContain("Cache it.");
+  });
+
   it.each(["```ts", "~~~ts"])(
     "closes a shortened class example opened with %s before the next profile section",
     (opening) => {

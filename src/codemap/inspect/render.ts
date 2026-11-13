@@ -12,6 +12,7 @@ import {
   inventoryFileNodes,
   relatedEdges,
 } from "../source/graph/index.js";
+import type { FileMetrics } from "../source/scanner/index.js";
 import { type InspectMetrics, workingTreeInspectGraph } from "./graph.js";
 import {
   buildLikelyEntries,
@@ -53,10 +54,11 @@ export function renderWorkingTreeInspection(
       return inspection;
     }
   }
-  const [graph, metrics] = workingTreeInspectGraph(root, target, inventory);
+  const [graph, metrics, fileMetricsByPath] = workingTreeInspectGraph(root, target, inventory);
   return renderInspection(root, graph, metrics, target, {
     limit,
     likelyEntries: likelyEntriesByFile(buildLikelyEntries(graph.nodes, graph.edges)),
+    fileMetricsByPath,
   });
 }
 
@@ -129,7 +131,15 @@ function renderInspection(
   graph: GraphPayload,
   metrics: InspectMetrics,
   target: string,
-  { limit, likelyEntries }: { limit: number; likelyEntries: Map<string, LikelyEntry> },
+  {
+    limit,
+    likelyEntries,
+    fileMetricsByPath,
+  }: {
+    limit: number;
+    likelyEntries: Map<string, LikelyEntry>;
+    fileMetricsByPath: Record<string, FileMetrics | undefined>;
+  },
 ): string | null {
   const directoryProfile = renderDirectoryProfile(root, graph, metrics, target, {
     limit,
@@ -138,7 +148,7 @@ function renderInspection(
     return directoryProfile;
   }
 
-  const candidates = inspectCandidates(graph.nodes, target);
+  const candidates = inspectCandidates(graph.nodes, target, fileMetricsByPath);
   const node = candidates[0];
   if (node === undefined) {
     return renderVariableProfile(target, metrics, { limit });

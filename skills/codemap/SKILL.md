@@ -39,6 +39,8 @@ codemap search --semantic --project-root <path> "<concept>"
 
 Default search handles paths, exact names, and ordinary concepts. Paths, exact definitions, and decisive multi-word source matches resolve from the working tree: up to three exact text matches, or every meaningful term within one 50-line window with two on one line, in at most three files or one whose path matches. Other queries go to backend code search and fall back to ast-grep plus fixed-string, case-insensitive `rg`. Likely test rows are omitted unless `--include-tests` is set.
 
+Name a method or module function by its qualified name: `Model.save` or `transaction.atomic` answers with the definition of the last segment that sits directly in a class of that name, or at the top level of a file of that name. Both segments are case-sensitive and earlier segments such as `django.db.` are ignored. Owners that are interfaces, object literals, or packages re-exporting a name do not resolve, and the query is then read as a phrase.
+
 When the local fallback has no whole-query match, it keeps only the files covering the most query terms: at most eight multi-term or two single-term files, with an omitted count and at most two anchors each. Within that tier, path usefulness ranks first, then how tightly the terms cluster. `Collection bound reached; ranking uses the available prefix.` means only part of a very large candidate set was ranked. Documentation, configuration, and generated-only hits appear only when no source file matches.
 
 Use `--graph` for BM25-ranked relationship context; graph filters apply only in this lane:
@@ -80,7 +82,7 @@ codemap inspect --local --project-root <path> <path-or-symbol>
 codemap inspect --backend --project-root <path> <symbol>
 ```
 
-Use `inspect` once search has found one likely target, and prefer a path when a short symbol may be ambiguous. Paths use working-tree evidence; unambiguous symbols use a fresh backend snippet and call trace, and ambiguous or missing backend matches fall back locally. `--local` forces working-tree detail, `--backend` isolates backend resolution, and `--limit <count>` bounds each section, 1,000 rows by default.
+Use `inspect` once search has found one likely target, and prefer a path or a qualified name such as `Model.save` when a short symbol may be ambiguous. Paths use working-tree evidence; unambiguous symbols use a fresh backend snippet and call trace, and ambiguous or missing backend matches fall back locally. `--local` forces working-tree detail, `--backend` isolates backend resolution, and `--limit <count>` bounds each section, 1,000 rows by default.
 
 Function inspection leaves out the owning file's function inventory; inspect the file or the class for it. Local inspection may still build repository-wide relationships, so for a call-site or syntax lookup in a large tree use `search calls` or `search match` with explicit paths.
 

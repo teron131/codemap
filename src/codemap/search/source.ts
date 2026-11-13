@@ -10,33 +10,46 @@ import {
 } from "../source/extraction/index.js";
 import {
   discoverFiles,
+  type FileMetrics,
   isGeneratedPath,
+  isMemberOf,
   isTestPath,
   PYTHON_SUFFIXES,
+  type QualifiedName,
+  qualifiedName,
   relativePath,
+  scanFile,
   TYPESCRIPT_SUFFIXES,
 } from "../source/scanner/index.js";
 import { compareText, escapeRegExp } from "../text-utils.js";
-import { compactSourceMatchText, ripgrepDefinitionMatches, ripgrepMatches } from "./ripgrep.js";
+import {
+  compactSourceMatchText,
+  ripgrepDefinitionMatches,
+  ripgrepMatches,
+  ripgrepOwnerFiles,
+} from "./ripgrep.js";
 import { type SyntaxMatch, SyntaxSearch } from "./structural.js";
 
 const IDENTIFIER_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 const SOURCE_CANDIDATE_LIMIT = 1_000;
 
-const SCRIPT_SYMBOL_KINDS = [
-  "function_declaration",
-  "method_definition",
-  "class_declaration",
-  "lexical_declaration",
-  "variable_declaration",
-];
+// `const`, `let`, and `var` bindings have no kind here: their name sits under a `variable_declarator`, out of reach of the direct-child name test in `symbolMatchConfig`, so the line-pattern lane reports them.
+const SCRIPT_SYMBOL_KINDS = ["function_declaration", "method_definition", "class_declaration"];
+// Class fields are `public_field_definition` in the TypeScript grammars and `field_definition` in the JavaScript ones, and a rule naming a kind its grammar lacks throws.
+const TYPESCRIPT_SYMBOL_KINDS = [...SCRIPT_SYMBOL_KINDS, "public_field_definition"];
+const JAVASCRIPT_SYMBOL_KINDS = [...SCRIPT_SYMBOL_KINDS, "field_definition"];
 const SYMBOL_KINDS_BY_LANGUAGE: Record<string, string[]> = {
-  typescript: SCRIPT_SYMBOL_KINDS,
-  tsx: SCRIPT_SYMBOL_KINDS,
-  javascript: SCRIPT_SYMBOL_KINDS,
-  jsx: SCRIPT_SYMBOL_KINDS,
+  typescript: TYPESCRIPT_SYMBOL_KINDS,
+  tsx: TYPESCRIPT_SYMBOL_KINDS,
+  javascript: JAVASCRIPT_SYMBOL_KINDS,
+  jsx: JAVASCRIPT_SYMBOL_KINDS,
   python: ["function_definition", "class_definition", "assignment"],
 };
+const PROPERTY_NAMED_KINDS = new Set([
+  "method_definition",
+  "public_field_definition",
+  "field_definition",
+]);
 
 export type SourceMatch = {
   engine: "ast-grep" | "path" | "regex" | "rg";
@@ -78,7 +91,10 @@ const SEARCH_STOP_WORDS = new Set([
   "with",
 ]);
 
-/** A multi-word phrase is searched as identifier forms of its terms and keeps only definitions that look callable; candidates are over-fetched so that filter runs before `limit`. */
+/**
+ * A qualified name such as `Model.save` answers with the definitions of `save` that belong to `Model`, and reads as a phrase only when none does.
+ * A multi-word phrase is searched as identifier forms of its terms and keeps only definitions that look callable; candidates are over-fetched so that filter runs before `limit`.
+ */
 export function definitionMatches(
   root: string,
   searchText: string,
@@ -90,16 +106,40 @@ export function definitionMatches(
     limit: number;
   },
 ): SourceMatch[] {
+  const qualified = qualifiedName(searchText);
+  if (qualified !== null) {
+    const members = memberDefinitions(root, qualified, { includeTests });
+    if (members.length > 0) {
+      return rankSourceMatches(members, searchText).slice(0, limit);
+    }
+  }
   const symbols = definitionSymbols(searchText);
   if (symbols.length === 0) {
     return [];
   }
   const phraseIntent = !IDENTIFIER_RE.test(searchText);
-  const candidateLimit =
-    includeTests && !phraseIntent ? limit : Math.max(limit, SOURCE_CANDIDATE_LIMIT);
+  const matches = symbolDefinitions(root, symbols, {
+    paths: ["."],
+    includeTests,
+    callableOnly: phraseIntent,
+    candidateLimit: includeTests && !phraseIntent ? limit : Math.max(limit, SOURCE_CANDIDATE_LIMIT),
+  });
+  return rankSourceMatches(matches, searchText).slice(0, limit);
+}
+
+function symbolDefinitions(
+  root: string,
+  symbols: string[],
+  {
+    paths,
+    includeTests,
+    callableOnly,
+    candidateLimit,
+  }: { paths: string[]; includeTests: boolean; callableOnly: boolean; candidateLimit: number },
+): SourceMatch[] {
   const matches: SourceMatch[] = [];
   const seen = new Set<string>();
-  const symbolGroups = astGrepSymbolMatches(root, symbols, { limit: candidateLimit });
+  const symbolGroups = astGrepSymbolMatches(root, symbols, { limit: candidateLimit, paths });
   for (const [index, symbol] of symbols.entries()) {
     const syntaxMatches = symbolGroups[index] ?? [];
     const syntaxLines = new Set(
@@ -107,7 +147,7 @@ export function definitionMatches(
     );
     const candidates = [
       ...syntaxMatches,
-      ...ripgrepDefinitionMatches(root, symbol, { limit: candidateLimit }).filter(
+      ...ripgrepDefinitionMatches(root, symbol, { limit: candidateLimit, paths }).filter(
         (match) => !syntaxLines.has(JSON.stringify([match.filePath, match.line])),
       ),
     ];
@@ -118,7 +158,7 @@ export function definitionMatches(
       const location = JSON.stringify([match.filePath, match.line, match.column]);
       if (
         (!includeTests && isTestPath(match.filePath)) ||
-        (phraseIntent && !isCallableDefinition(match, symbol)) ||
+        (callableOnly && !isCallableDefinition(match, symbol)) ||
         seen.has(location)
       ) {
         continue;
@@ -127,14 +167,54 @@ export function definitionMatches(
       matches.push(match);
     }
   }
-  return rankSourceMatches(matches, searchText).slice(0, limit);
+  return matches;
 }
 
+/**
+ * Looks only inside the files that declare a class named `owner` or are named for it, at most 1,000 of them, so a common member name costs no whole-tree scan and cannot exhaust the candidate bound elsewhere.
+ * Both names match case-sensitively, unlike a bare symbol, because `transaction.atomic` and `transaction.Atomic` are different definitions.
+ */
+function memberDefinitions(
+  root: string,
+  { owner, member }: QualifiedName,
+  { includeTests }: { includeTests: boolean },
+): SourceMatch[] {
+  const ownerFiles = ripgrepOwnerFiles(root, owner)
+    .filter((filePath) => includeTests || !isTestPath(filePath))
+    .sort(compareText)
+    .slice(0, SOURCE_CANDIDATE_LIMIT);
+  if (ownerFiles.length === 0) {
+    return [];
+  }
+  const metricsByPath = new Map<string, FileMetrics>();
+  // The member as a whole identifier: for `save`, `def save(` matches while `def save_base(` and `def Save(` do not.
+  const exactMember = new RegExp(`(?<![\\w$])${escapeRegExp(member)}(?![\\w$])`);
+  return symbolDefinitions(root, [member], {
+    paths: ownerFiles,
+    includeTests,
+    callableOnly: false,
+    candidateLimit: SOURCE_CANDIDATE_LIMIT,
+  }).filter((match) => {
+    if (!exactMember.test(match.text)) {
+      return false;
+    }
+    let metrics = metricsByPath.get(match.filePath);
+    if (metrics === undefined) {
+      metrics = scanFile(path.join(root, match.filePath), { displayRoot: root });
+      metricsByPath.set(match.filePath, metrics);
+    }
+    return isMemberOf(metrics, owner, match.line);
+  });
+}
+
+// A declaration counts as callable when it is a function, class, or method, or a `const`, `let`, or `var` initialized with a function: `const run = async (` and `const run = (a) => a` pass, `const run = 1` and `const run = (a + b) * 2` do not.
 function isCallableDefinition(match: SourceMatch, symbol: string): boolean {
   const escaped = escapeRegExp(symbol);
   const modifiers = String.raw`(?:(?:export|default|abstract|async|declare|public|protected|private|static|override|readonly)\s+)*`;
   const declaration = String.raw`(?:(?:function|class|def)\s+)?${escaped}(?:\b|\s*\()`;
-  return new RegExp(`^${modifiers}${declaration}`).test(match.text);
+  const functionValue = String.raw`(?:async\s+)?(?:function\b|[A-Za-z_$][\w$]*\s*=>|(?:<[^=]*>\s*)?\((?:.*=>|[^)]*$))`;
+  const binding = String.raw`(?:const|let|var)\s+${escaped}\s*(?::[^=]+)?=\s*${functionValue}`;
+  return new RegExp(`^${modifiers}(?:${declaration}|${binding})`).test(match.text);
 }
 
 /**
@@ -337,10 +417,10 @@ function definitionSymbols(searchText: string): string[] {
 function astGrepSymbolMatches(
   root: string,
   symbols: string[],
-  { limit }: { limit: number },
+  { limit, paths }: { limit: number; paths: string[] },
 ): SourceMatch[][] {
   const groups: SourceMatch[][] = symbols.map(() => []);
-  const search = new SyntaxSearch(root, ["."]);
+  const search = new SyntaxSearch(root, paths);
   const prefilter = new RegExp(symbols.map(escapeRegExp).join("|"));
   for (const [language, kinds] of Object.entries(SYMBOL_KINDS_BY_LANGUAGE)) {
     const matches = search.matchRules(
@@ -366,23 +446,13 @@ function symbolMatchConfig(symbol: string, kinds: string[]): NapiConfig {
   const escaped = escapeRegExp(symbol);
   return {
     rule: {
-      any: kinds.map((kind) =>
-        kind === "method_definition"
-          ? {
-              kind,
-              has: {
-                kind: "property_identifier",
-                regex: `^${escaped}$`,
-              },
-            }
-          : {
-              kind,
-              has: {
-                kind: "identifier",
-                regex: `^${escaped}$`,
-              },
-            },
-      ),
+      any: kinds.map((kind) => ({
+        kind,
+        has: {
+          kind: PROPERTY_NAMED_KINDS.has(kind) ? "property_identifier" : "identifier",
+          regex: `^${escaped}$`,
+        },
+      })),
     },
   };
 }

@@ -28,12 +28,12 @@ export type InspectMetrics = {
   variableDefinitions: VariableDefinitionRow[];
 };
 
-/** Takes a normalized target. */
+/** Takes a normalized target; the third element holds every scanned source file's metrics by project-relative path. */
 export function workingTreeInspectGraph(
   root: string,
   target: string,
   inventory: InventoryEntry[],
-): [GraphPayload, InspectMetrics] {
+): [GraphPayload, InspectMetrics, Record<string, FileMetrics | undefined>] {
   const importResult = runImportMap(root, inventory);
   const fileMetricsByPath = importResult.fileMetrics;
   const emitPaths = inspectEmitPaths(
@@ -46,7 +46,7 @@ export function workingTreeInspectGraph(
   const structureFiles =
     emitPaths === null ? inventory : inventory.filter((item) => emitPaths.has(item.path));
   const graph = buildWorkingTreeGraph(root, inventory, importResult, { emitPaths });
-  return [graph, metricsForFiles(root, structureFiles, fileMetricsByPath)];
+  return [graph, metricsForFiles(root, structureFiles, fileMetricsByPath), fileMetricsByPath];
 }
 
 /** Returns `[incoming, outgoing]` imports that cross the boundary of `filePaths`, each formatted `source -> target`. */

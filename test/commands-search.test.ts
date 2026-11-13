@@ -543,6 +543,96 @@ describe("search command handler", () => {
     expect(output).not.toContain("target/generated.ts");
   });
 
+  it("resolves a qualified name to that class's member, not a same-named or nested definition", async () => {
+    writeFileSync(
+      path.join(workDir, "src", "stores.ts"),
+      [
+        "export class Cache {",
+        "  save() {",
+        "    return 1;",
+        "  }",
+        "}",
+        "export class Store {",
+        "  save() {",
+        "    return 2;",
+        "  }",
+        "  load() {",
+        "    const save = () => 3;",
+        "    return save();",
+        "  }",
+        "  flush = () => 4;",
+        "}",
+      ].join("\n"),
+    );
+    writeFileSync(
+      path.join(workDir, "src", "models.py"),
+      ["class Store:", "    def save(self):", "        pass", "", "def save():", "    pass"].join(
+        "\n",
+      ),
+    );
+    writeFileSync(
+      path.join(workDir, "src", "consumer.ts"),
+      "// Store.save() persists\nstore.save();\n",
+    );
+
+    await expect(commandSearch(["Store.save"], { projectRoot: workDir })).resolves.toBe(0);
+
+    expect(logLines().filter((line) => line.includes("[symbol]"))).toEqual([
+      "  - ast-grep src/stores.ts:7:3 [symbol]",
+      "  - ast-grep src/models.py:2:5 [symbol]",
+    ]);
+    expect(logLines().join("\n")).not.toContain("consumer.ts");
+
+    logSpy.mockClear();
+    await expect(commandSearch(["Store.flush"], { projectRoot: workDir })).resolves.toBe(0);
+    expect(logLines().join("\n")).toContain("ast-grep src/stores.ts:14:3 [symbol]");
+  });
+
+  it("resolves a module-qualified name case-sensitively to that file's top-level definition", async () => {
+    writeFileSync(
+      path.join(workDir, "src", "transaction.py"),
+      [
+        "class Atomic:",
+        "    def atomic(self):",
+        "        pass",
+        "",
+        "def atomic():",
+        "    return Atomic()",
+      ].join("\n"),
+    );
+    writeFileSync(path.join(workDir, "src", "other.py"), "def atomic():\n    pass\n");
+
+    await expect(commandSearch(["db.transaction.atomic"], { projectRoot: workDir })).resolves.toBe(
+      0,
+    );
+
+    expect(logLines().filter((line) => line.includes("[symbol]"))).toEqual([
+      "  - ast-grep src/transaction.py:5:1 [symbol]",
+    ]);
+  });
+
+  it("reads a qualified name as a phrase when no owner defines the member", async () => {
+    writeFileSync(path.join(workDir, "src", "legacy.py"), "def model_save():\n    pass\n");
+
+    await expect(commandSearch(["model.save"], { projectRoot: workDir })).resolves.toBe(0);
+
+    expect(logLines().join("\n")).toContain("src/legacy.py:1:1 [symbol]");
+  });
+
+  it("resolves a phrase to a constant initialized with a function, not one holding state", async () => {
+    writeFileSync(path.join(workDir, "src", "state.ts"), "export const deleteSelected = 1;\n");
+    writeFileSync(
+      path.join(workDir, "src", "action.ts"),
+      ["const deleteSelected = (", "  ids: string[],", ") => ids;"].join("\n"),
+    );
+
+    await expect(commandSearch(["delete selected"], { projectRoot: workDir })).resolves.toBe(0);
+
+    const output = logLines().join("\n");
+    expect(output).toContain("src/action.ts:1:1 [symbol]");
+    expect(output).not.toContain("src/state.ts");
+  });
+
   it("searches inferred TypeScript and Python with bundled parsers", async () => {
     writeFileSync(path.join(workDir, "src", "mixed.ts"), "print('typescript');\n", "utf8");
     writeFileSync(path.join(workDir, "src", "mixed.py"), "print('python')\n", "utf8");
