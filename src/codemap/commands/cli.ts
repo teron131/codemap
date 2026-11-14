@@ -1,8 +1,9 @@
 /** Builds the commander program and runs it with stdout captured, so the output budget applies once to the whole output. */
 import { Command, CommanderError } from "commander";
 
+import { codebaseMemoryOutage } from "../codebase-memory/index.js";
 import { CODEMAP_VERSION } from "../version.js";
-import { addBackendParsers, addIndexParser } from "./backend.js";
+import { addBackendParsers, addIndexParser, backendReasonLines } from "./backend.js";
 import { addInspectParser } from "./inspect.js";
 import { PROJECT_ROOT_HELP } from "./options.js";
 import { applyOutputBudget } from "./output.js";
@@ -11,6 +12,8 @@ import { addSignalsParser } from "./signals.js";
 import { addSummaryParser } from "./summary.js";
 
 const COMMAND_NAMES = new Set(["backend", "index", "inspect", "search", "signals", "summary"]);
+// Commands that answer from the working tree when the backend cannot run; `backend` and `index` report its failure themselves.
+const FALLBACK_COMMAND_NAMES = new Set(["inspect", "search", "signals", "summary"]);
 
 /** Uses `exitOverride`, so usage errors and `--help` throw `CommanderError` for `dispatch` to map instead of exiting the process. */
 export function buildParser(): Command {
@@ -30,6 +33,11 @@ export function buildParser(): Command {
   addInspectParser(program);
   addBackendParsers(program);
   addIndexParser(program);
+  for (const command of program.commands) {
+    if (FALLBACK_COMMAND_NAMES.has(command.name())) {
+      command.hook("postAction", printOutageNotice);
+    }
+  }
   return program;
 }
 
@@ -91,6 +99,18 @@ export function run(): void {
       process.exitCode = exitCode;
     }
   });
+}
+
+/** Runs after the action and before `main` writes the buffered answer, so the notice opens the output: a fallback answer otherwise reads as complete, and in a command sandbox every answer falls back. */
+function printOutageNotice(): void {
+  const reason = codebaseMemoryOutage();
+  if (reason !== null) {
+    const lines = [
+      "codemap: Codebase Memory could not run, so nothing below comes from it.",
+      ...backendReasonLines(reason),
+    ];
+    process.stderr.write(`${lines.join("\n")}\n`);
+  }
 }
 
 /** Restores the script placeholder some launchers omit: `[node, "search", "x"]` → `[node, "codemap", "search", "x"]`. */

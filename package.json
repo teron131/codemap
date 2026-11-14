@@ -1,7 +1,7 @@
 {
   "$schema": "https://www.schemastore.org/package.json",
   "name": "codemap",
-  "version": "0.13.1",
+  "version": "0.14.0",
   "private": true,
   "description": "Opinionated Codebase Memory, rg, and ast-grep source inspection CLI.",
   "type": "module",
@@ -24,8 +24,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@ast-grep/lang-python": "^0.0.6",
-    "@ast-grep/napi": "^0.45.2",
+    "@ast-grep/cli": "^0.51.2",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "commander": "^15.0.0",
     "mdast-util-from-markdown": "^2.0.3",

@@ -324,7 +324,7 @@ describe("search command handler", () => {
     }
   });
 
-  it("uses the bundled Python parser and keeps repeated same-line calls", async () => {
+  it("finds Python calls without ast-grep on PATH and keeps repeated same-line calls", async () => {
     writeFileSync(
       path.join(workDir, "src", "calls.py"),
       "def helper():\n    pass\n\nhelper(); helper()\n",
@@ -633,7 +633,51 @@ describe("search command handler", () => {
     expect(output).not.toContain("src/state.ts");
   });
 
-  it("searches inferred TypeScript and Python with bundled parsers", async () => {
+  it("matches a language the working tree scanner cannot parse", async () => {
+    writeFileSync(path.join(workDir, "src", "run.go"), "package run\n\nfunc Run() {}\n", "utf8");
+
+    await expect(
+      dispatch(buildParser(), [
+        "node",
+        "codemap",
+        "search",
+        "match",
+        "--project-root",
+        workDir,
+        "--lang",
+        "go",
+        "--pattern",
+        "func $NAME() {}",
+        "src",
+      ]),
+    ).resolves.toBe(0);
+
+    expect(logLines().join("\n")).toContain("src/run.go:3:1: func Run() {}");
+  });
+
+  it("refuses call search in a language without call patterns instead of reporting no matches", async () => {
+    writeFileSync(path.join(workDir, "src", "run.go"), "package run\n\nfunc Run() {}\n", "utf8");
+
+    await expect(
+      dispatch(buildParser(), [
+        "node",
+        "codemap",
+        "search",
+        "calls",
+        "--project-root",
+        workDir,
+        "--lang",
+        "go",
+        "Run",
+      ]),
+    ).resolves.toBe(127);
+
+    const output = logLines().join("\n");
+    expect(output).toContain("call search has no grammar for go");
+    expect(output).not.toContain("No matches");
+  });
+
+  it("searches inferred TypeScript and Python without ast-grep on PATH", async () => {
     writeFileSync(path.join(workDir, "src", "mixed.ts"), "print('typescript');\n", "utf8");
     writeFileSync(path.join(workDir, "src", "mixed.py"), "print('python')\n", "utf8");
     vi.stubEnv("PATH", "");
@@ -662,7 +706,7 @@ describe("search command handler", () => {
     }
   });
 
-  it("runs Python rule search with the bundled parser", async () => {
+  it("runs a Python rule search without ast-grep on PATH", async () => {
     writeFileSync(
       path.join(workDir, "python-rule.yml"),
       ["id: python-functions", "language: python", "rule:", "  kind: function_definition"].join(
@@ -690,7 +734,29 @@ describe("search command handler", () => {
     expect(logLines().join("\n")).toContain("src/rule.py:1:1: def run(): ...");
   });
 
-  it("reports an unavailable rule engine instead of a valid empty result", async () => {
+  it("matches a pattern that parses only through error recovery, as ast-grep run does", async () => {
+    writeFileSync(path.join(workDir, "src", "save.py"), "def save(self):\n    pass\n", "utf8");
+
+    await expect(
+      dispatch(buildParser(), [
+        "node",
+        "codemap",
+        "search",
+        "match",
+        "--project-root",
+        workDir,
+        "--lang",
+        "python",
+        "--pattern",
+        "def save($$$)",
+        "src",
+      ]),
+    ).resolves.toBe(0);
+
+    expect(logLines().join("\n")).toContain("src/save.py:1:1: def save(self): ...");
+  });
+
+  it("reports ast-grep's reason for a rule it rejects instead of an empty result", async () => {
     writeFileSync(
       path.join(workDir, "rust-rule.yml"),
       [
@@ -717,10 +783,12 @@ describe("search command handler", () => {
           "rust-rule.yml",
           "src",
         ]),
-      ).resolves.toBe(127);
+      ).resolves.toBe(2);
 
       expect(logLines()).toEqual([]);
-      expect(errorSpy).toHaveBeenCalledWith("Unavailable: ast-grep cannot run this rule language.");
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining("Kind `function_definition` is invalid"),
+      );
     } finally {
       errorSpy.mockRestore();
     }
@@ -1036,6 +1104,28 @@ describe("search command handler", () => {
     expect(output).not.toContain("Retry helpers for transient failures.");
   });
 
+  it("finds source in a language the working tree cannot parse by path and by terms", async () => {
+    writeFileSync(
+      path.join(workDir, "src", "Motion.swift"),
+      "// Reduce motion\nfunc animation() {}\n",
+      "utf8",
+    );
+    writeFileSync(path.join(workDir, "src", "notes.py"), "# reduce noise\n", "utf8");
+
+    await expect(
+      commandSearch(["Motion.swift"], { projectRoot: workDir, limit: "10" }),
+    ).resolves.toBe(0);
+    expect(logLines().join("\n")).toContain("src/Motion.swift [file]");
+    logSpy.mockClear();
+
+    await expect(
+      commandSearch(["reduce", "motion", "animation"], { projectRoot: workDir, limit: "10" }),
+    ).resolves.toBe(0);
+    const output = logLines().join("\n");
+    expect(output).toContain("src/Motion.swift [terms 3/3: reduce, motion, animation]");
+    expect(output).not.toContain("src/notes.py");
+  });
+
   it.each([1, 4])("retains earlier co-occurrence among %i complete candidates", async (count) => {
     writeFileSync(
       path.join(workDir, "src", "z-owner.ts"),
@@ -1171,7 +1261,7 @@ describe("search command handler", () => {
 
     const output = logLines().join("\n");
     expect(output).toContain(
-      "Graph fallback: Codebase Memory graph search returned no answer; used working-tree relationship graph.",
+      "Graph fallback: Codebase Memory is unavailable; used working-tree relationship graph.",
     );
     expect(output).toContain("\nRelationship matches:");
     expect(output).toContain("src/helper.ts: code file");

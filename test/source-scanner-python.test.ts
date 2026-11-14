@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { runImportMap } from "../src/codemap/source/extraction/index.js";
 import { inventoryEntry } from "../src/codemap/source/extraction/inventory.js";
-import { scanFile, scanPythonFile } from "../src/codemap/source/scanner/index.js";
+import { scanFile } from "../src/codemap/source/scanner/index.js";
 
 const workspaceRoot = process.cwd();
 let workDir: string;
@@ -47,7 +47,7 @@ describe("Python scanner", () => {
     );
     const helper = path.join(workDir, "helper.py");
     writeFileSync(helper, "def helper(value): return value\n");
-    const metrics = scanPythonFile(file, { relPath: "main.py" });
+    const metrics = scanFile(file, { displayRoot: workDir });
     expect(metrics.functionNames).toEqual(["run", "nested"]);
     expect(metrics.variableNames).toEqual(
       expect.arrayContaining(["left", "middle", "right", "EXAMPLE", "example"]),
@@ -62,19 +62,6 @@ describe("Python scanner", () => {
         .importMap["main.py"],
     ).toEqual(["helper.py"]);
   });
-  it("uses supplied source for one scan without caching it across later scans", () => {
-    const filePath = path.join(workDir, "api.py");
-    writeFileSync(filePath, "def disk_version():\n    pass\n");
-    const options = { displayRoot: workDir };
-
-    expect(
-      scanFile(filePath, { ...options, source: "def snapshot_version():\n    pass\n" })
-        .functionNames,
-    ).toEqual(["snapshot_version"]);
-    expect(scanFile(filePath, { ...options, source: "" }).functionNames).toEqual([]);
-    expect(scanFile(filePath, options).functionNames).toEqual(["disk_version"]);
-  });
-
   it("keeps overload stubs separate from the implementation span", () => {
     const filePath = path.join(workDir, "api.py");
     writeFileSync(
@@ -97,7 +84,7 @@ describe("Python scanner", () => {
       "utf8",
     );
 
-    const metrics = scanPythonFile(filePath, { relPath: "api.py" });
+    const metrics = scanFile(filePath, { displayRoot: workDir });
     const spans = metrics.functionSpans
       .filter((span) => span.name === "build")
       .map((span) => span.span);

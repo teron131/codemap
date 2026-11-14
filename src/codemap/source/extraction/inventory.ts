@@ -2,8 +2,10 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
+import { compareText, uniqueStrings } from "../../text-utils.js";
 import {
   discoverFiles,
+  isSupportedSourcePath,
   relativePath,
   sourceLineCount,
   TYPESCRIPT_LANG_BY_SUFFIX,
@@ -22,6 +24,7 @@ export const LANGUAGE_BY_SUFFIX: Record<string, string> = {
   ".cc": "cpp",
   ".conf": "config",
   ".cpp": "cpp",
+  ".cs": "csharp",
   ".css": "css",
   ".eex": "eex",
   ".erl": "erlang",
@@ -33,20 +36,28 @@ export const LANGUAGE_BY_SUFFIX: Record<string, string> = {
   ".heex": "heex",
   ".hpp": "cpp-header",
   ".hrl": "erlang-header",
+  ".hs": "haskell",
   ".html": "html",
   ".java": "java",
   ".json": "json",
   ".jsonc": "jsonc",
+  ".kt": "kotlin",
+  ".kts": "kotlin",
   ".livemd": "markdown",
+  ".lua": "lua",
   ".md": "markdown",
   ".mmd": "mermaid",
+  ".php": "php",
   ".prisma": "prisma",
   ".proto": "protobuf",
   ".py": "python",
+  ".rb": "ruby",
   ".rs": "rust",
   ".rules": "rules",
+  ".scala": "scala",
   ".sh": "shell",
   ".sql": "sql",
+  ".swift": "swift",
   ".toml": "toml",
   ".yaml": "yaml",
   ".yml": "yaml",
@@ -76,13 +87,32 @@ export function buildInventory(
 
 export function inventoryEntry(root: string, filePath: string): InventoryEntry {
   const relPath = relativePath(filePath, { displayRoot: root });
-  const suffix = path.extname(filePath);
   return {
     path: relPath,
-    language: LANGUAGE_BY_SUFFIX[suffix] ?? (suffix.replace(/^\./, "") || "unknown"),
+    language: languageForPath(filePath),
     fileCategory: categoryForPath(relPath),
     sizeLines: countLines(filePath),
   };
+}
+
+/** Names a file's language from its suffix, falling back to the bare suffix and then `unknown`: `a.go` → `go`, `a.zig` → `zig`, `Makefile` → `unknown`. */
+export function languageForPath(filePath: string): string {
+  const suffix = path.extname(filePath);
+  return LANGUAGE_BY_SUFFIX[suffix] ?? (suffix.replace(/^\./, "") || "unknown");
+}
+
+/** Sorted languages of the paths the working-tree scanner cannot parse, which only Codebase Memory can describe; a file without a suffix counts as `unsuffixed files`. */
+export function backendOnlyLanguages(filePaths: string[]): string[] {
+  return uniqueStrings(
+    filePaths
+      .filter((filePath) => !isSupportedSourcePath(filePath))
+      .map((filePath) => (path.extname(filePath) ? languageForPath(filePath) : "unsuffixed files")),
+  ).sort(compareText);
+}
+
+/** The status line every command prints above evidence that includes backend-only languages. */
+export function backendOnlyCoverageLine(languages: string[]): string {
+  return `coverage: backend only for ${languages.join(", ")}; working tree not parsed`;
 }
 
 function countLines(filePath: string): number {

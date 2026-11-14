@@ -7,6 +7,10 @@ import {
   withFreshCodebaseMemoryProject,
 } from "../../codebase-memory/index.js";
 import { arrayValue, numberField, recordValue, stringField } from "../../json-utils.js";
+import {
+  BACKEND_DEFINITION_COLUMNS,
+  backendDefinitionsQuery,
+} from "../../source/extraction/index.js";
 import { isTestPath } from "../../source/scanner/index.js";
 import { uniqueStrings } from "../../text-utils.js";
 import type { ClusterSummary, MostCalledSymbol } from "../schema.js";
@@ -24,17 +28,25 @@ type Architecture = Record<string, unknown>;
 export type RelationshipEvidence = {
   architecture: Architecture;
   relationships: RelationshipRow[];
+  /** Definition rows for files the working-tree scanner cannot parse, as `backendFileMetrics` reads them. */
+  backendDefinitions: Record<string, unknown>[];
 };
+
+// Codebase Memory's names for the languages the working-tree scanner parses.
+const SCANNED_LANGUAGES = new Set(["Python", "TypeScript", "JavaScript"]);
+
+// Bounds one query; past it the unparsed languages lose the location of some symbols, never a whole section.
+const BACKEND_DEFINITION_LIMIT = 50_000;
 
 const IMPORT_RELATIONSHIPS_QUERY =
   "MATCH (a:File)-[r:IMPORTS]->(b:Module) RETURN a.file_path AS source, b.file_path AS target, count(r) AS weight";
 const CALL_RELATIONSHIPS_QUERY =
   "MATCH (a)-[r:CALLS]->(b) RETURN a.file_path AS source, b.file_path AS target, count(r) AS weight";
 
-/** Null when the backend is unavailable or reports an empty architecture; a relationship query that fails contributes no rows. */
+/** Null when the backend is unavailable or reports an empty architecture; a relationship or definition query that fails contributes no rows. `scannedFileCount` counts the files the working-tree scanner parsed. */
 export function fetchRelationshipEvidence(
   root: string,
-  sourceFileCount: number,
+  scannedFileCount: number,
 ): RelationshipEvidence | null {
   return withFreshCodebaseMemoryProject(root, (project) => {
     const architectureResult = callCodebaseMemoryTool("get_architecture", {
@@ -44,12 +56,24 @@ export function fetchRelationshipEvidence(
     if (!architectureResult.ok || !hasRelationshipEvidence(architectureResult.value)) {
       return null;
     }
+    const definitionsResult = indexesUnscannedLanguage(architectureResult.value)
+      ? callCodebaseMemoryTool("query_graph", {
+          project: project.name,
+          query: backendDefinitionsQuery(null),
+          max_rows: BACKEND_DEFINITION_LIMIT,
+        })
+      : null;
+    const backendDefinitions = definitionsResult?.ok
+      ? (codebaseMemoryQueryRows(definitionsResult.value, BACKEND_DEFINITION_COLUMNS) ?? [])
+      : [];
+    const fileCount =
+      scannedFileCount + new Set(backendDefinitions.map((row) => row.file_path)).size;
     const relationships = [IMPORT_RELATIONSHIPS_QUERY, CALL_RELATIONSHIPS_QUERY].flatMap(
       (query) => {
         const result = callCodebaseMemoryTool("query_graph", {
           project: project.name,
           query,
-          max_rows: Math.max(1, sourceFileCount ** 2),
+          max_rows: Math.max(1, fileCount ** 2),
         });
         const rows = result.ok
           ? (codebaseMemoryQueryRows(result.value, ["source", "target", "weight"]) ?? [])
@@ -57,7 +81,11 @@ export function fetchRelationshipEvidence(
         return rows.flatMap(relationshipRow);
       },
     );
-    return { architecture: recordValue(architectureResult.value), relationships };
+    return {
+      architecture: recordValue(architectureResult.value),
+      relationships,
+      backendDefinitions,
+    };
   });
 }
 
@@ -265,6 +293,15 @@ function commonOwnerPath(files: string[]): string | null {
     commonParts.push(part);
   }
   return commonParts.length > 1 ? commonParts.join("/") : null;
+}
+
+/** False only when the backend lists its indexed languages and the scanner parses all of them: each backend call starts a process, so such a project skips the definitions query. */
+function indexesUnscannedLanguage(architecture: unknown): boolean {
+  const languages = tableRows(recordValue(architecture).languages);
+  return (
+    languages.length === 0 ||
+    languages.some((row) => !SCANNED_LANGUAGES.has(stringField(row.language) ?? ""))
+  );
 }
 
 function namedCount(value: unknown, nameKey: string, expectedName: string): number {

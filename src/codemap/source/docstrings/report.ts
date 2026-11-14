@@ -1,6 +1,8 @@
 /** Builds docstring signal reports and previews for supported source files. */
+import { readFileSync } from "node:fs";
 import path from "node:path";
 
+import { scanSyntax } from "../../ast-grep.js";
 import { isDirectory, isFile } from "../../path-utils.js";
 import {
   discoverFiles,
@@ -16,8 +18,8 @@ import {
   LIKELY_MAIN_FUNCTION_NAMES,
   LIKELY_MAIN_FUNCTION_PREFIXES,
 } from "./models.js";
-import { buildPythonFileReport } from "./python.js";
-import { buildTypescriptFileReport } from "./typescript.js";
+import { PYTHON_DOCSTRING_RULES, pythonFileReport } from "./python.js";
+import { TYPESCRIPT_DOCSTRING_RULES, typescriptFileReport } from "./typescript.js";
 
 type FunctionPayload = {
   name: string;
@@ -266,16 +268,50 @@ export function collectReports(
       ? supportedFocusPaths(resolveFocusPathsInOrder(focusFiles, { moduleRoot }))
       : collectSupportedFiles(targetPath);
 
-  const reports: FileReport[] = [];
-  for (const filePath of supportedFiles) {
-    const shownPath = relativePath(filePath, { displayRoot: moduleRoot });
-    if (PYTHON_SUFFIXES.has(path.extname(filePath))) {
-      reports.push(buildPythonFileReport(filePath, { displayPath: shownPath }));
-    } else {
-      reports.push(buildTypescriptFileReport(filePath, { displayPath: shownPath }));
+  return [
+    moduleRoot,
+    buildFileReports(
+      supportedFiles.map((filePath) => ({
+        filePath,
+        displayPath: relativePath(filePath, { displayRoot: moduleRoot }),
+      })),
+    ),
+  ];
+}
+
+/** Reads every file once and parses them all in one ast-grep run; an unreadable file reports the read error as its `parseError`. */
+function buildFileReports(files: Array<{ filePath: string; displayPath: string }>): FileReport[] {
+  const sources = new Map<string, string>();
+  const reports = files.map(({ filePath, displayPath }): FileReport => {
+    const report: FileReport = {
+      path: filePath,
+      displayPath,
+      fileDocstring: null,
+      functions: [],
+      classes: [],
+      parseError: null,
+    };
+    try {
+      sources.set(filePath, readFileSync(filePath, "utf8"));
+    } catch (error) {
+      report.parseError = error instanceof Error ? error.message : String(error);
     }
-  }
-  return [moduleRoot, reports];
+    return report;
+  });
+  const matches = scanSyntax(
+    [...sources.keys()],
+    [...PYTHON_DOCSTRING_RULES, ...TYPESCRIPT_DOCSTRING_RULES],
+  );
+  return reports.map((report) => {
+    const source = sources.get(report.path);
+    if (source === undefined) {
+      return report;
+    }
+    const fileMatches = matches.get(report.path) ?? [];
+    return PYTHON_SUFFIXES.has(path.extname(report.path))
+      ? pythonFileReport(report, fileMatches)
+      : typescriptFileReport(report, { source, matches: fileMatches });
+  });
 }
 
 /** Parses the file afresh; callers already holding its report use `symbolDocstring`. */
@@ -297,10 +333,8 @@ export function docstringForSymbol(
   if (!DOCSTRING_SUFFIXES.has(suffix)) {
     return null;
   }
-  const report = PYTHON_SUFFIXES.has(suffix)
-    ? buildPythonFileReport(filePath, { displayPath })
-    : buildTypescriptFileReport(filePath, { displayPath });
-  return symbolDocstring(report, { kind, name, line });
+  const [report] = buildFileReports([{ filePath, displayPath }]);
+  return symbolDocstring(report!, { kind, name, line });
 }
 
 /** Matches a symbol against an existing report so one operation can reuse its file parse; `line` 0 accepts the first definition with that name. */

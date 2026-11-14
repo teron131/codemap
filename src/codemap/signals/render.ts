@@ -1,5 +1,6 @@
 /** Text rendering for `signals`, one Markdown section per payload section. Ranking headings state their sort criteria without judging the rows. */
 import { arrayValue, numberValue, recordValue } from "../json-utils.js";
+import { backendOnlyCoverageLine } from "../source/extraction/index.js";
 import { languageRows, rankDefinitionRowsByMentions, rankFunctionRowsByLength } from "./payload.js";
 import type { SignalRow, SignalSection } from "./schema.js";
 
@@ -28,6 +29,10 @@ export function renderSignalText(payload: Record<string, unknown>, section: Sign
       `coverage: bounded working tree; parsed=${numberValue(coverage.parsedFiles)}, eligible=${numberValue(coverage.eligibleFiles)}`,
       "",
     );
+  }
+  const backendOnlyLanguages = arrayValue<string>(payload.backendOnlyLanguages);
+  if (backendOnlyLanguages.length > 0) {
+    lines.push(backendOnlyCoverageLine(backendOnlyLanguages), "");
   }
   if ("stats" in payload) {
     appendSignalStats(lines, recordValue(payload.stats));

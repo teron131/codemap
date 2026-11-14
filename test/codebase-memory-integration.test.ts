@@ -1586,7 +1586,7 @@ describe("Codebase Memory integration", () => {
       expect(commandBackendStatus({ projectRoot: workDir })).toBe(1);
       const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
 
-      expect(output).toContain("No Codebase Memory index for this project.");
+      expect(output).toContain("Could not read Codebase Memory status.");
       expect(output).toContain("reason: Index refresh failed: project not found or not indexed");
       expect(codebaseMemoryFailureReason(workDir)).toBe(
         "Index refresh failed: project not found or not indexed",
@@ -1594,6 +1594,34 @@ describe("Codebase Memory integration", () => {
     } finally {
       logSpy.mockRestore();
     }
+  });
+
+  it("opens a fallback answer's stderr with the outage reason and the sandbox remedy", async () => {
+    mkdirSync(path.join(workDir, "src"), { recursive: true });
+    writeFileSync(path.join(workDir, "src", "needle.ts"), "export const needle = 1;\n", "utf8");
+    stubSocketDeniedBackend();
+
+    const result = await runFreshMain(["search", "--graph", "--project-root", workDir, "needle"]);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toContain(
+      "codemap: Codebase Memory could not run, so nothing below comes from it.",
+    );
+    expect(result.stderr).toContain("socket_bind failed with EPERM");
+    expect(result.stderr).toContain("rerun codemap outside the sandbox");
+    expect(result.stdout).toContain("Graph fallback: Codebase Memory is unavailable");
+  });
+
+  it("names the sandbox remedy in a backend diagnostic's own failure instead of a separate notice", async () => {
+    stubSocketDeniedBackend();
+
+    const result = await runFreshMain(["backend", "status", "--project-root", workDir]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain("Could not read Codebase Memory status.");
+    expect(result.stdout).toContain("socket_bind failed with EPERM");
+    expect(result.stdout).toContain("rerun codemap outside the sandbox");
+    expect(result.stderr).not.toContain("codemap: Codebase Memory could not run");
   });
 
   it("adds bounded backend function metrics without graph decoration", () => {
@@ -1619,6 +1647,22 @@ describe("Codebase Memory integration", () => {
         query: expect.stringContaining("f.is_test = false"),
       });
       expect(readIndexCalls()).toHaveLength(1);
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it("ranks backend function metrics in a language the working tree cannot parse", () => {
+    mkdirSync(path.join(workDir, "cmd"), { recursive: true });
+    writeFileSync(path.join(workDir, "cmd", "run.go"), "package cmd\n\nfunc Run() {}\n", "utf8");
+    vi.stubEnv("CODEBASE_MEMORY_MOCK_GO_METRICS", "1");
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      expect(commandSignals("top", { projectRoot: workDir })).toBe(0);
+      const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+
+      expect(output).toContain("coverage: backend only for go; working tree not parsed");
+      expect(output).toContain("cmd/run.go:3 Run: cognitive=12, cyclomatic=7, lines=9");
     } finally {
       logSpy.mockRestore();
     }
@@ -1727,6 +1771,43 @@ describe("Codebase Memory integration", () => {
     }
   });
 });
+
+/** Replaces the backend with one that fails as Codebase Memory 0.12 does inside a command sandbox. */
+function stubSocketDeniedBackend(): void {
+  const backendPath = path.join(workDir, "denied-backend");
+  writeFileSync(
+    backendPath,
+    [
+      "#!/usr/bin/env node",
+      'process.stderr.write("codebase-memory-mcp: CBM daemon failed to start: socket_bind failed with EPERM (Operation not permitted)\\n");',
+      "process.exitCode = 1;",
+    ].join("\n"),
+    "utf8",
+  );
+  chmodSync(backendPath, 0o755);
+  vi.stubEnv("CODEMAP_CODEBASE_MEMORY_COMMAND", backendPath);
+}
+
+/** Runs the CLI entry on a fresh module graph, because the outage is recorded once per process and earlier tests' backend calls would otherwise hide it. */
+async function runFreshMain(
+  args: string[],
+): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  vi.resetModules();
+  const { main } = await import("../src/codemap/commands/cli.js");
+  const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+  const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+  try {
+    const exitCode = await main(["node", "codemap", ...args]);
+    return {
+      exitCode,
+      stdout: logSpy.mock.calls.map((call) => call.join(" ")).join("\n"),
+      stderr: stderrSpy.mock.calls.map((call) => String(call[0])).join(""),
+    };
+  } finally {
+    logSpy.mockRestore();
+    stderrSpy.mockRestore();
+  }
+}
 
 function readIndexCalls(): unknown[] {
   const logPath = path.join(workDir, "index-calls.jsonl");
@@ -2164,6 +2245,7 @@ const payloads = {
 	        "name",
 	        "file_path",
 	        "start_line",
+	        "end_line",
 	        "lines",
 	        "complexity",
 	        "cognitive",
@@ -2176,6 +2258,7 @@ const payloads = {
 	              "src/candidate.test.ts",
 	              1,
 	              1,
+	              1,
 	              200 - index,
 	              300 - index,
 	              0,
@@ -2183,6 +2266,7 @@ const payloads = {
 	            ...Array.from({ length: 20 }, (_, index) => [
 	              "production" + index,
 	              "src/production" + index + ".ts",
+	              1,
 	              1,
 	              1,
 	              20 - index,
@@ -2196,11 +2280,14 @@ const payloads = {
 	            "src/backend" + index + ".ts",
 	            1,
 	            1,
+	            1,
 	            11 + index,
 	            20 + index,
 	            0,
 	          ])
-	        : [["app", "src/app.ts", 1, 3, 11, 20, 0]],
+	        : process.env.CODEBASE_MEMORY_MOCK_GO_METRICS === "1"
+	        ? [["Run", "cmd/run.go", 3, 11, 0, 7, 12, 0]]
+	        : [["app", "src/app.ts", 1, 3, 3, 11, 20, 0]],
 	      total: 1,
 	    }
 	  : process.env.CODEBASE_MEMORY_MOCK_JSON_STRING_QUERY === "1"

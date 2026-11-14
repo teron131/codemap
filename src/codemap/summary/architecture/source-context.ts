@@ -9,14 +9,14 @@ import {
   type FileReport,
   symbolDocstring,
 } from "../../source/docstrings/index.js";
-import { ImportResolver } from "../../source/extraction/index.js";
+import { ImportResolver, languageForPath } from "../../source/extraction/index.js";
 import {
   discoverFiles,
   type FileMetrics,
   isGeneratedPath,
   isSupportedSourcePath,
   isTestPath,
-  scanFile,
+  scanFiles,
 } from "../../source/scanner/index.js";
 import { compareText } from "../../text-utils.js";
 import type { LanguageSummary } from "../schema.js";
@@ -38,11 +38,11 @@ export type SourceContext = {
   resolver: ImportResolver;
 };
 
-/** Measures supported authored languages by source bytes, matching GitHub's basic convention. */
+/** Measures authored languages by source bytes, matching GitHub's basic convention; files without a suffix are left out. */
 export function languageSummaries(source: SourceContext): LanguageSummary[] {
   const bytesByLanguage = new Map<string, number>();
   for (const metrics of source.files) {
-    const language = languageName(metrics.suffix);
+    const language = languageName(metrics.relPath);
     if (language === null) {
       continue;
     }
@@ -60,18 +60,29 @@ export function languageSummaries(source: SourceContext): LanguageSummary[] {
     .map(([name, bytes]) => ({ name, share: bytes / totalBytes }));
 }
 
+// GitHub's names for the inventory languages whose capitalized identifier is not one; syntax variants and headers join their language.
+const GITHUB_LANGUAGE_NAMES: Record<string, string> = {
+  javascript: "JavaScript",
+  jsx: "JavaScript",
+  typescript: "TypeScript",
+  tsx: "TypeScript",
+  "c-header": "C",
+  cpp: "C++",
+  "cpp-header": "C++",
+  csharp: "C#",
+  "erlang-header": "Erlang",
+  php: "PHP",
+};
+
 /** Groups syntax variants under the language names GitHub users expect. */
-function languageName(suffix: string): string | null {
-  if (suffix === ".py") {
-    return "Python";
+function languageName(relPath: string): string | null {
+  if (!path.extname(relPath)) {
+    return null;
   }
-  if ([".ts", ".tsx", ".mts", ".cts"].includes(suffix)) {
-    return "TypeScript";
-  }
-  if ([".js", ".jsx", ".mjs", ".cjs"].includes(suffix)) {
-    return "JavaScript";
-  }
-  return null;
+  const language = languageForPath(relPath);
+  return (
+    GITHUB_LANGUAGE_NAMES[language] ?? `${language[0]?.toUpperCase() ?? ""}${language.slice(1)}`
+  );
 }
 
 /** Discovers the tree once and scans supported production source for exports and symbol descriptions. */
@@ -81,7 +92,7 @@ export function buildSourceContext(root: string): SourceContext {
     const relative = path.relative(root, filePath).split(path.sep).join("/");
     return isSupportedSourcePath(relative) && !isGeneratedPath(relative) && !isTestPath(relative);
   });
-  const files = sourcePaths.map((filePath) => scanFile(filePath, { displayRoot: root }));
+  const files = scanFiles(sourcePaths, { displayRoot: root });
   const filesByPath = new Map(files.map((metrics) => [metrics.relPath, metrics]));
   const filePaths = new Set(files.map((metrics) => metrics.relPath));
   const symbolsByName = new Map<string, SourceSymbol[]>();
@@ -111,6 +122,70 @@ export function buildSourceContext(root: string): SourceContext {
     symbolsByName,
     reports: new Map(),
     resolver: new ImportResolver(root, filePaths),
+  };
+}
+
+// Below this share of source bytes a backend-only language stays out of the summary; lower it and incidental scripts and templates add languages and files to a Python or TypeScript project's summary.
+const BACKEND_LANGUAGE_MIN_SHARE = 0.01;
+
+/**
+ * Keeps the backend-described files that count as project source, decided per suffix without a language list.
+ * A suffix needs a function or method somewhere, which drops the sections the backend reports in configuration and markup files, and at least 1% of the source bytes.
+ */
+export function backendSourceFiles(
+  scannedFiles: FileMetrics[],
+  backendFiles: FileMetrics[],
+): FileMetrics[] {
+  const callableSuffixes = new Set(
+    backendFiles
+      .filter((metrics) => metrics.functionSpans.length > 0)
+      .map((metrics) => metrics.suffix),
+  );
+  const candidates = backendFiles.filter((metrics) => callableSuffixes.has(metrics.suffix));
+  if (candidates.length === 0) {
+    return [];
+  }
+  const bytesBySuffix = new Map<string, number>();
+  for (const metrics of candidates) {
+    bytesBySuffix.set(
+      metrics.suffix,
+      (bytesBySuffix.get(metrics.suffix) ?? 0) + statSync(metrics.path).size,
+    );
+  }
+  const totalBytes =
+    scannedFiles.reduce((total, metrics) => total + statSync(metrics.path).size, 0) +
+    [...bytesBySuffix.values()].reduce((total, bytes) => total + bytes, 0);
+  return candidates.filter(
+    (metrics) =>
+      (bytesBySuffix.get(metrics.suffix) ?? 0) >= totalBytes * BACKEND_LANGUAGE_MIN_SHARE,
+  );
+}
+
+/** Adds the files only Codebase Memory can describe, with their definitions as resolvable symbols; the import resolver keeps covering scanned files alone. */
+export function withBackendFiles(
+  source: SourceContext,
+  backendFiles: FileMetrics[],
+): SourceContext {
+  if (backendFiles.length === 0) {
+    return source;
+  }
+  const files = [...source.files, ...backendFiles];
+  const symbolsByName = new Map(
+    [...source.symbolsByName].map(([name, symbols]) => [name, symbols.slice()]),
+  );
+  for (const metrics of backendFiles) {
+    for (const span of [...metrics.functionSpans, ...metrics.classSpans]) {
+      const symbols = symbolsByName.get(span.name) ?? [];
+      symbols.push({ name: span.name, file: metrics.relPath, line: span.startLine });
+      symbolsByName.set(span.name, symbols);
+    }
+  }
+  return {
+    ...source,
+    files,
+    filesByPath: new Map(files.map((metrics) => [metrics.relPath, metrics])),
+    filePaths: new Set(files.map((metrics) => metrics.relPath)),
+    symbolsByName,
   };
 }
 

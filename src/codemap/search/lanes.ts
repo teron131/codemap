@@ -71,7 +71,7 @@ export function printSearch(root: string, searchText: string, request: SearchReq
     }
     printWorkingTreeSearch(workingTreeSearch(root, searchText, limit, includeTests, undefined));
     console.log("\nSemantic graph matches:");
-    console.log(`  unavailable: ${fallbackReason}; used working-tree search fallback.`);
+    console.log(`  ${fallbackReason}; used working-tree search fallback.`);
     return;
   }
   const paths = pathMatches(root, searchText, { limit });

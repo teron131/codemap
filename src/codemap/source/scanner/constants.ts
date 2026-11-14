@@ -43,24 +43,39 @@ export const TYPESCRIPT_SUFFIXES = new Set([
 ]);
 export const PYTHON_SUFFIXES = new Set([".py"]);
 
-const TEXT_SUFFIXES = new Set([
+/** Programming languages the scanner cannot parse: discovery lists their files, search ranks them as implementation source, and Codebase Memory supplies their definitions. */
+export const UNPARSED_SOURCE_SUFFIXES = new Set([
   ".c",
   ".cc",
-  ".conf",
   ".cpp",
-  ".css",
-  ".eex",
+  ".cs",
   ".erl",
   ".ex",
   ".exs",
   ".go",
-  ".graphql",
   ".h",
-  ".heex",
   ".hpp",
   ".hrl",
-  ".html",
+  ".hs",
   ".java",
+  ".kt",
+  ".kts",
+  ".lua",
+  ".php",
+  ".rb",
+  ".rs",
+  ".scala",
+  ".swift",
+]);
+
+const TEXT_SUFFIXES = new Set([
+  ...UNPARSED_SOURCE_SUFFIXES,
+  ".conf",
+  ".css",
+  ".eex",
+  ".graphql",
+  ".heex",
+  ".html",
   ".json",
   ".jsonc",
   ".livemd",
@@ -68,7 +83,6 @@ const TEXT_SUFFIXES = new Set([
   ".mmd",
   ".prisma",
   ".proto",
-  ".rs",
   ".rules",
   ".sh",
   ".sql",

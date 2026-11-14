@@ -1,162 +1,199 @@
-/** Builds Python documentation reports from bundled syntax evidence without evaluating inspected source. */
-import { readFileSync } from "node:fs";
-
-import type { SgNode } from "@ast-grep/napi";
-
-import { astGrepRoot } from "../../ast-grep.js";
+/** Builds Python documentation reports from one file's ast-grep matches without evaluating inspected source. */
+import { type AstGrepMatch, type AstGrepRule } from "../../ast-grep.js";
 import type { ClassReport, FileReport, FunctionReport } from "./models.js";
 
-type Definition = {
-  node: SgNode;
-  children: Definition[];
+const DEFINITION = { any: [{ kind: "function_definition" }, { kind: "class_definition" }] };
+const PARAMETER_PARENT = {
+  inside: { kind: "parameters", inside: { kind: "function_definition", field: "parameters" } },
 };
 
-/** Reads one current file and reports parser recovery explicitly instead of presenting incomplete documentation as complete. */
-export function buildPythonFileReport(
-  filePath: string,
-  { displayPath }: { displayPath: string },
-): FileReport {
-  const report: FileReport = {
-    path: filePath,
-    displayPath,
-    fileDocstring: null,
-    functions: [],
-    classes: [],
-    parseError: null,
-  };
-  let source: string;
-  try {
-    source = readFileSync(filePath, "utf8");
-  } catch (error) {
-    report.parseError = error instanceof Error ? error.message : String(error);
-    return report;
-  }
-
-  const root = astGrepRoot(source, "python");
-  if (root === null) {
-    report.parseError = "Python syntax parser unavailable";
-    return report;
-  }
-  // Include zero-width recovery tokens and blocks, which may lack an ERROR node.
-  const invalid = root.find({
+export const PYTHON_DOCSTRING_RULES: AstGrepRule[] = Object.entries({
+  // Error recovery can insert a missing token without an ERROR node. A missing named token is a zero-width node, and a missing closing bracket leaves its bracketed node unclosed; other missing anonymous tokens, such as `:`, go unnoticed because kind matchers cannot name them.
+  invalid: {
     rule: {
-      any: [{ kind: "ERROR" }, { all: [{ regex: "^$" }, { not: { kind: "module" } }] }],
+      any: [
+        { kind: "ERROR" },
+        {
+          any: ["block", "identifier", "string_start", "string_end"].map((kind) => ({ kind })),
+          regex: "^$",
+        },
+        {
+          any: [
+            "parameters",
+            "argument_list",
+            "parenthesized_expression",
+            "generator_expression",
+            "tuple",
+            "list",
+            "list_comprehension",
+            "subscript",
+            "dictionary",
+            "dictionary_comprehension",
+            "set",
+            "set_comprehension",
+          ].map((kind) => ({ kind })),
+          not: { regex: "[)\\]}]$" },
+        },
+      ],
     },
-  });
-  if (invalid !== null) {
-    report.parseError = "invalid syntax";
-    return report;
-  }
+  },
+  function: { rule: { kind: "function_definition", has: { field: "name", pattern: "$NAME" } } },
+  class: { rule: { kind: "class_definition", has: { field: "name", pattern: "$NAME" } } },
+  parameter: {
+    rule: {
+      any: [
+        "identifier",
+        "list_splat_pattern",
+        "dictionary_splat_pattern",
+        "keyword_separator",
+        "positional_separator",
+        "tuple_pattern",
+      ].map((kind) => ({ kind })),
+      ...PARAMETER_PARENT,
+    },
+  },
+  typed_parameter: { rule: { kind: "typed_parameter", ...PARAMETER_PARENT } },
+  default_parameter: { rule: { kind: "default_parameter", ...PARAMETER_PARENT } },
+  typed_default_parameter: { rule: { kind: "typed_default_parameter", ...PARAMETER_PARENT } },
+  parameter_name: {
+    rule: {
+      any: [
+        {
+          any: ["identifier", "list_splat_pattern", "dictionary_splat_pattern"].map((kind) => ({
+            kind,
+          })),
+          inside: { kind: "typed_parameter" },
+        },
+        {
+          kind: "identifier",
+          inside: {
+            any: [{ kind: "default_parameter" }, { kind: "typed_default_parameter" }],
+            field: "name",
+          },
+        },
+      ],
+    },
+  },
+  parameter_type: {
+    rule: {
+      kind: "type",
+      inside: {
+        any: [{ kind: "typed_parameter" }, { kind: "typed_default_parameter" }],
+        field: "type",
+      },
+    },
+  },
+  return_type: {
+    rule: { kind: "type", inside: { kind: "function_definition", field: "return_type" } },
+  },
+  docstring_part: {
+    utils: {
+      docstring_statement: {
+        kind: "expression_statement",
+        nthChild: { position: 1, ofRule: { not: { kind: "comment" } } },
+        not: { has: { nthChild: 2 } },
+        any: [
+          { inside: { kind: "block", inside: { ...DEFINITION, field: "body" } } },
+          { inside: { kind: "module" } },
+        ],
+      },
+    },
+    rule: {
+      kind: "string",
+      any: [
+        { inside: { matches: "docstring_statement" } },
+        { inside: { kind: "concatenated_string", inside: { matches: "docstring_statement" } } },
+      ],
+    },
+  },
+}).map(([id, config]) => ({ id: `pydoc.${id}`, language: "python", ...config }));
 
-  report.fileDocstring = bodyDocstring(root);
-  for (const definition of collectDefinitions(root)) {
-    if (definition.node.kind() === "function_definition") {
-      report.functions.push(functionReport(definition));
-    } else {
-      report.classes.push(classReport(definition));
-    }
+/** Reports parser recovery explicitly instead of presenting incomplete documentation as complete. */
+export function pythonFileReport(report: FileReport, matches: AstGrepMatch[]): FileReport {
+  if (matches.some((match) => match.rule === "pydoc.invalid")) {
+    return { ...report, parseError: "invalid syntax" };
   }
-  return report;
-}
-
-/**
- * Keeps declaration ownership tied to syntax parents, including decorated and conditionally defined members.
- *
- * Native matches arrive in source preorder, so the innermost open definition range is each definition's owner.
- */
-function collectDefinitions(root: SgNode): Definition[] {
-  const topLevel: Definition[] = [];
-  const open: Array<{ definition: Definition; endIndex: number }> = [];
-  for (const node of root.findAll({
-    rule: { any: [{ kind: "function_definition" }, { kind: "class_definition" }] },
-  })) {
-    const definition: Definition = { node, children: [] };
-    const range = node.range();
-    while (open.length && range.start.index >= open.at(-1)!.endIndex) open.pop();
-    (open.at(-1)?.definition.children ?? topLevel).push(definition);
-    open.push({ definition, endIndex: range.end.index });
-  }
-  return topLevel;
-}
-
-function functionReport({ node, children }: Definition): FunctionReport {
-  const parameters = node.field("parameters")?.namedChildren() ?? [];
+  const topLevel = matches.filter((match) => match.parent === null);
   return {
-    name: node.field("name")?.text() ?? "",
-    lineno: node.range().start.line + 1,
+    ...report,
+    fileDocstring: docstring(topLevel),
+    functions: topLevel.filter((match) => match.rule === "pydoc.function").map(functionReport),
+    classes: topLevel.filter((match) => match.rule === "pydoc.class").map(classReport),
+  };
+}
+
+/** Definitions nest by range, which keeps declaration ownership tied to syntax parents, including decorated and conditionally defined members. */
+function functionReport(definition: AstGrepMatch): FunctionReport {
+  const children = definition.children;
+  return {
+    name: definition.name,
+    lineno: definition.startLine + 1,
     inputs:
-      parameters
-        .filter((parameter) => parameter.kind() !== "comment")
+      children
         .map(formatParameter)
+        .filter((parameter) => parameter !== null)
         .join(", ") || "none",
-    outputs: node.field("return_type")?.text() ?? "unannotated",
-    docstring: bodyDocstring(node.field("body")),
+    outputs: children.find((child) => child.rule === "pydoc.return_type")?.text ?? "unannotated",
+    docstring: docstring(children),
     nestedFunctions: children
-      .filter((child) => child.node.kind() === "function_definition")
+      .filter((child) => child.rule === "pydoc.function")
       .map(functionReport),
   };
 }
 
-function classReport({ node, children }: Definition): ClassReport {
+function classReport(definition: AstGrepMatch): ClassReport {
+  const children = definition.children;
   return {
-    name: node.field("name")?.text() ?? "",
-    lineno: node.range().start.line + 1,
-    docstring: bodyDocstring(node.field("body")),
-    methods: children
-      .filter((child) => child.node.kind() === "function_definition")
-      .map(functionReport),
-    nestedClasses: children
-      .filter((child) => child.node.kind() === "class_definition")
-      .map(classReport),
+    name: definition.name,
+    lineno: definition.startLine + 1,
+    docstring: docstring(children),
+    methods: children.filter((child) => child.rule === "pydoc.function").map(functionReport),
+    nestedClasses: children.filter((child) => child.rule === "pydoc.class").map(classReport),
   };
 }
 
-/** Formats syntax fields separately so annotation and default delimiters cannot be mistaken for argument separators. */
-function formatParameter(parameter: SgNode): string {
-  const name =
-    parameter.field("name") ??
-    (parameter.kind() === "typed_parameter"
-      ? parameter
-          .namedChildren()
-          .find((child) => !["type", "comment"].includes(String(child.kind())))
-      : parameter);
-  let rendered = name?.text() ?? "";
-  const annotation = parameter.field("type");
-  if (annotation !== null) {
-    rendered += `: ${annotation.text()}`;
+/** Formats syntax fields separately so annotation and default delimiters cannot be mistaken for argument separators; null for a match that is not a parameter. */
+function formatParameter(parameter: AstGrepMatch): string | null {
+  const part = (rule: string) => parameter.children.find((child) => child.rule === rule);
+  switch (parameter.rule) {
+    case "pydoc.parameter":
+      return parameter.text;
+    case "pydoc.typed_parameter":
+      return `${part("pydoc.parameter_name")?.text ?? ""}: ${part("pydoc.parameter_type")?.text ?? ""}`;
+    case "pydoc.default_parameter": {
+      const name = part("pydoc.parameter_name");
+      return `${name?.text ?? ""} = ${defaultValue(parameter, name)}`;
+    }
+    case "pydoc.typed_default_parameter": {
+      const annotation = part("pydoc.parameter_type");
+      return `${part("pydoc.parameter_name")?.text ?? ""}: ${annotation?.text ?? ""} = ${defaultValue(parameter, annotation)}`;
+    }
+    default:
+      return null;
   }
-  const value = parameter.field("value");
-  if (value !== null) {
-    rendered += ` = ${value.text()}`;
-  }
-  return rendered;
 }
 
-/** Reads only a leading constant string expression, preserving source text and excluding executable interpolation and bytes. */
-function bodyDocstring(body: SgNode | null): string | null {
-  const statement = body?.namedChildren().find((node) => node.kind() !== "comment");
-  if (statement?.kind() !== "expression_statement") {
+/** The default is the parameter's text after the part before `=`: `a: int = 1` with the annotation `int` → `1`. Offsets are bytes, so the slice runs on UTF-8. */
+function defaultValue(parameter: AstGrepMatch, before: AstGrepMatch | undefined): string {
+  const tail = Buffer.from(parameter.text, "utf8")
+    .subarray((before?.end ?? parameter.start) - parameter.start)
+    .toString("utf8");
+  return tail.replace(/^\s*=\s*/, "");
+}
+
+/** Reads only a leading constant string expression, preserving source text and excluding executable interpolation and bytes; null without one. */
+function docstring(siblings: AstGrepMatch[]): string | null {
+  const literals = siblings.filter((match) => match.rule === "pydoc.docstring_part");
+  if (literals.length === 0) {
     return null;
   }
-  const expressions = statement.namedChildren();
-  if (expressions.length !== 1) {
-    return null;
-  }
-  const expression = expressions[0]!;
-  const literals =
-    expression.kind() === "concatenated_string" ? expression.namedChildren() : [expression];
   const parts: string[] = [];
   for (const literal of literals) {
-    if (literal.kind() !== "string") {
+    const quotes = /^([A-Za-z]*)("""|'''|"|')/.exec(literal.text);
+    if (quotes === null || !/^[ru]?$/i.test(quotes[1]!) || !literal.text.endsWith(quotes[2]!)) {
       return null;
     }
-    const children = literal.namedChildren();
-    const start = children.find((node) => node.kind() === "string_start")?.text();
-    const end = children.find((node) => node.kind() === "string_end")?.text();
-    if (!start || !end || !/^(?:r|u)?(?:"""|'''|"|')$/i.test(start)) {
-      return null;
-    }
-    parts.push(literal.text().slice(start.length, -end.length));
+    parts.push(literal.text.slice(quotes[0].length, -quotes[2]!.length));
   }
   return cleanDocstring(parts.join(""));
 }

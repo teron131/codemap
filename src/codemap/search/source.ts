@@ -1,8 +1,6 @@
 /** Owns the working-tree path, definition, and exact-text search lanes and the path-affinity ranking they share. */
 import path from "node:path";
 
-import type { NapiConfig } from "@ast-grep/napi";
-
 import {
   categoryForPath,
   CONFIG_BASENAMES,
@@ -10,7 +8,6 @@ import {
 } from "../source/extraction/index.js";
 import {
   discoverFiles,
-  type FileMetrics,
   isGeneratedPath,
   isMemberOf,
   isTestPath,
@@ -18,17 +15,18 @@ import {
   type QualifiedName,
   qualifiedName,
   relativePath,
-  scanFile,
+  scanFiles,
   TYPESCRIPT_SUFFIXES,
+  UNPARSED_SOURCE_SUFFIXES,
 } from "../source/scanner/index.js";
-import { compareText, escapeRegExp } from "../text-utils.js";
+import { compareText, escapeRegExp, uniqueStrings } from "../text-utils.js";
 import {
   compactSourceMatchText,
   ripgrepDefinitionMatches,
   ripgrepMatches,
   ripgrepOwnerFiles,
 } from "./ripgrep.js";
-import { type SyntaxMatch, SyntaxSearch } from "./structural.js";
+import { type SyntaxMatch, type SyntaxRuleConfig, SyntaxSearch } from "./structural.js";
 
 const IDENTIFIER_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 const SOURCE_CANDIDATE_LIMIT = 1_000;
@@ -64,11 +62,14 @@ export function isImplementationSourceMatch(match: SourceMatch): boolean {
   return isImplementationSourcePath(match.filePath);
 }
 
-/** Test files qualify; only unsupported suffixes and generated paths are excluded. */
+/** Test files qualify; only suffixes outside the programming languages discovery lists, and generated paths, are excluded. */
 export function isImplementationSourcePath(filePath: string): boolean {
   const suffix = path.extname(filePath).toLowerCase();
   return (
-    (PYTHON_SUFFIXES.has(suffix) || TYPESCRIPT_SUFFIXES.has(suffix)) && !isGeneratedPath(filePath)
+    (PYTHON_SUFFIXES.has(suffix) ||
+      TYPESCRIPT_SUFFIXES.has(suffix) ||
+      UNPARSED_SOURCE_SUFFIXES.has(suffix)) &&
+    !isGeneratedPath(filePath)
   );
 }
 
@@ -186,25 +187,25 @@ function memberDefinitions(
   if (ownerFiles.length === 0) {
     return [];
   }
-  const metricsByPath = new Map<string, FileMetrics>();
   // The member as a whole identifier: for `save`, `def save(` matches while `def save_base(` and `def Save(` do not.
   const exactMember = new RegExp(`(?<![\\w$])${escapeRegExp(member)}(?![\\w$])`);
-  return symbolDefinitions(root, [member], {
+  const candidates = symbolDefinitions(root, [member], {
     paths: ownerFiles,
     includeTests,
     callableOnly: false,
     candidateLimit: SOURCE_CANDIDATE_LIMIT,
-  }).filter((match) => {
-    if (!exactMember.test(match.text)) {
-      return false;
-    }
-    let metrics = metricsByPath.get(match.filePath);
-    if (metrics === undefined) {
-      metrics = scanFile(path.join(root, match.filePath), { displayRoot: root });
-      metricsByPath.set(match.filePath, metrics);
-    }
-    return isMemberOf(metrics, owner, match.line);
-  });
+  }).filter((match) => exactMember.test(match.text));
+  const candidateFiles = uniqueStrings(candidates.map((match) => match.filePath));
+  const scanned = scanFiles(
+    candidateFiles.map((filePath) => path.join(root, filePath)),
+    { displayRoot: root },
+  );
+  const metricsByPath = new Map(
+    candidateFiles.map((filePath, index) => [filePath, scanned[index]!]),
+  );
+  return candidates.filter((match) =>
+    isMemberOf(metricsByPath.get(match.filePath)!, owner, match.line),
+  );
 }
 
 // A declaration counts as callable when it is a function, class, or method, or a `const`, `let`, or `var` initialized with a function: `const run = async (` and `const run = (a) => a` pass, `const run = 1` and `const run = (a + b) * 2` do not.
@@ -431,7 +432,6 @@ function astGrepSymbolMatches(
       })),
       prefilter,
     );
-    if (matches === null) return groups;
     for (const [index, rows] of matches.entries()) {
       groups[index]!.push(...rows.map(astGrepMatch));
     }
@@ -442,7 +442,7 @@ function astGrepSymbolMatches(
   return groups;
 }
 
-function symbolMatchConfig(symbol: string, kinds: string[]): NapiConfig {
+function symbolMatchConfig(symbol: string, kinds: string[]): SyntaxRuleConfig {
   const escaped = escapeRegExp(symbol);
   return {
     rule: {

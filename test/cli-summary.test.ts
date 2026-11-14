@@ -439,6 +439,7 @@ describe("summary CLI", () => {
         { name: "TypeScript", share: 0.75 },
         { name: "JavaScript", share: 0.25 },
       ],
+      backendOnlyLanguages: [],
       publicSurfaces: [
         {
           file: "src/index.ts",

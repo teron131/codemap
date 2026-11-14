@@ -1,11 +1,13 @@
 ---
 name: codemap
-description: Navigate and scope Python and TypeScript code using Codebase Memory for graph and semantic evidence, rg for working-tree exact text, and ast-grep for syntax patterns. Use for repository orientation, path/name/concept discovery, graph or semantic search, call-site or structural matches, focused target inspection, source-metric ranking, or backend freshness and change-impact diagnostics.
+description: Navigate and scope code, fully for Python and TypeScript and at a backend-only baseline for other languages, using Codebase Memory for graph and semantic evidence, rg for working-tree exact text, and ast-grep for syntax patterns. Use for repository orientation, path/name/concept discovery, graph or semantic search, call-site or structural matches, focused target inspection, source-metric ranking, or backend freshness and change-impact diagnostics. Run it outside the command sandbox, where its backend cannot start.
 ---
 
 # Codemap
 
-Use this workflow only for Python and TypeScript code, including within mixed-language repositories; use `rg`, focused reads, and language-native tools for other languages.
+Run every codemap command outside the command sandbox, starting with the first. Codebase Memory runs a daemon that creates `/tmp/cbm-daemon-<uid>` and binds a Unix socket there; agent command sandboxes deny both, and pointing `CBM_RUNTIME_DIR` at a writable folder still leaves the socket denied. A sandboxed command still succeeds but answers from the working tree alone: `signals` loses its complexity ranking, `inspect <symbol>` its metrics and most callers, and `search --graph` and `--semantic` their backend matches. Its stderr then opens with `codemap: Codebase Memory could not run`, so rerun it outside the sandbox before judging the code, or Codemap, from that answer.
+
+Python and TypeScript/JavaScript have full support: Codemap parses them from the working tree and enriches that with the backend. Any other language Codebase Memory indexes has a backend-only baseline, described under [Work In Other Languages](#work-in-other-languages); beyond it, use `rg`, focused reads, and language-native tools.
 
 Route relationship and semantic questions to Codebase Memory, exact text to `rg`, and syntax patterns to ast-grep. Read compact text by default; use JSON only on the stable row surfaces `signals`, `search calls`, `search match`, and `search rule`. Every command caps its output at about 10,000 tokens: text reports truncation inline, and JSON stays valid for `jq` and reports truncation on stderr.
 
@@ -18,7 +20,7 @@ Output is designed as context, so read its form as well as its rows.
 - A heading states what the section selected and its row fields' order, as in `## Most Called — symbol · location · share of all calls`. A ranked list follows exactly those criteria and judges nothing.
 - A selected view is not an inventory: `Structural Signals` shows at most one boundary per role, `Most Called` drops generic names such as `get` or `map`, and `Public API` shows only the surfaces its heading selects.
 - Rows name their source: `ast-grep`, `regex`, or `rg` on working-tree rows, `[file]` for a path match, and a `Codebase Memory ... matches:` block for backend rows.
-- Status lines say what the evidence does not cover: `backend: unavailable`, `backend: partial index`, or `backend: skipped`; `coverage: bounded working tree; parsed=N, eligible=N`; `Fallback: ...`; and `hidden tests: N`.
+- Status lines say what the evidence does not cover: `backend: unavailable`, `backend: partial index`, or `backend: skipped`; `coverage: bounded working tree; parsed=N, eligible=N`; `coverage: backend only for <languages>; working tree not parsed`; `Fallback: ...`; `hidden tests: N`; and, opening stderr, `codemap: Codebase Memory could not run`.
 - `- ...`, `... N more candidates`, and `... output truncated: shown=N, total=N, ...` mean more rows exist. Working-tree search rows stop at `--limit` without a marker, so raise the limit before concluding nothing else matches.
 
 ## Orient Before Substantial Work
@@ -68,11 +70,11 @@ codemap search match --json --project-root <path> --lang <lang> --pattern '<patt
 codemap search rule --json --project-root <path> --rule <rule.yml> [paths...]
 ```
 
-`search calls` finds call-shaped matches such as `print(...)`, `logger.info(...)`, or `console.log(...)`: a bare method name matches any receiver, and a dotted target is exact. It stays syntax matching even when the backend is available, so it never traces callers. JSON is compact `{total,matches}`, and at most 1,000 matches are selected unless `--limit` says otherwise.
+`search calls` finds call-shaped matches such as `print(...)`, `logger.info(...)`, or `console.log(...)`: a bare method name matches any receiver, and a dotted target is exact. It stays syntax matching even when the backend is available, so it never traces callers, and it covers only JavaScript, TypeScript, and Python. JSON is compact `{total,matches}`, and at most 1,000 matches are selected unless `--limit` says otherwise.
 
 Scope `[paths...]` to known files or directories. Without `--lang`, calls and patterns infer languages from those targets; YAML rules declare their own. Single-quote patterns containing `$NAME` or `$$$ARGS` so the shell passes them literally.
 
-`search match` takes one pattern, and its JSON is an array of rows; `search rule` takes a reusable YAML rule, and its JSON wraps matches with rule metadata. Both cover JavaScript, TypeScript, and Python. Use raw ast-grep for rewrites, fixes, interactive authoring, parse dumps, or engine options Codemap does not expose.
+`search match` takes one pattern, and its JSON is an array of rows; `search rule` takes a reusable YAML rule, and its JSON wraps matches with rule metadata. Both cover every language the ast-grep CLI installed with Codemap supports, inferring JavaScript, TypeScript, and Python from file suffixes and needing `--lang` or the rule to name any other. A pattern matches as it would under `ast-grep run`, and a pattern or rule ast-grep rejects exits 2 with ast-grep's reason. Use raw ast-grep for rewrites, fixes, interactive authoring, parse dumps, or engine options Codemap does not expose.
 
 ## Inspect One Known Target
 
@@ -95,7 +97,7 @@ codemap signals --project-root <path>
 codemap signals --json --project-root <path> | jq '{stats, functionMetrics, functionsByMentions, variablesByNameLength}'
 ```
 
-Start with the default. Rankings have no per-section caps, so text is cut in reading order and on larger repositories can end inside `Function Metrics`; JSON truncation keeps the head of every ranking, so use the `jq` form to compare all three. Working-tree statistics come first: `count`, `mean`, sample `std`, percentiles to `p90`, extrema, and data-sized `bins` over every measured function and variable. Backend rows do not feed them.
+Start with the default: with `all`, it is the only view that ranks functions by backend complexity, while the sections below answer narrower questions from the working tree. Rankings have no per-section caps, so text is cut in reading order and on larger repositories can end inside `Function Metrics`; JSON truncation keeps the head of every ranking, so use the `jq` form to compare all three. Working-tree statistics come first: `count`, `mean`, sample `std`, percentiles to `p90`, extrema, and data-sized `bins` over every measured function and variable. Backend rows do not feed them.
 
 - `functionMetrics`: backend rows by cognitive complexity, then cyclomatic complexity, then length; working-tree rows by length, then fewest mentions.
 - `functionsByMentions`: every function definition by fewest mentions, then shortest.
@@ -132,10 +134,22 @@ A focused section skips unrelated analysis, and only `top` and `all` query the b
 
 Treat extracted imports, functions, classes, containment, same-file call edges, and docstrings as syntax-level leads, not compiler facts. Start from likely entries such as `__main__.py`, `cli.py`, `main.py`, and `app.py`.
 
-Python parsing uses Codemap's bundled ast-grep parser, so calls in comments or strings never become edges; dynamic dispatch still needs source verification. To locate definitions:
+Python parsing uses the ast-grep CLI installed with Codemap, so calls in comments or strings never become edges; dynamic dispatch still needs source verification. To locate definitions:
 
 ```sh
 codemap search match --project-root <path> --lang python --pattern 'def $NAME($$$ARGS): $$$BODY' [paths...]
+```
+
+## Work In Other Languages
+
+A language the working tree does not parse is covered through Codebase Memory alone, which `summary`, `signals`, and file inspection mark with `coverage: backend only for <languages>; working tree not parsed`. `summary` gives its language share, most-called symbols, and clusters; `signals` gives backend function metrics; `inspect <file>` lists the file's types and functions with their line spans; and `search`, `search --graph`, `search --semantic`, and `inspect <symbol>` answer from the backend, with `rg` as the text fallback.
+
+Path search, directory listings, and phrase-search ranking cover C, C++, C#, Elixir, Erlang, Go, Haskell, Java, Kotlin, Lua, PHP, Ruby, Rust, Scala, and Swift; a file in any other indexed language is reached by naming it to `inspect` or through backend search.
+
+Missing at this level: the public API, import structure, working-tree statistics and mention rankings, `search calls`, and definitions in a directory inspection, where `defines=0` means not parsed rather than empty. Backend line spans and test flags pass through as reported, and without the backend only text search and structural matches remain. To locate definitions or calls by syntax, name the language:
+
+```sh
+codemap search match --project-root <path> --lang go --pattern 'func $NAME($$$ARGS) $$$BODY' [paths...]
 ```
 
 ## Diagnose Freshness Or Change Impact

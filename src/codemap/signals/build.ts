@@ -10,7 +10,7 @@ import {
   type FileMetrics,
   PYTHON_SUFFIXES,
   relativePath,
-  scanFile,
+  scanFiles,
   TYPESCRIPT_SUFFIXES,
 } from "../source/scanner/index.js";
 import { compareText } from "../text-utils.js";
@@ -49,7 +49,7 @@ export function buildSignalSections(
   { names, files }: { names: SignalSectionName[]; files: string[] },
 ): SignalSections {
   const selected = new Set(names);
-  const scannedFiles = files.map((filePath) => scanFile(filePath, { displayRoot: root }));
+  const scannedFiles = scanFiles(files, { displayRoot: root });
   const needsProfiles =
     selected.has("relationships") ||
     selected.has("fileProfiles") ||

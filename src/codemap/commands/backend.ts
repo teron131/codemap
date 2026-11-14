@@ -11,6 +11,7 @@ import {
   codebaseMemorySchema,
   codebaseMemoryStatus,
   type CodebaseMemoryStatusResult,
+  isPermissionDenial,
   symbolName,
 } from "../codebase-memory/index.js";
 import { arrayValue, numberField, recordValue, stringField } from "../json-utils.js";
@@ -107,7 +108,7 @@ export function commandBackendProjects(
     console.log(renderBackendProjects(result, root));
     return 0;
   }
-  console.log(backendFailureMessage(root, "No Codebase Memory projects available."));
+  console.log(backendFailureMessage(root, "Could not read Codebase Memory projects."));
   return 1;
 }
 
@@ -121,7 +122,7 @@ export function commandBackendStatus(
     console.log(renderBackendStatus(result));
     return 0;
   }
-  console.log(backendFailureMessage(root, "No Codebase Memory index for this project."));
+  console.log(backendFailureMessage(root, "Could not read Codebase Memory status."));
   return 1;
 }
 
@@ -135,7 +136,7 @@ export function commandBackendSchema(
     console.log(renderBackendSchema(result));
     return 0;
   }
-  console.log(backendFailureMessage(root, "No Codebase Memory schema for this project."));
+  console.log(backendFailureMessage(root, "Could not read Codebase Memory schema."));
   return 1;
 }
 
@@ -203,7 +204,19 @@ export function commandIndex(
 
 function backendFailureMessage(root: string, summary: string): string {
   const reason = codebaseMemoryFailureReason(root);
-  return reason === null ? summary : `${summary}\nreason: ${reason}`;
+  return [summary, ...(reason === null ? [] : backendReasonLines(reason))].join("\n");
+}
+
+/** The reason a backend operation failed, followed by the sandbox remedy when the system denied the backend a file or socket. */
+export function backendReasonLines(reason: string): string[] {
+  return [
+    `reason: ${reason}`,
+    ...(isPermissionDenial(reason)
+      ? [
+          "The system denied the backend a file or socket it needs; inside an agent's command sandbox, rerun codemap outside the sandbox.",
+        ]
+      : []),
+  ];
 }
 
 /** Keyword screen, not a Cypher parse: a keyword anywhere, even inside a string literal such as `'create'`, refuses the query. */

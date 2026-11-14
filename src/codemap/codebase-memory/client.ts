@@ -34,8 +34,13 @@ const DEFAULT_INDEX_MODE = "full";
 const INDEX_REQUEST_TIMEOUT_MS = 120_000;
 const READY_INDEX_STATUSES = new Set(["complete", "completed", "indexed", "ready"]);
 const PROJECTS_PAGE_LIMIT = 500;
+// Permission denials as the backend and the OS word them: `chmod 0700 failed (errno 1)` and `socket_bind failed with EPERM` match, a timeout or `spawn … ENOENT` does not.
+const PERMISSION_DENIED_RE =
+  /\b(?:EPERM|EACCES)\b|operation not permitted|permission denied|\berrno (?:1|13)\b/i;
 const activeOperations: ActiveCodebaseMemoryOperation[] = [];
 const failureReasons = new Map<string, string>();
+let reachedBackend = false;
+let firstUnreachedReason: string | null = null;
 
 /** Off for `CODEMAP_CODEBASE_MEMORY` values `0`, `false`, and `off`, and off by default under Vitest so tests reach a backend only when they opt in. */
 function codebaseMemoryEnabled(): boolean {
@@ -68,10 +73,9 @@ export function withFreshCodebaseMemoryProject<T>(
   }
   const lock = acquireProjectLock(lockPath);
   if (lock === null) {
-    failureReasons.set(
-      resolvedRoot,
-      `Could not acquire the operational cache lock at ${lockPath}.`,
-    );
+    const reason = `Could not acquire the operational cache lock at ${lockPath}.`;
+    failureReasons.set(resolvedRoot, reason);
+    firstUnreachedReason ??= reason;
     return null;
   }
   const active: ActiveCodebaseMemoryOperation = { lock, project: null, root: resolvedRoot };
@@ -80,8 +84,10 @@ export function withFreshCodebaseMemoryProject<T>(
     const refresh = refreshProject(resolvedRoot);
     if (!refresh.ok) {
       failureReasons.set(resolvedRoot, refresh.reason);
+      firstUnreachedReason ??= refresh.reason;
       return null;
     }
+    reachedBackend = true;
     const project = refresh.project;
     active.project = project;
     return runSynchronousProjectOperation(project, operation);
@@ -94,6 +100,16 @@ export function withFreshCodebaseMemoryProject<T>(
 /** The latest failure recorded for `root`; each new operation and each successful call for that root clears it. */
 export function codebaseMemoryFailureReason(root: string): string | null {
   return failureReasons.get(canonicalPath(root)) ?? null;
+}
+
+/** The first reason no operation in this process reached the backend; null once one did, when none tried, or when the integration is disabled. */
+export function codebaseMemoryOutage(): string | null {
+  return reachedBackend ? null : firstUnreachedReason;
+}
+
+/** True when the operating system refused the backend a file or socket, as an agent's command sandbox refuses its daemon directory and Unix socket. */
+export function isPermissionDenial(reason: string): boolean {
+  return PERMISSION_DENIED_RE.test(reason);
 }
 
 function runSynchronousProjectOperation<T>(

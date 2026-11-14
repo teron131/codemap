@@ -1,6 +1,7 @@
 /** Renders the summary as Markdown in a fixed order: overview, structure, most-called symbols, clusters, then public API. */
 import path from "node:path";
 
+import { backendOnlyCoverageLine } from "../source/extraction/index.js";
 import type {
   ClusterSummary,
   LanguageSummary,
@@ -33,6 +34,9 @@ const PUBLIC_API_LEVELS = 3;
 export function renderSummaryText(summary: RepositorySummary): string {
   const lines = [`# ${summary.project}`];
   appendOverview(lines, summary.readme, summary.languages);
+  if (summary.backendOnlyLanguages.length > 0) {
+    lines.push(backendOnlyCoverageLine(summary.backendOnlyLanguages));
+  }
   appendStructure(lines, summary.structuralRoles, summary.structuralOutlines);
   appendMostCalled(lines, summary.mostCalled);
   appendClusters(lines, summary.clusters);

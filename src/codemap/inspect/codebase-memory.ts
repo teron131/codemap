@@ -4,10 +4,19 @@ import path from "node:path";
 import {
   callCodebaseMemoryTool,
   codebaseMemoryQueryRows,
+  codebaseMemoryQueryWithProject,
   withFreshCodebaseMemoryProject,
 } from "../codebase-memory/index.js";
 import { arrayValue, numberField, recordValue, stringField } from "../json-utils.js";
 import { canonicalPath } from "../path-utils.js";
+import {
+  BACKEND_DEFINITION_COLUMNS,
+  backendDefinitionsQuery,
+  backendFileMetrics,
+  categoryForPath,
+} from "../source/extraction/index.js";
+import { type FileMetrics, isSupportedSourcePath } from "../source/scanner/index.js";
+import { inspectPathTargetKind, normalizeTarget } from "./targets.js";
 
 export type CodebaseMemoryInspectResult = {
   name: string;
@@ -24,7 +33,28 @@ export type CodebaseMemoryInspectResult = {
 const TRACE_DEPTH = 2;
 /** The backend's own ceiling; Codemap's `--limit` bounds what is printed. */
 const TRACE_ROW_LIMIT = 5_000;
+const FILE_DEFINITION_LIMIT = 5_000;
 const NODE_PROPERTY_COLUMNS = ["signature", "return_type", "complexity", "cognitive", "lines"];
+
+/** Empty unless the target is one code file the working-tree scanner cannot parse; also empty when the backend is unavailable, so the file still renders without its definitions. */
+export function backendFileDefinitions(root: string, rawTarget: string): FileMetrics[] {
+  const target = normalizeTarget(root, rawTarget);
+  if (
+    inspectPathTargetKind(root, target) !== "file" ||
+    isSupportedSourcePath(target) ||
+    categoryForPath(target) !== "code"
+  ) {
+    return [];
+  }
+  const result = codebaseMemoryQueryWithProject(
+    root,
+    backendDefinitionsQuery(target),
+    FILE_DEFINITION_LIMIT,
+  );
+  const rows =
+    result === null ? null : codebaseMemoryQueryRows(result.value, BACKEND_DEFINITION_COLUMNS);
+  return backendFileMetrics(root, rows ?? [], { includeTests: true });
+}
 
 export function codebaseMemoryInspect(
   root: string,

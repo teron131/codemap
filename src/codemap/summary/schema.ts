@@ -62,6 +62,8 @@ export type RepositorySummary = {
   project: string;
   readme: ReadmeSection[];
   languages: LanguageSummary[];
+  /** Languages present only through Codebase Memory, whose public API and import structure are therefore absent. */
+  backendOnlyLanguages: string[];
   publicSurfaces: PublicSurface[];
   structuralRoles: StructuralRole[];
   structuralOutlines: StructuralOutline[];

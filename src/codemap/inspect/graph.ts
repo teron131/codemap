@@ -9,7 +9,7 @@ import {
 } from "../signals/index.js";
 import { type InventoryEntry, runImportMap } from "../source/extraction/index.js";
 import { buildWorkingTreeGraph, type GraphNode, type GraphPayload } from "../source/graph/index.js";
-import { type FileMetrics, scanFile } from "../source/scanner/index.js";
+import { type FileMetrics, scanFiles } from "../source/scanner/index.js";
 import { uniqueStrings } from "../text-utils.js";
 import { inspectEmitPaths } from "./targets.js";
 
@@ -28,14 +28,18 @@ export type InspectMetrics = {
   variableDefinitions: VariableDefinitionRow[];
 };
 
-/** Takes a normalized target; the third element holds every scanned source file's metrics by project-relative path. */
+/** Takes a normalized target; `backendFiles` stand in for files the scanner cannot parse, and the third element holds every file's metrics by project-relative path. */
 export function workingTreeInspectGraph(
   root: string,
   target: string,
   inventory: InventoryEntry[],
+  backendFiles: FileMetrics[],
 ): [GraphPayload, InspectMetrics, Record<string, FileMetrics | undefined>] {
   const importResult = runImportMap(root, inventory);
   const fileMetricsByPath = importResult.fileMetrics;
+  for (const metrics of backendFiles) {
+    fileMetricsByPath[metrics.relPath] = metrics;
+  }
   const emitPaths = inspectEmitPaths(
     root,
     target,
@@ -79,9 +83,15 @@ export function metricsForFiles(
   files: InventoryEntry[],
   fileMetricsByPath: Record<string, FileMetrics | undefined>,
 ): InspectMetrics {
+  const unscanned = files.filter((item) => fileMetricsByPath[item.path] === undefined);
+  const scannedNow = new Map(
+    scanFiles(
+      unscanned.map((item) => path.join(root, item.path)),
+      { displayRoot: root },
+    ).map((metrics, index) => [unscanned[index]!.path, metrics]),
+  );
   const scanned = files.map((item) => {
-    const metrics =
-      fileMetricsByPath[item.path] ?? scanFile(path.join(root, item.path), { displayRoot: root });
+    const metrics = fileMetricsByPath[item.path] ?? scannedNow.get(item.path)!;
     if (item.sizeLines > 0 && metrics.lines === 0) {
       metrics.lines = item.sizeLines;
     }

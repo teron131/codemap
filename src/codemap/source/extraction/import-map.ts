@@ -4,7 +4,7 @@ import path from "node:path";
 import {
   type FileMetrics,
   PYTHON_SUFFIXES,
-  scanFile,
+  scanFiles,
   TYPESCRIPT_SUFFIXES,
 } from "../scanner/index.js";
 import { ImportResolver } from "./import-resolver.js";
@@ -25,17 +25,23 @@ export function runImportMap(root: string, files: InventoryEntry[]): ImportMapPa
   const resolver = new ImportResolver(root, filePaths);
   const fileMetricsByPath: Record<string, FileMetrics> = {};
   const importMap: Record<string, string[]> = {};
+  const sourcePaths = files
+    .map((inventoryEntry) => String(inventoryEntry.path))
+    .filter((relPath) => {
+      const suffix = path.extname(relPath);
+      return PYTHON_SUFFIXES.has(suffix) || TYPESCRIPT_SUFFIXES.has(suffix);
+    });
+  const scanned = scanFiles(
+    sourcePaths.map((relPath) => path.join(root, relPath)),
+    { displayRoot: root },
+  );
+  sourcePaths.forEach((relPath, index) => {
+    fileMetricsByPath[relPath] = scanned[index]!;
+  });
   for (const inventoryEntry of files) {
     const relPath = String(inventoryEntry.path);
-    const filePath = path.join(root, relPath);
-    const suffix = path.extname(filePath);
-    if (PYTHON_SUFFIXES.has(suffix) || TYPESCRIPT_SUFFIXES.has(suffix)) {
-      const metrics = scanFile(filePath, { displayRoot: root });
-      fileMetricsByPath[relPath] = metrics;
-      importMap[relPath] = resolver.targets(metrics);
-    } else {
-      importMap[relPath] = [];
-    }
+    const metrics = fileMetricsByPath[relPath];
+    importMap[relPath] = metrics === undefined ? [] : resolver.targets(metrics);
   }
   return { importMap, fileMetrics: fileMetricsByPath };
 }

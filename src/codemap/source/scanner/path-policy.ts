@@ -60,18 +60,22 @@ export function isGeneratedPath(filePath: string): boolean {
 
 /** Test files still qualify; ignored directories and hidden directories other than `.github` do not. */
 export function isSupportedSourcePath(filePath: string): boolean {
-  const parts = pathParts(filePath);
-  const directories = parts.slice(0, -1);
-  const suffix = path.extname(parts.at(-1) ?? "").toLowerCase();
+  const suffix = path.extname(filePath).toLowerCase();
   return (
-    (PYTHON_SUFFIXES.has(suffix) || TYPESCRIPT_SUFFIXES.has(suffix)) &&
-    !directories.some(
+    (PYTHON_SUFFIXES.has(suffix) || TYPESCRIPT_SUFFIXES.has(suffix)) && !isIgnoredPath(filePath)
+  );
+}
+
+/** True under an ignored directory or a hidden one other than `.github`, whatever language the file is in. */
+export function isIgnoredPath(filePath: string): boolean {
+  return pathParts(filePath)
+    .slice(0, -1)
+    .some(
       (directory, index) =>
         IGNORED_DIR_NAMES.has(directory) ||
         (index === 0 && ROOT_IGNORED_DIR_NAMES.has(directory)) ||
         (directory.startsWith(".") && !KEPT_HIDDEN_DIR_NAMES.has(directory)),
-    )
-  );
+    );
 }
 
 function pathParts(filePath: string): string[] {

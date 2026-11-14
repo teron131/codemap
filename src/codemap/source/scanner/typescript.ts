@@ -1,11 +1,8 @@
-/** Extracts TypeScript-family measurements, imports, exports, declarations, and call sites from one syntax tree. Files above 256 KiB get only their top-level imports and exports. */
-import { readFileSync } from "node:fs";
+/** Extracts TypeScript-family measurements, imports, exports, declarations, and call sites from one file's ast-grep matches. Files above 256 KiB get only their top-level imports and exports. */
 import path from "node:path";
 
-import { type NapiConfig, type SgNode } from "@ast-grep/napi";
-
-import { astGrepRoot } from "../../ast-grep.js";
-import { ENTRYPOINT_BASENAMES, TYPESCRIPT_LANG_BY_SUFFIX } from "./constants.js";
+import { ancestor, type AstGrepMatch, type AstGrepRule, descendants } from "../../ast-grep.js";
+import { ENTRYPOINT_BASENAMES } from "./constants.js";
 import {
   addSample,
   addVariableDefinition,
@@ -17,76 +14,293 @@ import {
   type TypeScriptReexportBinding,
 } from "./metrics.js";
 
-/** Keeps native AST extraction below the large-script teardown failure boundary. */
-const MAX_AST_SOURCE_BYTES = 256 * 1024;
-const TYPESCRIPT_SCAN_KINDS = [
-  "import_statement",
-  "call_expression",
-  "export_statement",
-  "class_declaration",
-  "function_declaration",
-  "generator_function_declaration",
-  "method_definition",
-  "variable_declarator",
-];
-const FUNCTION_EXPRESSION_KINDS = ["arrow_function", "function_expression", "generator_function"];
-const FUNCTION_SCOPE_KINDS = new Set([
-  "function_declaration",
-  "generator_function_declaration",
-  "method_definition",
-  ...FUNCTION_EXPRESSION_KINDS,
-]);
-const CALLER_BINDING_KINDS = new Set([
-  "variable_declarator",
-  "public_field_definition",
-  "field_definition",
-]);
+/** Bundled and vendored scripts reach this size; past it a full scan's match output would dwarf the file, while its imports and exports still matter. */
+export const MAX_FULL_SCAN_BYTES = 256 * 1024;
+
+type Grammar = "typescript" | "tsx" | "javascript";
 
 type FunctionScope = {
-  endIndex: number;
+  end: number;
   caller: string | null;
 };
 
-function directChild(node: SgNode, ...kinds: string[]): SgNode | null {
-  return node.children().find((child) => kinds.includes(String(child.kind()))) ?? null;
+const GRAMMARS: Grammar[] = ["typescript", "tsx", "javascript"];
+const FUNCTION_EXPRESSION = {
+  any: [
+    { kind: "arrow_function" },
+    { kind: "function_expression" },
+    { kind: "generator_function" },
+  ],
+};
+const PROPERTY_NAME_RE = /^#?[\p{ID_Start}$_][\p{ID_Continue}$‌‍]*$/u;
+
+export const TYPESCRIPT_SCAN_RULES: AstGrepRule[] = GRAMMARS.flatMap((grammar) =>
+  typescriptRules(grammar, { surface: false }),
+);
+export const TYPESCRIPT_SURFACE_RULES: AstGrepRule[] = GRAMMARS.flatMap((grammar) =>
+  typescriptRules(grammar, { surface: true }),
+);
+
+/** Builds one file's record from its source and the matches of `TYPESCRIPT_SCAN_RULES`, or of `TYPESCRIPT_SURFACE_RULES` for a file above `MAX_FULL_SCAN_BYTES`. */
+export function typescriptFileMetrics(
+  filePath: string,
+  { relPath, source, matches }: { relPath: string; source: string; matches: AstGrepMatch[] },
+): FileMetrics {
+  const metrics = createFileMetrics({ path: filePath, relPath, suffix: path.extname(filePath) });
+  metrics.lines = sourceLineCount(source);
+  metrics.entrypointHint =
+    ENTRYPOINT_BASENAMES.has(path.basename(filePath)) || source.includes("require.main === module");
+  const countsJsx = metrics.suffix === ".jsx" || metrics.suffix === ".tsx";
+  // Matches arrive in source preorder, so a scope stack gives each call its innermost function.
+  const scopes: FunctionScope[] = [];
+  for (const match of matches) {
+    while (scopes.length && match.start >= scopes.at(-1)!.end) scopes.pop();
+    switch (match.rule) {
+      case "ts.import":
+        addTypescriptImport(metrics, stringValue(match.name));
+        break;
+      case "ts.require":
+        addTypescriptImport(metrics, stringValue(match.name), "require");
+        break;
+      case "ts.export":
+        collectTypescriptExport(metrics, match);
+        break;
+      case "ts.class":
+        metrics.classSpans.push({
+          name: match.name,
+          span: spanFor(match),
+          startLine: match.startLine + 1,
+        });
+        metrics.defines += 1;
+        addSample(metrics.samples, match.name);
+        break;
+      case "ts.class_heritage":
+        metrics.extends += 1;
+        addSample(metrics.samples, match.name);
+        break;
+      case "ts.function":
+        scopes.push({ end: match.end, caller: match.name });
+        addTypescriptFunction(metrics, relPath, match.name, match);
+        break;
+      case "ts.method": {
+        const name = match.name;
+        scopes.push({ end: match.end, caller: name });
+        // Computed, string, and numeric method names still own their calls but do not name a function.
+        if (PROPERTY_NAME_RE.test(name)) addTypescriptFunction(metrics, relPath, name, match);
+        break;
+      }
+      case "ts.field_function":
+        addTypescriptFunction(metrics, relPath, match.name, match);
+        break;
+      case "ts.variable":
+      case "ts.local_variable": {
+        const name = match.name;
+        metrics.variableNames.push(name);
+        addVariableDefinition(metrics, relPath, name, {
+          startLine: match.startLine + 1,
+          moduleLevel: match.rule === "ts.variable",
+        });
+        if (match.children.some((child) => child.rule === "ts.bound_function")) {
+          addTypescriptFunction(metrics, relPath, name, match);
+        }
+        break;
+      }
+      case "ts.bound_function":
+        // A function expression initializing a variable or class field takes that binding's name.
+        scopes.push({ end: match.end, caller: match.parent?.name ?? null });
+        break;
+      case "ts.function_expression":
+        // An anonymous innermost function owns its calls without a caller name, so they are not attributed to an outer function.
+        scopes.push({ end: match.end, caller: match.name || null });
+        break;
+      case "ts.callee":
+      case "ts.callee_member": {
+        const caller = scopes.at(-1)?.caller;
+        const callee = match.rule === "ts.callee" ? match.text : match.name;
+        if (caller) {
+          metrics.callSites.push({ caller, callee, lineNumber: match.startLine + 1 });
+        }
+        break;
+      }
+      case "ts.jsx":
+        if (countsJsx) metrics.jsxComponents += 1;
+        break;
+    }
+  }
+  return metrics;
 }
 
-function descendant(node: SgNode | null, ...kinds: string[]): SgNode | null {
-  if (node === null) {
-    return null;
+/**
+ * The rules for one grammar. Each rule's direct-parent conditions stand in for a tree walk, so a match never borrows a node from a nested declaration.
+ * `surface` keeps only top-level imports and exports with their parts.
+ */
+function typescriptRules(grammar: Grammar, { surface }: { surface: boolean }): AstGrepRule[] {
+  const typed = grammar !== "javascript";
+  const fieldKind = typed ? "public_field_definition" : "field_definition";
+  const fieldName = typed ? "name" : "property";
+  const classKinds = typed
+    ? ["class_declaration", "abstract_class_declaration"]
+    : ["class_declaration"];
+  const namedKinds = typed
+    ? [...classKinds, "interface_declaration", "type_alias_declaration", "enum_declaration"]
+    : classKinds;
+  const exportStatement = surface
+    ? { kind: "export_statement", inside: { kind: "program" } }
+    : { kind: "export_statement" };
+  const identifierKinds = (typed ? ["identifier", "type_identifier"] : ["identifier"]).map(
+    (kind) => ({
+      kind,
+    }),
+  );
+  const binding = { any: [{ kind: "variable_declarator" }, { kind: fieldKind }], field: "value" };
+  const rules: Record<string, Record<string, unknown>> = {
+    import: {
+      kind: "import_statement",
+      has: { field: "source", pattern: "$NAME" },
+      ...(surface ? { inside: { kind: "program" } } : {}),
+    },
+    export: exportStatement,
+    export_source: { kind: "string", inside: { ...exportStatement, field: "source" } },
+    export_clause: { kind: "export_clause", inside: exportStatement },
+    export_specifier: {
+      kind: "export_specifier",
+      inside: { kind: "export_clause", inside: exportStatement },
+    },
+    export_specifier_name: {
+      kind: "identifier",
+      inside: {
+        kind: "export_specifier",
+        inside: { kind: "export_clause", inside: exportStatement },
+      },
+    },
+    export_namespace_name: {
+      kind: "identifier",
+      inside: { kind: "namespace_export", inside: exportStatement },
+    },
+    export_name: {
+      all: [
+        { any: identifierKinds },
+        {
+          any: [
+            {
+              inside: {
+                any: [
+                  { kind: "function_declaration" },
+                  { kind: "generator_function_declaration" },
+                  ...namedKinds.map((kind) => ({ kind })),
+                ],
+                field: "name",
+                inside: exportStatement,
+              },
+            },
+            {
+              inside: {
+                kind: "variable_declarator",
+                field: "name",
+                inside: {
+                  any: [{ kind: "lexical_declaration" }, { kind: "variable_declaration" }],
+                  inside: exportStatement,
+                },
+              },
+            },
+          ],
+        },
+      ],
+    },
+  };
+  if (!surface) {
+    Object.assign(rules, {
+      require: {
+        kind: "call_expression",
+        all: [
+          { has: { field: "function", kind: "identifier", regex: "^require$" } },
+          { has: { kind: "string", stopBy: "end", pattern: "$NAME" } },
+        ],
+      },
+      class: {
+        any: classKinds.map((kind) => ({ kind })),
+        has: { field: "name", pattern: "$NAME" },
+      },
+      class_heritage: {
+        kind: "class_heritage",
+        inside: { any: classKinds.map((kind) => ({ kind })) },
+        has: {
+          any: identifierKinds,
+          stopBy: "end",
+          pattern: "$NAME",
+        },
+      },
+      function: {
+        any: [{ kind: "function_declaration" }, { kind: "generator_function_declaration" }],
+        has: { field: "name", pattern: "$NAME" },
+      },
+      method: { kind: "method_definition", has: { field: "name", pattern: "$NAME" } },
+      field_function: {
+        kind: fieldKind,
+        all: [
+          { has: { field: "value", ...FUNCTION_EXPRESSION } },
+          { has: { field: fieldName, pattern: "$NAME" } },
+        ],
+      },
+      variable: {
+        kind: "variable_declarator",
+        all: [
+          { has: { field: "name", kind: "identifier", pattern: "$NAME" } },
+          { not: { inside: { kind: "statement_block", stopBy: "end" } } },
+        ],
+      },
+      local_variable: {
+        kind: "variable_declarator",
+        all: [
+          { has: { field: "name", kind: "identifier", pattern: "$NAME" } },
+          { inside: { kind: "statement_block", stopBy: "end" } },
+        ],
+      },
+      destructured_binding: {
+        kind: "variable_declarator",
+        all: [
+          { has: { field: "name", pattern: "$NAME" } },
+          { not: { has: { field: "name", kind: "identifier" } } },
+          { has: { field: "value", ...FUNCTION_EXPRESSION } },
+        ],
+      },
+      bound_function: { ...FUNCTION_EXPRESSION, inside: binding },
+      function_expression: {
+        all: [
+          FUNCTION_EXPRESSION,
+          { not: { inside: binding } },
+          {
+            any: [
+              { has: { field: "name", pattern: "$NAME" } },
+              { not: { has: { field: "name", kind: "identifier" } } },
+            ],
+          },
+        ],
+      },
+      callee: { kind: "identifier", inside: { kind: "call_expression", field: "function" } },
+      callee_member: {
+        kind: "member_expression",
+        inside: { kind: "call_expression", field: "function" },
+        has: { field: "property", pattern: "$NAME" },
+      },
+      ...(grammar === "typescript"
+        ? {}
+        : { jsx: { kind: "jsx_opening_element", inside: { kind: "jsx_element" } } }),
+    });
   }
-  for (const child of node.children()) {
-    if (kinds.includes(String(child.kind()))) {
-      return child;
-    }
-    const nested = descendant(child, ...kinds);
-    if (nested !== null) {
-      return nested;
-    }
-  }
-  return null;
+  return Object.entries(rules).map(([id, rule]) => ({ id: `ts.${id}`, language: grammar, rule }));
 }
 
 /** Strips matching quotes, as in `'./a.js'` → `./a.js`. */
-function stringValue(node: SgNode | null): string {
-  if (node === null) {
-    return "";
-  }
-  const text = node.text();
+function stringValue(text: string): string {
   if (text.length >= 2 && ["'", '"', "`"].includes(text[0] ?? "") && text.at(-1) === text[0]) {
     return text.slice(1, -1);
   }
-  const fragment = descendant(node, "string_fragment");
-  return fragment?.text() ?? text;
+  return text;
 }
 
-function spanFor(node: SgNode): number {
-  const nodeRange = node.range();
-  return Math.max(1, nodeRange.end.line - nodeRange.start.line + 1);
-}
-
-function startLineFor(node: SgNode): number {
-  return node.range().start.line + 1;
+function spanFor(match: AstGrepMatch): number {
+  return Math.max(1, match.endLine - match.startLine + 1);
 }
 
 function addTypescriptImport(
@@ -120,34 +334,23 @@ function addTypescriptReexport(
   }
 }
 
-/** Null when the statement names no bindings, as with `export * from`. */
-function typescriptReexportBindings(node: SgNode): TypeScriptReexportBinding[] | null {
-  const clause = directChild(node, "export_clause");
-  if (clause !== null) {
-    return clause
-      .children()
-      .filter((child) => child.kind() === "export_specifier")
+/** Null when the statement names no bindings, as with `export * from`; an empty clause gives an empty list. */
+function typescriptReexportBindings(statement: AstGrepMatch): TypeScriptReexportBinding[] | null {
+  const clause = statement.children.find((child) => child.rule === "ts.export_clause");
+  if (clause !== undefined) {
+    return clause.children
+      .filter((child) => child.rule === "ts.export_specifier")
       .flatMap((specifier) => {
-        const identifiers = specifier
-          .children()
-          .filter((child) => child.kind() === "identifier")
-          .map((child) => child.text());
+        const identifiers = specifier.children
+          .filter((child) => child.rule === "ts.export_specifier_name")
+          .map((child) => child.text);
         const imported = identifiers[0];
         const exported = identifiers.at(-1);
         return imported === undefined || exported === undefined ? [] : [{ imported, exported }];
       });
   }
-  const namespace = directChild(node, "namespace_export");
-  const exported = directChild(namespace ?? node, "identifier");
-  return namespace === null || exported === null
-    ? null
-    : [{ imported: null, exported: exported.text() }];
-}
-
-/** Reads a declarator's bound name, leaving destructuring patterns unrecorded rather than misreading their initializer. */
-function declaratorName(declarator: SgNode): string | null {
-  const name = declarator.field("name");
-  return name?.kind() === "identifier" ? name.text() : null;
+  const exported = statement.children.find((child) => child.rule === "ts.export_namespace_name");
+  return exported === undefined ? null : [{ imported: null, exported: exported.text }];
 }
 
 function addExportedName(metrics: FileMetrics, name: string): void {
@@ -160,7 +363,7 @@ function addTypescriptFunction(
   metrics: FileMetrics,
   relPath: string,
   name: string,
-  node: SgNode,
+  match: AstGrepMatch,
 ): void {
   if (!name) {
     return;
@@ -169,246 +372,24 @@ function addTypescriptFunction(
   metrics.functionSpans.push({
     name,
     identifier: definitionIdentifier(relPath, name),
-    span: spanFor(node),
-    startLine: startLineFor(node),
+    span: spanFor(match),
+    startLine: match.startLine + 1,
   });
   metrics.defines += 1;
   addSample(metrics.samples, name);
 }
 
-function isTypescriptModuleLevelVariable(node: SgNode): boolean {
-  let parent = node.parent();
-  while (parent !== null) {
-    const kind = parent.kind();
-    if (kind === "statement_block") {
-      return false;
-    }
-    if (kind === "program") {
-      return true;
-    }
-    parent = parent.parent();
-  }
-  return false;
-}
-
-function collectTypescriptExportNames(
-  metrics: FileMetrics,
-  node: SgNode,
-  bindings: TypeScriptReexportBinding[] | null,
-): void {
-  for (const child of node.children()) {
-    const kind = child.kind();
-    if (kind === "function_declaration" || kind === "generator_function_declaration") {
-      const name = directChild(child, "identifier");
-      if (name !== null) {
-        addExportedName(metrics, name.text());
-      }
-    } else if (
-      kind === "class_declaration" ||
-      kind === "abstract_class_declaration" ||
-      kind === "interface_declaration" ||
-      kind === "type_alias_declaration" ||
-      kind === "enum_declaration"
-    ) {
-      const name = directChild(child, "type_identifier", "identifier");
-      if (name !== null) {
-        addExportedName(metrics, name.text());
-      }
-    } else if (kind === "lexical_declaration" || kind === "variable_declaration") {
-      for (const declarator of child
-        .children()
-        .filter((candidate) => candidate.kind() === "variable_declarator")) {
-        const name = declaratorName(declarator);
-        if (name !== null) {
-          addExportedName(metrics, name);
-        }
-      }
+function collectTypescriptExport(metrics: FileMetrics, statement: AstGrepMatch): void {
+  const bindings = typescriptReexportBindings(statement);
+  metrics.exports += 1;
+  const source = statement.children.find((child) => child.rule === "ts.export_source");
+  addTypescriptReexport(metrics, stringValue(source?.text ?? ""), bindings);
+  for (const name of descendants(statement, "ts.export_name")) {
+    if (ancestor(name, "ts.export") === statement) {
+      addExportedName(metrics, name.text);
     }
   }
   for (const binding of bindings ?? []) {
     addExportedName(metrics, binding.exported);
   }
-}
-
-function collectTypescriptExport(metrics: FileMetrics, node: SgNode): void {
-  const bindings = typescriptReexportBindings(node);
-  metrics.exports += 1;
-  addTypescriptReexport(metrics, stringValue(directChild(node, "string")), bindings);
-  collectTypescriptExportNames(metrics, node, bindings);
-}
-
-function scanTypescriptWithAstGrep({
-  source,
-  filePath,
-  relPath,
-  metrics,
-}: {
-  source: string;
-  filePath: string;
-  relPath: string;
-  metrics: FileMetrics;
-}): void {
-  const root = parseTypescriptRoot(filePath, source);
-  if (root === null) {
-    return;
-  }
-
-  // Native matches arrive in source preorder, so a scope stack replaces one ancestor walk per call.
-  const scopes: FunctionScope[] = [];
-  for (const node of root.findAll(typescriptScanRule(filePath))) {
-    const range = node.range();
-    while (scopes.length && range.start.index >= scopes.at(-1)!.endIndex) scopes.pop();
-    const kind = node.kind();
-    if (FUNCTION_SCOPE_KINDS.has(String(kind))) {
-      scopes.push({ endIndex: range.end.index, caller: functionScopeCaller(node) });
-    }
-    if (kind === "import_statement") {
-      addTypescriptImport(metrics, stringValue(directChild(node, "string")));
-    } else if (kind === "call_expression") {
-      const target = node.field("function");
-      const caller = scopes.at(-1)?.caller;
-      const callee =
-        target?.kind() === "identifier"
-          ? target.text()
-          : target?.kind() === "member_expression"
-            ? target.field("property")?.text()
-            : null;
-      if (caller && callee) {
-        metrics.callSites.push({ caller, callee, lineNumber: range.start.line + 1 });
-      }
-      if (target?.kind() === "identifier" && callee === "require") {
-        addTypescriptImport(metrics, stringValue(descendant(node, "string")), "require");
-      }
-    } else if (kind === "export_statement") {
-      collectTypescriptExport(metrics, node);
-    } else if (kind === "class_declaration" || kind === "abstract_class_declaration") {
-      const name = directChild(node, "type_identifier", "identifier");
-      if (name !== null) {
-        metrics.classSpans.push({
-          name: name.text(),
-          span: spanFor(node),
-          startLine: startLineFor(node),
-        });
-        metrics.defines += 1;
-        addSample(metrics.samples, name.text());
-      }
-      const heritage = directChild(node, "class_heritage");
-      const base = heritage === null ? null : descendant(heritage, "identifier", "type_identifier");
-      if (base !== null) {
-        metrics.extends += 1;
-        addSample(metrics.samples, base.text());
-      }
-    } else if (kind === "function_declaration" || kind === "generator_function_declaration") {
-      const name = directChild(node, "identifier");
-      if (name !== null) {
-        addTypescriptFunction(metrics, relPath, name.text(), node);
-      }
-    } else if (kind === "method_definition") {
-      const name = directChild(node, "property_identifier", "private_property_identifier");
-      if (name !== null) {
-        addTypescriptFunction(metrics, relPath, name.text(), node);
-      }
-    } else if (kind === "public_field_definition" || kind === "field_definition") {
-      const name = node.field("name") ?? node.field("property");
-      const value = node.field("value");
-      if (name && value && FUNCTION_EXPRESSION_KINDS.includes(String(value.kind()))) {
-        addTypescriptFunction(metrics, relPath, name.text(), node);
-      }
-    } else if (kind === "variable_declarator") {
-      const name = declaratorName(node);
-      if (name !== null) {
-        metrics.variableNames.push(name);
-        addVariableDefinition(metrics, relPath, name, {
-          startLine: range.start.line + 1,
-          moduleLevel: isTypescriptModuleLevelVariable(node),
-        });
-        if (FUNCTION_EXPRESSION_KINDS.includes(String(node.field("value")?.kind()))) {
-          addTypescriptFunction(metrics, relPath, name, node);
-        }
-      }
-    } else if (kind === "jsx_element") {
-      metrics.jsxComponents += 1;
-    }
-  }
-}
-
-/** Selects relevant syntax nodes in native code instead of materializing the whole tree in JS. */
-function typescriptScanRule(filePath: string): NapiConfig {
-  const suffix = path.extname(filePath);
-  const kinds = [...TYPESCRIPT_SCAN_KINDS, ...FUNCTION_EXPRESSION_KINDS];
-  if (["typescript", "tsx"].includes(TYPESCRIPT_LANG_BY_SUFFIX[suffix] ?? "")) {
-    kinds.push("abstract_class_declaration", "public_field_definition");
-  } else {
-    kinds.push("field_definition");
-  }
-  if (suffix === ".jsx" || suffix === ".tsx") {
-    kinds.push("jsx_element");
-  }
-  return { rule: { any: kinds.map((kind) => ({ kind })) } };
-}
-
-/** Keeps imports and public exports for large files without deep native AST traversal. */
-function scanTypescriptSurfaceWithAstGrep({
-  source,
-  filePath,
-  metrics,
-}: {
-  source: string;
-  filePath: string;
-  metrics: FileMetrics;
-}): void {
-  const root = parseTypescriptRoot(filePath, source);
-  if (root === null) {
-    return;
-  }
-  for (const node of root.children()) {
-    if (node.kind() === "import_statement") {
-      addTypescriptImport(metrics, stringValue(directChild(node, "string")));
-    } else if (node.kind() === "export_statement") {
-      collectTypescriptExport(metrics, node);
-    }
-  }
-}
-
-function parseTypescriptRoot(filePath: string, source: string): SgNode | null {
-  return astGrepRoot(source, TYPESCRIPT_LANG_BY_SUFFIX[path.extname(filePath)] ?? "typescript");
-}
-
-export function scanTypescriptFile(
-  filePath: string,
-  { relPath, source: existingSource }: { relPath: string; source?: string | undefined },
-): FileMetrics {
-  const metrics = createFileMetrics({
-    path: filePath,
-    relPath,
-    suffix: path.extname(filePath),
-  });
-  let source: string;
-  try {
-    source = existingSource ?? readFileSync(filePath, "utf8");
-  } catch {
-    return metrics;
-  }
-
-  metrics.lines = sourceLineCount(source);
-  metrics.entrypointHint =
-    ENTRYPOINT_BASENAMES.has(path.basename(filePath)) || source.includes("require.main === module");
-  if (Buffer.byteLength(source, "utf8") <= MAX_AST_SOURCE_BYTES) {
-    scanTypescriptWithAstGrep({ source, filePath, relPath, metrics });
-  } else {
-    scanTypescriptSurfaceWithAstGrep({ source, filePath, metrics });
-  }
-  return metrics;
-}
-
-/**
- * Names the function scope that owns real call expressions, excluding comments and string examples.
- *
- * Function expressions take the name of the variable or class field they initialize; an anonymous innermost scope owns its calls without a caller name, so those calls are not attributed to an outer function.
- */
-function functionScopeCaller(node: SgNode): string | null {
-  const parent = node.parent();
-  const binding =
-    parent !== null && CALLER_BINDING_KINDS.has(String(parent.kind())) ? parent : node;
-  return (binding.field("name") ?? binding.field("property"))?.text() ?? null;
 }

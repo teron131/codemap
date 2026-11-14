@@ -1,134 +1,222 @@
-/** Reads TypeScript-family documentation from syntax. A declaration's docstring is its adjacent leading comment group, and the file docstring is the first leading comment that is not a tool directive. */
-import { readFileSync } from "node:fs";
-import path from "node:path";
-
-import type { SgNode } from "@ast-grep/napi";
-
-import { astGrepRoot } from "../../ast-grep.js";
-import { TYPESCRIPT_LANG_BY_SUFFIX } from "../scanner/index.js";
+/** Reads TypeScript-family documentation from one file's ast-grep matches. A declaration's docstring is its adjacent leading comment group, and the file docstring is the first leading comment that is not a tool directive. */
+import { type AstGrepMatch, type AstGrepRule } from "../../ast-grep.js";
 import type { ClassReport, FileReport, FunctionReport } from "./models.js";
 
+type Grammar = "typescript" | "tsx" | "javascript";
+
 type Declaration = {
-  node: SgNode;
-  signature: SgNode | null;
-  name: string;
+  match: AstGrepMatch;
+  signature: AstGrepMatch | null;
   kind: "class" | "function";
   docstring: string | null;
   children: Declaration[];
 };
 
+const FUNCTION_EXPRESSION_KINDS = ["arrow_function", "function_expression", "generator_function"];
+const DECLARATION_RULES = new Set([
+  "tsdoc.class",
+  "tsdoc.function",
+  "tsdoc.variable",
+  "tsdoc.variable_function",
+  "tsdoc.field_function",
+]);
+
+export const TYPESCRIPT_DOCSTRING_RULES: AstGrepRule[] = (
+  ["typescript", "tsx", "javascript"] as const
+).flatMap((grammar) => docstringRules(grammar));
+
 /** A variable or field reports as a function when it holds one, and a non-function variable reports too when a block comment documents it. Any syntax error yields `parseError` and no declarations. */
-export function buildTypescriptFileReport(
-  filePath: string,
-  { displayPath }: { displayPath: string },
+export function typescriptFileReport(
+  report: FileReport,
+  { source, matches }: { source: string; matches: AstGrepMatch[] },
 ): FileReport {
-  const report: FileReport = {
-    path: filePath,
-    displayPath,
-    fileDocstring: null,
-    functions: [],
-    classes: [],
-    parseError: null,
-  };
-  let source: string;
-  try {
-    source = readFileSync(filePath, "utf8");
-  } catch (error) {
-    report.parseError = error instanceof Error ? error.message : String(error);
-    return report;
+  if (matches.some((match) => match.rule === "tsdoc.invalid")) {
+    return { ...report, parseError: "invalid syntax" };
   }
-  const language = TYPESCRIPT_LANG_BY_SUFFIX[path.extname(filePath)] ?? "typescript";
-  const root = astGrepRoot(source, language);
-  if (root === null) {
-    report.parseError = "TypeScript syntax parser unavailable";
-    return report;
-  }
-  if (
-    root.find({
-      rule: { any: [{ kind: "ERROR" }, { all: [{ regex: "^$" }, { not: { kind: "program" } }] }] },
-    })
-  ) {
-    report.parseError = "invalid syntax";
-    return report;
-  }
+  const bytes = Buffer.from(source, "utf8");
   const lines = source.split(/\r?\n/);
-  report.fileDocstring = fileComment(root);
-  const kinds = [
-    "function_declaration",
-    "generator_function_declaration",
-    "method_definition",
-    "variable_declarator",
-    "class_declaration",
-  ];
-  if (language === "typescript" || language === "tsx")
-    kinds.push(
-      "abstract_class_declaration",
-      "function_signature",
-      "method_signature",
-      "abstract_method_signature",
-      "public_field_definition",
-    );
-  else kinds.push("field_definition");
+  const comments = matches.filter((match) => match.rule === "tsdoc.comment");
   const topLevel: Declaration[] = [];
-  // Native matches arrive in source preorder, so open declaration ranges identify each owner without ancestor walks.
-  const open: Array<{ declaration: Declaration; endIndex: number }> = [];
-  for (const node of root.findAll({ rule: { any: kinds.map((kind) => ({ kind })) } })) {
-    const name = (node.field("name") ?? node.field("property"))?.text();
-    if (!name) continue;
-    const kind = String(node.kind());
-    if (kind === "method_signature" && node.parent()?.kind() !== "class_body") continue;
-    const variable = kind === "variable_declarator";
-    const field = kind === "public_field_definition" || kind === "field_definition";
-    let signature: SgNode | null = node;
-    let anchor = node;
-    while (
-      ["export_statement", "lexical_declaration", "variable_declaration"].includes(
-        String(anchor.parent()?.kind()),
-      )
-    )
-      anchor = anchor.parent()!;
-    const comment = declarationComment(anchor, lines);
-    if (variable || field) {
-      const value = node.field("value");
-      signature =
-        value &&
-        ["arrow_function", "function_expression", "generator_function"].includes(
-          String(value.kind()),
-        )
-          ? value
-          : null;
-      if (signature === null && (field || !comment?.block)) continue;
+  const declarations = new Map<AstGrepMatch, Declaration>();
+  for (const match of matches) {
+    if (!DECLARATION_RULES.has(match.rule)) continue;
+    const comment = declarationComment(anchorFor(match), { bytes, lines, comments });
+    let signature: AstGrepMatch | null = match;
+    if (
+      match.rule === "tsdoc.variable" ||
+      match.rule === "tsdoc.variable_function" ||
+      match.rule === "tsdoc.field_function"
+    ) {
+      signature = match.children.find((child) => child.rule === "tsdoc.value_function") ?? null;
+      if (signature === null && !comment?.block) continue;
     }
     const declaration: Declaration = {
-      node,
+      match,
       signature,
-      name,
-      kind: kind.includes("class_declaration") ? "class" : "function",
+      kind: match.rule === "tsdoc.class" ? "class" : "function",
       docstring: comment?.text ?? null,
       children: [],
     };
-    const range = node.range();
-    while (open.length && range.start.index >= open.at(-1)!.endIndex) open.pop();
-    (open.at(-1)?.declaration.children ?? topLevel).push(declaration);
-    open.push({ declaration, endIndex: range.end.index });
+    declarations.set(match, declaration);
+    // Skipped declarations own nothing, so a member nests under the nearest reported ancestor.
+    let owner = match.parent;
+    while (owner !== null && !declarations.has(owner)) owner = owner.parent;
+    (owner === null ? topLevel : declarations.get(owner)!.children).push(declaration);
   }
-  for (const declaration of topLevel) {
-    if (declaration.kind === "class") report.classes.push(classReport(declaration));
-    else report.functions.push(functionReport(declaration));
+  return {
+    ...report,
+    fileDocstring: fileComment(source, { bytes, comments }),
+    functions: topLevel.filter((item) => item.kind === "function").map(functionReport),
+    classes: topLevel.filter((item) => item.kind === "class").map(classReport),
+  };
+}
+
+function docstringRules(grammar: Grammar): AstGrepRule[] {
+  const typed = grammar !== "javascript";
+  const fieldKind = typed ? "public_field_definition" : "field_definition";
+  const fieldName = typed ? "name" : "property";
+  const classKinds = typed
+    ? ["class_declaration", "abstract_class_declaration"]
+    : ["class_declaration"];
+  const functionKinds = [
+    "function_declaration",
+    "generator_function_declaration",
+    "method_definition",
+    ...(typed ? ["function_signature", "abstract_method_signature"] : []),
+  ];
+  const functionValue = {
+    has: { field: "value", any: FUNCTION_EXPRESSION_KINDS.map((kind) => ({ kind })) },
+  };
+  const signatureKinds = [
+    ...functionKinds,
+    ...FUNCTION_EXPRESSION_KINDS,
+    ...(typed ? ["method_signature"] : []),
+  ];
+  const signatureParent = (field: string) => ({
+    inside: { any: signatureKinds.map((kind) => ({ kind })), field },
+  });
+  const named = (field: string) => ({ has: { field, pattern: "$NAME" } });
+  const rules: Record<string, Record<string, unknown>> = {
+    // Error recovery can insert a missing token without an ERROR node. A missing named token is a zero-width node, and a missing closing delimiter leaves its node unclosed; other missing anonymous tokens, such as `;`, go unnoticed because kind matchers cannot name them.
+    invalid: {
+      any: [
+        { kind: "ERROR" },
+        {
+          any: [
+            "identifier",
+            "property_identifier",
+            "statement_block",
+            "optional_chain",
+            "empty_statement",
+            ...(typed ? ["type_identifier"] : []),
+          ].map((kind) => ({ kind })),
+          regex: "^$",
+        },
+        {
+          any: [
+            "statement_block",
+            "class_body",
+            "object",
+            "object_pattern",
+            "array",
+            "array_pattern",
+            "arguments",
+            "formal_parameters",
+            "parenthesized_expression",
+            "switch_body",
+            "named_imports",
+            "export_clause",
+            ...(typed
+              ? ["object_type", "interface_body", "enum_body", "type_arguments", "type_parameters"]
+              : ["jsx_expression"]),
+          ].map((kind) => ({ kind })),
+          not: { regex: "[)\\]}>]$" },
+        },
+        { kind: "template_string", not: { regex: "`$" } },
+        { kind: "string", not: { regex: "[\"']$" } },
+      ],
+    },
+    comment: { kind: "comment" },
+    class: { any: classKinds.map((kind) => ({ kind })), ...named("name") },
+    function: {
+      any: [
+        ...functionKinds.map((kind) => ({ kind })),
+        ...(typed ? [{ kind: "method_signature", inside: { kind: "class_body" } }] : []),
+      ],
+      ...named("name"),
+    },
+    variable: { kind: "variable_declarator", all: [named("name"), { not: functionValue }] },
+    variable_function: { kind: "variable_declarator", all: [named("name"), functionValue] },
+    field_function: { kind: fieldKind, all: [named(fieldName), functionValue] },
+    value_function: {
+      any: FUNCTION_EXPRESSION_KINDS.map((kind) => ({ kind })),
+      inside: { any: [{ kind: "variable_declarator" }, { kind: fieldKind }], field: "value" },
+    },
+    // Callbacks and other unbound functions report nothing, but holding their own parameters and return types keeps those off the enclosing declaration.
+    nested_function: {
+      any: FUNCTION_EXPRESSION_KINDS.map((kind) => ({ kind })),
+      not: {
+        inside: { any: [{ kind: "variable_declarator" }, { kind: fieldKind }], field: "value" },
+      },
+    },
+    parameters: { kind: "formal_parameters", ...signatureParent("parameters") },
+    parameter: { kind: "identifier", inside: { kind: "arrow_function", field: "parameter" } },
+    // The export or declaration list that a documenting comment precedes instead of the declaration itself.
+    declaration_list: {
+      any: [{ kind: "lexical_declaration" }, { kind: "variable_declaration" }],
+    },
+    export: {
+      kind: "export_statement",
+      has: {
+        any: [
+          ...[...classKinds, ...functionKinds].map((kind) => ({ kind })),
+          { kind: "lexical_declaration" },
+          { kind: "variable_declaration" },
+        ],
+      },
+    },
+    ...(typed
+      ? {
+          return_type: {
+            any: ["type_annotation", "asserts_annotation", "type_predicate_annotation"].map(
+              (kind) => ({ kind }),
+            ),
+            ...signatureParent("return_type"),
+          },
+        }
+      : {}),
+  };
+  return Object.entries(rules).map(([id, rule]) => ({
+    id: `tsdoc.${id}`,
+    language: grammar,
+    rule,
+  }));
+}
+
+/** Climbs from a declaration through the declaration list and export that directly hold it, where a leading comment sits. */
+function anchorFor(match: AstGrepMatch): AstGrepMatch {
+  let anchor = match;
+  while (
+    anchor.parent !== null &&
+    (anchor.parent.rule === "tsdoc.declaration_list" || anchor.parent.rule === "tsdoc.export")
+  ) {
+    anchor = anchor.parent;
   }
-  return report;
+  return anchor;
 }
 
 function functionReport(declaration: Declaration): FunctionReport {
-  const parameters = declaration.signature?.field("parameters");
-  const single = declaration.signature?.field("parameter");
-  const params = parameters?.text().slice(1, -1) ?? single?.text() ?? "";
+  const parts = declaration.signature?.children ?? [];
+  const parameters = parts.find((child) => child.rule === "tsdoc.parameters");
+  const single = parts.find((child) => child.rule === "tsdoc.parameter");
+  const params = parameters?.text.slice(1, -1) ?? single?.text ?? "";
   return {
-    name: declaration.name,
-    lineno: declaration.node.range().start.line + 1,
+    name: declaration.match.name,
+    lineno: declaration.match.startLine + 1,
     inputs: params.replace(/\s+/g, " ").trim() || "none",
     outputs:
-      declaration.signature?.field("return_type")?.text().replace(/^:\s*/, "") ?? "unannotated",
+      parts.find((child) => child.rule === "tsdoc.return_type")?.text.replace(/^:\s*/, "") ??
+      "unannotated",
     docstring: declaration.docstring,
     nestedFunctions: declaration.children
       .filter((child) => child.kind === "function")
@@ -138,62 +226,79 @@ function functionReport(declaration: Declaration): FunctionReport {
 
 function classReport(declaration: Declaration): ClassReport {
   return {
-    name: declaration.name,
-    lineno: declaration.node.range().start.line + 1,
+    name: declaration.match.name,
+    lineno: declaration.match.startLine + 1,
     docstring: declaration.docstring,
     methods: declaration.children.filter((child) => child.kind === "function").map(functionReport),
     nestedClasses: declaration.children.filter((child) => child.kind === "class").map(classReport),
   };
 }
 
-/** Associates adjacent leading comments with their declaration without borrowing a previous statement's trailing comment. */
+/**
+ * Associates adjacent leading comments with their declaration without borrowing a previous statement's trailing comment.
+ * A comment is adjacent when only whitespace separates it from what follows, which is what makes it that node's previous sibling.
+ */
 function declarationComment(
-  anchor: SgNode,
-  lines: string[],
+  anchor: AstGrepMatch,
+  { bytes, lines, comments }: { bytes: Buffer; lines: string[]; comments: AstGrepMatch[] },
 ): { text: string; block: boolean } | null {
-  let previous = anchor.prev();
-  let nextLine = anchor.range().start.line;
-  const comments: SgNode[] = [];
-  while (previous?.kind() === "comment" && nextLine - previous.range().end.line <= 1) {
+  const group: AstGrepMatch[] = [];
+  let next = anchor;
+  let index = comments.findLastIndex((comment) => comment.end <= anchor.start);
+  while (index >= 0) {
+    const previous = comments[index]!;
     if (
-      !(lines[previous.range().start.line] ?? "")
-        .trimStart()
-        .startsWith(previous.text().split(/\r?\n/)[0] ?? "")
+      !whitespaceBetween(bytes, previous.end, next.start) ||
+      next.startLine - previous.endLine > 1
     )
       break;
-    comments.unshift(previous);
-    nextLine = previous.range().start.line;
-    if (previous.text().startsWith("/*")) break;
-    previous = previous.prev();
+    if (
+      !(lines[previous.startLine] ?? "")
+        .trimStart()
+        .startsWith(previous.text.split(/\r?\n/)[0] ?? "")
+    )
+      break;
+    group.unshift(previous);
+    if (previous.text.startsWith("/*")) break;
+    next = previous;
+    index -= 1;
   }
-  return comments.length === 0
+  return group.length === 0
     ? null
     : {
-        text: comments.map((comment) => cleanComment(comment.text())).join("\n"),
-        block: comments.some((comment) => comment.text().startsWith("/*")),
+        text: group.map((comment) => cleanComment(comment.text)).join("\n"),
+        block: group.some((comment) => comment.text.startsWith("/*")),
       };
 }
 
-/** Keeps tool directives out of file intent while preserving the first meaningful comment group. */
-function fileComment(root: SgNode): string | null {
-  const nodes = root.namedChildren();
-  for (let index = 0; index < nodes.length; index += 1) {
-    const node = nodes[index]!;
-    if (node.kind() === "hash_bang_line") continue;
-    if (node.kind() !== "comment") return null;
+/** Keeps tool directives out of file intent while preserving the first meaningful comment group; only comments before the first statement count. */
+function fileComment(
+  source: string,
+  { bytes, comments }: { bytes: Buffer; comments: AstGrepMatch[] },
+): string | null {
+  const hashBang = /^#![^\r\n]*/.exec(source)?.[0];
+  let cursor = hashBang === undefined ? 0 : Buffer.byteLength(hashBang, "utf8");
+  for (let index = 0; index < comments.length; index += 1) {
+    const node = comments[index]!;
+    if (!whitespaceBetween(bytes, cursor, node.start)) return null;
     const group = [node];
-    if (node.text().startsWith("//")) {
+    if (node.text.startsWith("//")) {
       while (
-        nodes[index + 1]?.kind() === "comment" &&
-        nodes[index + 1]!.text().startsWith("//") &&
-        nodes[index + 1]!.range().start.line === nodes[index]!.range().end.line + 1
+        comments[index + 1]?.text.startsWith("//") &&
+        comments[index + 1]!.startLine === comments[index]!.endLine + 1 &&
+        whitespaceBetween(bytes, comments[index]!.end, comments[index + 1]!.start)
       )
-        group.push(nodes[++index]!);
+        group.push(comments[++index]!);
     }
-    const comment = group.map((item) => cleanComment(item.text())).join("\n");
+    const comment = group.map((item) => cleanComment(item.text)).join("\n");
     if (comment && !isIgnorableFileComment(comment)) return comment;
+    cursor = comments[index]!.end;
   }
   return null;
+}
+
+function whitespaceBetween(bytes: Buffer, start: number, end: number): boolean {
+  return start <= end && !/\S/.test(bytes.toString("utf8", start, end));
 }
 
 /** Strips comment markers and drops blank lines, so paragraph breaks do not survive. */

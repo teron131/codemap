@@ -2,6 +2,8 @@
 export {
   callCodebaseMemoryTool,
   codebaseMemoryFailureReason,
+  codebaseMemoryOutage,
+  isPermissionDenial,
   withFreshCodebaseMemoryProject,
 } from "./client.js";
 export type { CodebaseMemoryChangeOptions, CodebaseMemoryStatusResult } from "./queries.js";

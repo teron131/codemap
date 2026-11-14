@@ -1,6 +1,7 @@
-/** `search match`, `search calls`, and `search rule`: explicit ast-grep searches. Exit code 1 means no match and 127 an unavailable language. */
+/** `search match`, `search calls`, and `search rule`: explicit ast-grep searches. Exit code 1 means no match, 2 invalid input, such as a pattern or rule ast-grep rejects with its reason on stderr, and 127 a language call search has no patterns for. */
 import type { Command } from "commander";
 
+import { AstGrepRuleError } from "../ast-grep.js";
 import {
   callMatches,
   resolveProjectFile,
@@ -104,22 +105,20 @@ function commandSearchMatch(options: SearchMatchOptions): number {
     return 1;
   }
   const matches = [];
-  const unavailableLanguages = [];
   let searchedLanguages = 0;
   for (const language of languages) {
-    const languageMatches = search.matches(language, { rule: { pattern: options.pattern } });
-    if (languageMatches === null) {
-      unavailableLanguages.push(language);
-      continue;
+    try {
+      matches.push(...search.patternMatches(language, options.pattern));
+      searchedLanguages += 1;
+    } catch (error) {
+      if (!(error instanceof AstGrepRuleError)) {
+        throw error;
+      }
+      console.error(`ast-grep rejected the pattern for ${language}:\n${error.message}`);
     }
-    searchedLanguages += 1;
-    matches.push(...languageMatches);
-  }
-  if (unavailableLanguages.length > 0) {
-    console.error(`Unavailable syntax languages: ${unavailableLanguages.join(", ")}.`);
   }
   if (searchedLanguages === 0) {
-    return 127;
+    return 2;
   }
   printSyntaxMatches(matches, { jsonOutput: Boolean(options.json) });
   if (matches.length === 0 && !options.json) {
@@ -146,7 +145,9 @@ function commandSearchCalls(options: SearchCallsOptions): number {
   for (const language of languages) {
     const languageMatches = callMatches(search, language, options.name);
     if (languageMatches === null) {
-      console.log(`Unavailable: ast-grep is not available for language: ${language}.`);
+      console.log(
+        `Unavailable: call search has no grammar for ${language}. Use search match --lang ${language} with a call pattern, or inspect <symbol> for callers.`,
+      );
       return 127;
     }
     matches.push(...languageMatches);
@@ -174,10 +175,15 @@ async function commandSearchRule(options: SearchRuleOptions): Promise<number> {
   const root = resolveProjectRoot(options);
   const paths = resolveTargetPaths(root, options.paths ?? []);
   const rulePath = resolveProjectFile(root, options.rule);
-  const matches = await searchRuleMatches(root, rulePath, paths);
-  if (matches === null) {
-    console.error("Unavailable: ast-grep cannot run this rule language.");
-    return 127;
+  let matches;
+  try {
+    matches = await searchRuleMatches(root, rulePath, paths);
+  } catch (error) {
+    if (!(error instanceof AstGrepRuleError)) {
+      throw error;
+    }
+    console.error(`ast-grep rejected the rule:\n${error.message}`);
+    return 2;
   }
   if (options.json) {
     console.log(

@@ -134,6 +134,7 @@ function renderCodebaseMemoryArchitectureSummary(value: unknown): string {
     project: stringField(architecture.project) ?? "project",
     readme: [],
     languages: [],
+    backendOnlyLanguages: [],
     publicSurfaces: [],
     structuralRoles: [],
     structuralOutlines: [],

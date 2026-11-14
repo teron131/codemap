@@ -2,7 +2,11 @@
 import path from "node:path";
 
 import { docstringForSymbol } from "../source/docstrings/index.js";
-import { buildInventory } from "../source/extraction/index.js";
+import {
+  backendOnlyCoverageLine,
+  backendOnlyLanguages,
+  buildInventory,
+} from "../source/extraction/index.js";
 import {
   DETAILED_ANALYSIS_FILE_LIMIT,
   edgeRelationshipLabel,
@@ -31,14 +35,23 @@ import {
 } from "./profiles.js";
 import { inspectCandidates, inspectPathTargetKind, nodeLabel, normalizeTarget } from "./targets.js";
 
-/** Null when the target matches nothing, leaving the no-match message to the command. */
+/** Null when the target matches nothing, leaving the no-match message to the command. `backendFiles` carry Codebase Memory definitions for files the scanner cannot parse; above the detailed-analysis limit they are not used. */
 export function renderWorkingTreeInspection(
   root: string,
   rawTarget: string,
-  { limit }: { limit: number },
+  { limit, backendFiles }: { limit: number; backendFiles: FileMetrics[] },
 ): string | null {
   const target = normalizeTarget(root, rawTarget);
-  const inventory = buildInventory(root);
+  const discovered = buildInventory(root);
+  const discoveredPaths = new Set(discovered.map((entry) => entry.path));
+  // A file Codebase Memory describes is inspectable even when discovery does not list its suffix.
+  const inventory = [
+    ...discovered,
+    ...buildInventory(
+      root,
+      backendFiles.filter((file) => !discoveredPaths.has(file.relPath)).map((file) => file.path),
+    ),
+  ];
   const pathTargetKind = inspectPathTargetKind(root, target);
   if (pathTargetKind !== null && inventory.length > DETAILED_ANALYSIS_FILE_LIMIT) {
     const inspection =
@@ -54,11 +67,17 @@ export function renderWorkingTreeInspection(
       return inspection;
     }
   }
-  const [graph, metrics, fileMetricsByPath] = workingTreeInspectGraph(root, target, inventory);
+  const [graph, metrics, fileMetricsByPath] = workingTreeInspectGraph(
+    root,
+    target,
+    inventory,
+    backendFiles,
+  );
   return renderInspection(root, graph, metrics, target, {
     limit,
     likelyEntries: likelyEntriesByFile(buildLikelyEntries(graph.nodes, graph.edges)),
     fileMetricsByPath,
+    backendOnlyPaths: backendFiles.map((file) => file.relPath),
   });
 }
 
@@ -135,10 +154,12 @@ function renderInspection(
     limit,
     likelyEntries,
     fileMetricsByPath,
+    backendOnlyPaths,
   }: {
     limit: number;
     likelyEntries: Map<string, LikelyEntry>;
     fileMetricsByPath: Record<string, FileMetrics | undefined>;
+    backendOnlyPaths: string[];
   },
 ): string | null {
   const directoryProfile = renderDirectoryProfile(root, graph, metrics, target, {
@@ -156,6 +177,9 @@ function renderInspection(
   const nodesById = new Map(graph.nodes.map((item) => [item.id, item]));
   const relPath = node.filePath;
   const lines = [`# ${nodeLabel(node)}`, "", node.summary.trim()];
+  if (backendOnlyPaths.includes(relPath)) {
+    lines.push(backendOnlyCoverageLine(backendOnlyLanguages([relPath])));
+  }
 
   appendLikelyEntryContext(lines, likelyEntries.get(relPath));
   appendSymbolProfile(lines, node);

@@ -64,6 +64,8 @@ For a behavior change, name two sets before editing: targets that must change, e
 
 Run both builds under the same backend availability. A sandbox that blocks the Codebase Memory daemon turns every graph-backed case into a fallback, so a comparison that mixes sandboxed and unsandboxed runs measures the sandbox.
 
+Backend-ranked output also varies between runs of one build: tied rows in `Most Called`, cluster order, call-trace hops, and tied graph-search rows. Before blaming a control diff in those sections on the change, run the baseline twice and diff it against itself.
+
 ## Choose Evidence by Risk
 
 Use the smallest matrix that can falsify the change:
@@ -97,11 +99,13 @@ Use regular references to judge useful defaults, the optional library case for l
 | [Cal.diy](https://github.com/calcom/cal.diy) | Regular full-stack reference | TypeScript | 380k | L | Next.js, tRPC, Prisma, and feature boundaries across application packages. |
 | [LangChain JS](https://github.com/langchain-ai/langchainjs) | Optional library case | TypeScript | 180k | M | Generic public APIs, runnable composition, re-exports, and provider packages. |
 | [Transformers](https://github.com/huggingface/transformers) | Python stress case | Python | 740k | XL | Repeated model families, large classes, lazy imports, generated source, and substantial tests. |
+| [Cobra](https://github.com/spf13/cobra) | Backend-only baseline case | Go | 6k | S | One flat package, methods on one large struct, and tests beside source. |
+| [ripgrep](https://github.com/BurntSushi/ripgrep) | Backend-only baseline case | Rust | 50k | M | A crate workspace, traits and `impl` blocks, and shell completions beside source. |
 | [OpenClaw](https://github.com/openclaw/openclaw) | Extreme stress case only | Mainly TypeScript; Swift, Kotlin | 3.4M | XXL | Very large trees, multiple runtimes, traversal cost, output limits, and degraded behavior. |
 
-Use focused Hermes tasks for ordinary navigation checks. DeepSeek's [Cordis architecture](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/architecture.md) adds service and event registration that import or call graphs cannot fully explain, so it holds the regular TypeScript-agent slot while LangChain JS stays optional. OpenClaw tests extremes only and should not set everyday defaults.
+Use focused Hermes tasks for ordinary navigation checks. DeepSeek's [Cordis architecture](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/architecture.md) adds service and event registration that import or call graphs cannot fully explain, so it holds the regular TypeScript-agent slot while LangChain JS stays optional. Cobra and ripgrep cover the languages the working tree does not parse: use them whenever a change touches backend rows, path policy, or the coverage line. OpenClaw tests extremes only and should not set everyday defaults.
 
-Sizes are rounded nonblank source lines, comments included, excluding tests, fixtures, examples, documentation, benchmarks, vendored code, build output, and obvious generated files; they show approximate scale, not Codemap's eligible-file counts. M is 50k–200k lines, L 200k–500k, XL 500k–2M, and XXL above 2M. Refresh them only when scale affects the choice of case.
+Sizes are rounded nonblank source lines, comments included, excluding tests, fixtures, examples, documentation, benchmarks, vendored code, build output, and obvious generated files; they show approximate scale, not Codemap's eligible-file counts. S is under 50k lines, M 50k–200k, L 200k–500k, XL 500k–2M, and XXL above 2M. Refresh them only when scale affects the choice of case.
 
 Useful task seeds include tracing a Hermes tool call, locating DeepSeek's tool registration and execution, following a Django model save, finding Excalidraw's deletion/history update, or tracing Cal.diy booking behavior across frontend and server packages. Verify the expected target from source before treating a seed as a regression case; record focused path queries separately from whole-repository traversals.
 

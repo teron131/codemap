@@ -8,13 +8,8 @@ import {
   codebaseMemoryQueryWithProject,
 } from "../codebase-memory/index.js";
 import { arrayValue, nonblankString, recordValue } from "../json-utils.js";
-import {
-  isGeneratedPath,
-  isSupportedSourcePath,
-  isTestPath,
-  PYTHON_SUFFIXES,
-  TYPESCRIPT_SUFFIXES,
-} from "../source/scanner/index.js";
+import { backendOnlyLanguages } from "../source/extraction/index.js";
+import { isGeneratedPath, isIgnoredPath, isTestPath } from "../source/scanner/index.js";
 import { compareText } from "../text-utils.js";
 import type { SignalSection } from "./schema.js";
 
@@ -28,6 +23,7 @@ const BACKEND_FUNCTION_METRICS_COLUMNS = [
   "name",
   "file_path",
   "start_line",
+  "end_line",
   "lines",
   "complexity",
   "cognitive",
@@ -36,7 +32,10 @@ const BACKEND_FUNCTION_METRICS_COLUMNS = [
 const BACKEND_FUNCTION_METRICS_LIMIT = 100;
 const BACKEND_FUNCTION_METRICS_FILE_LIMIT = 10_000;
 
-/** `top` fills backend rows out with distinct working-tree rows, while `all` carries backend rows alone; above 10,000 eligible files the backend is skipped. */
+/**
+ * `top` fills backend rows out with distinct working-tree rows, while `all` carries backend rows alone; above 10,000 eligible files the backend is skipped.
+ * Backend rows cover every language Codebase Memory indexes; `backendOnlyLanguages` names the ones among them the working-tree scanner cannot parse, and is absent when there are none.
+ */
 export function addBackendFunctionMetrics(
   payload: Record<string, unknown>,
   section: SignalSection,
@@ -55,20 +54,16 @@ export function addBackendFunctionMetrics(
     };
   }
   const backend = backendFunctionMetrics(root, { includeTests });
-  if (section === "top") {
-    const functionMetrics = mergedFunctionMetrics(backend, arrayValue(payload.functionMetrics));
-    return {
-      ...payload,
-      freshness: backend.freshness,
-      ...(backend.reason === null ? {} : { backendReason: backend.reason }),
-      functionMetrics,
-    };
-  }
+  const languages = backendOnlyLanguages(backend.rows.map((row) => String(row.path)));
   return {
     ...payload,
     freshness: backend.freshness,
     ...(backend.reason === null ? {} : { backendReason: backend.reason }),
-    functionMetrics: backend.rows,
+    ...(languages.length === 0 ? {} : { backendOnlyLanguages: languages }),
+    functionMetrics:
+      section === "top"
+        ? mergedFunctionMetrics(backend, arrayValue(payload.functionMetrics))
+        : backend.rows,
   };
 }
 
@@ -132,17 +127,12 @@ function backendFunctionMetrics(
   };
 }
 
-/** Ranks functions and methods in the backend so its row limit keeps the true top rows, filtering by language there so the limit is not spent on rows `functionMetricRow` drops; the backend orders by returned aliases only, so metrics are coalesced in `RETURN`. */
+/** Ranks functions and methods in the backend so its row limit keeps the true top rows; the backend orders by returned aliases only, so metrics are coalesced in `RETURN`. */
 function functionMetricsQuery({ includeTests }: { includeTests: boolean }): string {
-  // Uppercase suffixes, which `isSupportedSourcePath` accepts, are left out: the backend cannot lowercase a value before `ENDS WITH`.
-  const suffixes = [...PYTHON_SUFFIXES, ...TYPESCRIPT_SUFFIXES].map(
-    (suffix) => `f.file_path ENDS WITH '${suffix}'`,
-  );
-  const conditions = [`(${suffixes.join(" OR ")})`, ...(includeTests ? [] : ["f.is_test = false"])];
   return [
     "MATCH (f:Function|Method)",
-    `WHERE ${conditions.join(" AND ")}`,
-    "RETURN f.name AS name, f.file_path AS file_path, f.start_line AS start_line, coalesce(f.lines, 0) AS lines, coalesce(f.complexity, 0) AS complexity, coalesce(f.cognitive, 0) AS cognitive, f.linear_scan_in_loop AS linear_scan_in_loop",
+    ...(includeTests ? [] : ["WHERE f.is_test = false"]),
+    "RETURN f.name AS name, f.file_path AS file_path, f.start_line AS start_line, f.end_line AS end_line, coalesce(f.lines, 0) AS lines, coalesce(f.complexity, 0) AS complexity, coalesce(f.cognitive, 0) AS cognitive, f.linear_scan_in_loop AS linear_scan_in_loop",
     "ORDER BY cognitive DESC, complexity DESC, lines DESC, file_path, name",
   ].join(" ");
 }
@@ -159,7 +149,7 @@ function functionMetricRow(
     return null;
   }
   if (
-    !isSupportedSourcePath(filePath) ||
+    isIgnoredPath(filePath) ||
     isGeneratedPath(filePath) ||
     (!includeTests && isTestPath(filePath))
   ) {
@@ -168,11 +158,13 @@ function functionMetricRow(
   const cognitive = numericField(row.cognitive);
   const cyclomatic = numericField(row.complexity);
   const hiddenQuadratic = numericField(row.linear_scan_in_loop);
+  const line = numericField(row.start_line);
   return {
     name,
     path: filePath,
-    line: numericField(row.start_line),
-    lines: numericField(row.lines),
+    line,
+    // The backend leaves `lines` at 0 for some definitions it still bounds, such as Rust methods.
+    lines: numericField(row.lines) || Math.max(0, numericField(row.end_line) - line + 1),
     cognitive,
     cyclomatic,
     ...(hiddenQuadratic > 0 ? { hiddenQuadratic } : {}),

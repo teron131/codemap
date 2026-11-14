@@ -210,7 +210,7 @@ export function printCodebaseMemoryGraphSearch(
     filters,
   );
   if (result === null) {
-    return "Codebase Memory graph search returned no answer";
+    return "Codebase Memory is unavailable";
   }
   const selection = searchRowSelection(result.rows, { includeTests });
   const filteredRows = selection.visibleRows.filter(
@@ -246,7 +246,7 @@ export function printCodebaseMemorySemanticSearch(
 ): string | null {
   const result = codebaseMemorySemanticSearch(root, searchText, backendFetchLimit(limit, options));
   if (result === null) {
-    return "Codebase Memory semantic search returned no answer";
+    return "Codebase Memory is unavailable";
   }
   const selection = searchRowSelection(result.rows, options);
   if (selection.visibleRows.length === 0) {

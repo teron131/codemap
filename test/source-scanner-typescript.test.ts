@@ -8,7 +8,7 @@ import { collectReports } from "../src/codemap/source/docstrings/index.js";
 import { runImportMap } from "../src/codemap/source/extraction/index.js";
 import { inventoryEntry } from "../src/codemap/source/extraction/inventory.js";
 import { classifyTags } from "../src/codemap/source/graph/builder.js";
-import { scanFile, scanTypescriptFile } from "../src/codemap/source/scanner/index.js";
+import { scanFile } from "../src/codemap/source/scanner/index.js";
 
 const workspaceRoot = process.cwd();
 let workDir: string;
@@ -28,19 +28,6 @@ afterEach(() => {
 });
 
 describe("TypeScript-family scanner", () => {
-  it("uses supplied source for one scan without caching it across later scans", () => {
-    const filePath = path.join(workDir, "api.ts");
-    writeFileSync(filePath, "export function diskVersion() {}\n");
-    const options = { displayRoot: workDir };
-
-    expect(
-      scanFile(filePath, { ...options, source: "export function snapshotVersion() {}\n" })
-        .functionNames,
-    ).toEqual(["snapshotVersion"]);
-    expect(scanFile(filePath, { ...options, source: "" }).functionNames).toEqual([]);
-    expect(scanFile(filePath, options).functionNames).toEqual(["diskVersion"]);
-  });
-
   it("labels JavaScript and TypeScript module suffixes", () => {
     for (const [suffix, language] of [
       [".mjs", "javascript"],
@@ -89,9 +76,7 @@ describe("TypeScript-family scanner", () => {
         "utf8",
       );
 
-      const metrics = scanTypescriptFile(filePath, {
-        relPath: `module${suffix}`,
-      });
+      const metrics = scanFile(filePath, { displayRoot: workDir });
 
       expect(metrics.lines).toBe(6);
       expect(metrics.importsLocal).toBe(0);
@@ -120,7 +105,7 @@ describe("TypeScript-family scanner", () => {
       "utf8",
     );
 
-    const metrics = scanTypescriptFile(filePath, { relPath: "service.ts" });
+    const metrics = scanFile(filePath, { displayRoot: workDir });
 
     expect(metrics.functionNames).toContain("createPinnedTarget");
     expect(metrics.functionSpans).toContainEqual(
@@ -133,24 +118,28 @@ describe("TypeScript-family scanner", () => {
   });
 
   it("does not mistake destructuring initializers for variable or export names", () => {
-    const metrics = scanTypescriptFile(path.join(workDir, "bindings.ts"), {
-      relPath: "bindings.ts",
-      source: [
+    const filePath = path.join(workDir, "bindings.ts");
+    writeFileSync(
+      filePath,
+      [
         "const { local } = localSource;",
         "export const { value: renamed } = objectSource;",
         "export const [first] = arraySource;",
         "export const plain = source;",
       ].join("\n"),
-    });
+      "utf8",
+    );
+    const metrics = scanFile(filePath, { displayRoot: workDir });
 
     expect(metrics.variableNames).toEqual(["plain"]);
     expect(metrics.exportedNames).toEqual(["plain"]);
   });
 
   it("restores call ownership after nested and anonymous function scopes", () => {
-    const metrics = scanTypescriptFile(path.join(workDir, "scopes.ts"), {
-      relPath: "scopes.ts",
-      source: [
+    const filePath = path.join(workDir, "scopes.ts");
+    writeFileSync(
+      filePath,
+      [
         "function outer() {",
         "  before();",
         "  const inner = () => inside();",
@@ -161,7 +150,9 @@ describe("TypeScript-family scanner", () => {
         "outside();",
         "function sibling() { last(); }",
       ].join("\n"),
-    });
+      "utf8",
+    );
+    const metrics = scanFile(filePath, { displayRoot: workDir });
 
     expect(metrics.callSites).toEqual([
       { caller: "outer", callee: "before", lineNumber: 2 },
@@ -191,7 +182,7 @@ describe("TypeScript-family scanner", () => {
       "utf8",
     );
 
-    expect(scanTypescriptFile(filePath, { relPath: "surface.ts" }).exportedNames).toEqual([
+    expect(scanFile(filePath, { displayRoot: workDir }).exportedNames).toEqual([
       "Options",
       "Result",
       "Mode",
@@ -211,9 +202,7 @@ describe("TypeScript-family scanner", () => {
       "utf8",
     );
 
-    expect(scanTypescriptFile(filePath, { relPath: "large-surface.ts" }).exportedNames).toEqual([
-      "publicApi",
-    ]);
+    expect(scanFile(filePath, { displayRoot: workDir }).exportedNames).toEqual(["publicApi"]);
   });
 
   it("resolves imports across JavaScript and TypeScript module suffixes", () => {

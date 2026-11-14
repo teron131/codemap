@@ -2,6 +2,7 @@
 import type { Command } from "commander";
 
 import {
+  backendFileDefinitions,
   codebaseMemoryInspect,
   inspectPathTargetKind,
   renderCodebaseMemoryInspect,
@@ -50,7 +51,10 @@ export function commandInspect(
   }
   const pathTarget = !options.backend && inspectPathTargetKind(root, target) !== null;
   if (pathTarget) {
-    const inspection = renderWorkingTreeInspection(root, target, { limit });
+    const inspection = renderWorkingTreeInspection(root, target, {
+      limit,
+      backendFiles: options.local ? [] : backendFileDefinitions(root, target),
+    });
     if (inspection !== null) {
       console.log(inspection);
       return 0;
@@ -68,7 +72,9 @@ export function commandInspect(
     console.log("Backend: Codebase Memory");
     return 1;
   }
-  const inspection = pathTarget ? null : renderWorkingTreeInspection(root, target, { limit });
+  const inspection = pathTarget
+    ? null
+    : renderWorkingTreeInspection(root, target, { limit, backendFiles: [] });
   if (inspection === null) {
     const quotedTarget = `'${target.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
     console.log(`No match: ${target}`);

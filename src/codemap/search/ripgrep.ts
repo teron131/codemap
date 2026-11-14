@@ -8,6 +8,7 @@ import {
   PYTHON_SUFFIXES,
   ROOT_IGNORED_DIR_NAMES,
   TYPESCRIPT_SUFFIXES,
+  UNPARSED_SOURCE_SUFFIXES,
 } from "../source/scanner/index.js";
 import { escapeRegExp } from "../text-utils.js";
 import type { SourceMatch } from "./source.js";
@@ -16,6 +17,9 @@ const SOURCE_MATCH_TEXT_LIMIT = 240;
 const SOURCE_SEARCH_BUFFER_LIMIT = 16 * 1024 * 1024;
 const SOURCE_CODE_SUFFIXES = [...PYTHON_SUFFIXES, ...TYPESCRIPT_SUFFIXES];
 const SOURCE_CODE_GLOBS = SOURCE_CODE_SUFFIXES.map((suffix) => `*${suffix}`);
+const IMPLEMENTATION_GLOBS = [...SOURCE_CODE_SUFFIXES, ...UNPARSED_SOURCE_SUFFIXES].map(
+  (suffix) => `*${suffix}`,
+);
 
 export type RipgrepScanStatus = "complete" | "failed" | "truncated";
 
@@ -116,7 +120,7 @@ export function ripgrepFilesWithMatches(
     "--files-with-matches",
     "--fixed-strings",
     "--ignore-case",
-    ...(sourceOnly ? SOURCE_CODE_GLOBS.flatMap((glob) => ["--glob", glob]) : []),
+    ...(sourceOnly ? IMPLEMENTATION_GLOBS.flatMap((glob) => ["--glob", glob]) : []),
     ...ripgrepExcludeArgs(),
     ...variants.flatMap((variant) => ["-e", variant]),
     ".",

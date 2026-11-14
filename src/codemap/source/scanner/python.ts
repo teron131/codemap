@@ -1,10 +1,7 @@
-/** Extracts Python measurements, imports, declarations, and call sites from one operation-local syntax tree. */
-import { readFileSync } from "node:fs";
+/** Extracts Python measurements, imports, declarations, and call sites from one file's ast-grep matches. Each rule names one fact, and ownership comes from byte-range nesting. */
 import path from "node:path";
 
-import type { SgNode } from "@ast-grep/napi";
-
-import { astGrepRoot } from "../../ast-grep.js";
+import { ancestor, type AstGrepMatch, type AstGrepRule, descendants } from "../../ast-grep.js";
 import { ENTRYPOINT_BASENAMES } from "./constants.js";
 import {
   addSample,
@@ -18,157 +15,234 @@ import {
 type DefinitionScope = {
   name: string;
   kind: "function" | "class";
-  endIndex: number;
+  end: number;
   bodyStart: number;
-  bodyEnd: number;
 };
 
-/** Scans supplied or current source without retaining native trees between files or commands. */
-export function scanPythonFile(
+const IMPORT_PARENT = {
+  any: [{ inside: { kind: "import_statement" } }, { inside: { kind: "import_from_statement" } }],
+};
+const ASSIGNMENT = { any: [{ kind: "assignment" }, { kind: "augmented_assignment" }] };
+const DESTRUCTURING_PATTERNS = [
+  "pattern_list",
+  "tuple_pattern",
+  "list_pattern",
+  "list_splat_pattern",
+];
+// Destructuring deeper than this many nested patterns, as in `(a, (b, (c, (d, (e,))))) = x`, loses its innermost names.
+const DESTRUCTURING_DEPTH = 4;
+// Every expression kind the grammar allows in a class's argument list except keyword arguments and comments, which name no base.
+const BASE_KINDS = [
+  "identifier",
+  "attribute",
+  "subscript",
+  "call",
+  "string",
+  "concatenated_string",
+  "integer",
+  "float",
+  "true",
+  "false",
+  "none",
+  "ellipsis",
+  "binary_operator",
+  "unary_operator",
+  "not_operator",
+  "boolean_operator",
+  "comparison_operator",
+  "conditional_expression",
+  "lambda",
+  "named_expression",
+  "await",
+  "list",
+  "list_comprehension",
+  "dictionary",
+  "dictionary_comprehension",
+  "set",
+  "set_comprehension",
+  "tuple",
+  "parenthesized_expression",
+  "generator_expression",
+  "list_splat",
+  "dictionary_splat",
+  "parenthesized_list_splat",
+];
+
+/** Matches an identifier bound by an assignment target, directly or through up to `DESTRUCTURING_DEPTH` nested patterns. */
+function bindingTarget(): Record<string, unknown> {
+  let target: Record<string, unknown> = { inside: { ...ASSIGNMENT, field: "left" } };
+  const levels = [target];
+  for (let depth = 0; depth < DESTRUCTURING_DEPTH; depth += 1) {
+    target = { inside: { any: DESTRUCTURING_PATTERNS.map((kind) => ({ kind })), ...target } };
+    levels.push(target);
+  }
+  return { any: levels };
+}
+
+export const PYTHON_SCAN_RULES: AstGrepRule[] = Object.entries({
+  import: { kind: "import_statement" },
+  import_from: { kind: "import_from_statement", has: { field: "module_name", pattern: "$NAME" } },
+  import_name: {
+    kind: "dotted_name",
+    all: [
+      IMPORT_PARENT,
+      { not: { inside: { kind: "import_from_statement", field: "module_name" } } },
+    ],
+  },
+  import_alias: {
+    kind: "aliased_import",
+    all: [IMPORT_PARENT, { has: { field: "name", pattern: "$NAME" } }],
+  },
+  import_wildcard: { kind: "wildcard_import", inside: { kind: "import_from_statement" } },
+  function: { kind: "function_definition", has: { field: "name", pattern: "$NAME" } },
+  parameters: { kind: "parameters", inside: { kind: "function_definition", field: "parameters" } },
+  return_type: { kind: "type", inside: { kind: "function_definition", field: "return_type" } },
+  class: { kind: "class_definition", has: { field: "name", pattern: "$NAME" } },
+  base: {
+    any: BASE_KINDS.map((kind) => ({ kind })),
+    inside: {
+      kind: "argument_list",
+      inside: { kind: "class_definition", field: "superclasses" },
+    },
+  },
+  decorator: { kind: "decorator", inside: { kind: "decorated_definition" } },
+  assignment: ASSIGNMENT,
+  binder: { kind: "identifier", ...bindingTarget() },
+  export_name: {
+    kind: "string",
+    inside: {
+      any: [{ kind: "list" }, { kind: "tuple" }, { kind: "set" }],
+      inside: { ...ASSIGNMENT, field: "right", has: { field: "left", regex: "^__all__$" } },
+    },
+  },
+  callee: { kind: "identifier", inside: { kind: "call", field: "function" } },
+  callee_attribute: {
+    kind: "attribute",
+    inside: { kind: "call", field: "function" },
+    has: { field: "attribute", pattern: "$NAME" },
+  },
+  main_guard: { kind: "comparison_operator", regex: "__main__" },
+}).map(([id, rule]) => ({ id: `python.${id}`, language: "python", rule }));
+
+/** Builds one file's record from its source and the matches of `PYTHON_SCAN_RULES`. */
+export function pythonFileMetrics(
   filePath: string,
-  { relPath, source: supplied }: { relPath: string; source?: string | undefined },
+  { relPath, source, matches }: { relPath: string; source: string; matches: AstGrepMatch[] },
 ): FileMetrics {
   const metrics = createFileMetrics({ path: filePath, relPath, suffix: path.extname(filePath) });
-  let source: string;
-  try {
-    source = supplied ?? readFileSync(filePath, "utf8");
-  } catch {
-    return metrics;
-  }
   metrics.lines = sourceLineCount(source);
   metrics.entrypointHint = ENTRYPOINT_BASENAMES.has(path.basename(filePath));
-  const root = astGrepRoot(source, "python");
-  if (root === null) {
-    return metrics;
-  }
-  const nodes = root.findAll({
-    rule: {
-      any: [
-        "import_statement",
-        "import_from_statement",
-        "function_definition",
-        "class_definition",
-        "assignment",
-        "augmented_assignment",
-        "call",
-        "comparison_operator",
-      ].map((kind) => ({ kind })),
-    },
-  });
-  // Native matches arrive in source preorder, so scalar scopes replace repeated ancestor walks.
+  // Matches arrive in source preorder, so an open-range stack gives each match its enclosing definitions.
   const scopes: DefinitionScope[] = [];
-  for (const node of nodes) {
-    const range = node.range();
-    while (scopes.length && range.start.index >= scopes.at(-1)!.endIndex) scopes.pop();
-    const kind = node.kind();
-    if (kind === "import_statement" || kind === "import_from_statement") {
-      collectImport(metrics, node);
-    } else if (kind === "function_definition" || kind === "class_definition") {
-      const name = node.field("name")?.text();
-      if (!name) continue;
-      const span = range.end.line - range.start.line + 1;
-      const startLine = range.start.line + 1;
-      if (kind === "function_definition") {
+  for (const match of matches) {
+    while (scopes.length && match.start >= scopes.at(-1)!.end) scopes.pop();
+    switch (match.rule) {
+      case "python.import":
+      case "python.import_from":
+        collectImport(metrics, match);
+        break;
+      case "python.function": {
+        const name = match.name;
         metrics.functionNames.push(name);
         metrics.functionSpans.push({
           name,
           identifier: `${relPath}::${[...scopes.map((scope) => scope.name), name].join(".")}`,
-          span,
-          startLine,
+          span: match.endLine - match.startLine + 1,
+          startLine: match.startLine + 1,
         });
         if (scopes.length === 0) metrics.defines += 1;
-      } else {
-        metrics.defines += 1;
-        metrics.classSpans.push({ name, span, startLine });
-        const bases =
-          node
-            .field("superclasses")
-            ?.namedChildren()
-            .filter((base) => !["keyword_argument", "comment"].includes(String(base.kind()))) ?? [];
-        for (const base of bases) {
-          metrics.inherits += 1;
-          addSample(metrics.samples, base.text());
-        }
-      }
-      const body = node.field("body")?.range();
-      scopes.push({
-        name,
-        kind: kind === "function_definition" ? "function" : "class",
-        endIndex: range.end.index,
-        bodyStart: body?.start.index ?? range.end.index,
-        bodyEnd: body?.end.index ?? range.end.index,
-      });
-      const decorated = node.parent();
-      if (decorated?.kind() === "decorated_definition") {
-        metrics.decorators += decorated
-          .namedChildren()
-          .filter((child) => child.kind() === "decorator").length;
-      }
-      addSample(metrics.samples, name);
-    } else if (kind === "assignment" || kind === "augmented_assignment") {
-      const names = assignmentNames(node.field("left"));
-      metrics.variableNames.push(...names);
-      const moduleLevel = scopes.length === 0;
-      if (moduleLevel) {
-        for (const name of names)
-          addVariableDefinition(metrics, relPath, name, {
-            startLine: range.start.line + 1,
-            moduleLevel,
-          });
-      }
-      if (node.field("left")?.text() === "__all__") {
-        metrics.exportedNames.push(...literalExportNames(node.field("right")));
-      }
-    } else if (kind === "call") {
-      const owner = scopes.findLast(
-        (scope) =>
-          scope.kind === "function" &&
-          scope.bodyStart <= range.start.index &&
-          scope.bodyEnd >= range.end.index,
-      );
-      const target = node.field("function");
-      const callee =
-        target?.kind() === "identifier"
-          ? target.text()
-          : target?.kind() === "attribute"
-            ? target.field("attribute")?.text()
-            : null;
-      if (owner && callee)
-        metrics.callSites.push({
-          caller: owner.name,
-          callee,
-          lineNumber: range.start.line + 1,
+        scopes.push({
+          name,
+          kind: "function",
+          end: match.end,
+          // Parameter defaults and the return annotation run before the body, so calls there belong to an outer function.
+          bodyStart: Math.max(
+            match.start,
+            ...match.children
+              .filter(
+                (child) =>
+                  child.rule === "python.parameters" || child.rule === "python.return_type",
+              )
+              .map((child) => child.end),
+          ),
         });
-    } else if (kind === "comparison_operator") {
-      const children = node.namedChildren();
-      metrics.entrypointHint ||=
-        children.length === 2 &&
-        children.some((child) => child.kind() === "identifier" && child.text() === "__name__") &&
-        children.some(
-          (child) => child.kind() === "string" && /^(['"])__main__\1$/.test(child.text()),
-        ) &&
-        node.children().some((child) => child.text() === "==");
+        addSample(metrics.samples, name);
+        break;
+      }
+      case "python.class": {
+        const name = match.name;
+        metrics.defines += 1;
+        metrics.classSpans.push({
+          name,
+          span: match.endLine - match.startLine + 1,
+          startLine: match.startLine + 1,
+        });
+        for (const base of match.children.filter((child) => child.rule === "python.base")) {
+          metrics.inherits += 1;
+          addSample(metrics.samples, base.text);
+        }
+        scopes.push({ name, kind: "class", end: match.end, bodyStart: match.end });
+        addSample(metrics.samples, name);
+        break;
+      }
+      case "python.decorator":
+        metrics.decorators += 1;
+        break;
+      case "python.assignment": {
+        const names = ownedBy(match, "python.binder").map((binder) => binder.text);
+        metrics.variableNames.push(...names);
+        if (scopes.length === 0) {
+          for (const name of names)
+            addVariableDefinition(metrics, relPath, name, {
+              startLine: match.startLine + 1,
+              moduleLevel: true,
+            });
+        }
+        metrics.exportedNames.push(...literalExportNames(match));
+        break;
+      }
+      case "python.callee":
+      case "python.callee_attribute": {
+        const owner = scopes.findLast(
+          (scope) =>
+            scope.kind === "function" && scope.bodyStart <= match.start && scope.end >= match.end,
+        );
+        const callee = match.rule === "python.callee" ? match.text : match.name;
+        if (owner)
+          metrics.callSites.push({
+            caller: owner.name,
+            callee,
+            lineNumber: match.startLine + 1,
+          });
+        break;
+      }
+      case "python.main_guard":
+        metrics.entrypointHint ||=
+          /^(?:__name__\s*==\s*(["'])__main__\1|(["'])__main__\2\s*==\s*__name__)$/.test(
+            match.text,
+          );
+        break;
     }
   }
   return metrics;
 }
 
 /** Preserves import names and relative levels before project-specific module resolution. */
-function collectImport(metrics: FileMetrics, node: SgNode): void {
-  const names = node
-    .fieldChildren("name")
-    .map((name) =>
-      name.kind() === "aliased_import" ? (name.field("name")?.text() ?? "") : name.text(),
-    );
-  if (node.namedChildren().some((child) => child.kind() === "wildcard_import")) names.push("*");
-  let statement: PythonImport;
-  if (node.kind() === "import_statement") {
-    statement = { kind: "import", names };
+function collectImport(metrics: FileMetrics, statement: AstGrepMatch): void {
+  const names: string[] = [];
+  for (const child of statement.children) {
+    if (child.rule === "python.import_name") names.push(child.text);
+    else if (child.rule === "python.import_alias") names.push(child.name);
+    else if (child.rule === "python.import_wildcard") names.push("*");
+  }
+  let record: PythonImport;
+  if (statement.rule === "python.import") {
+    record = { kind: "import", names };
     metrics.pythonImportTargets.push(...names);
   } else {
-    const raw = node.field("module_name")?.text() ?? "";
+    const raw = statement.name;
     const level = raw.match(/^\.+/)?.[0].length ?? 0;
-    statement = { kind: "from", level, module: raw.slice(level), names };
+    record = { kind: "from", level, module: raw.slice(level), names };
     for (const name of names) {
       const target = raw || name;
       metrics.pythonImportTargets.push(target);
@@ -178,34 +252,24 @@ function collectImport(metrics: FileMetrics, node: SgNode): void {
       }
     }
   }
-  metrics.pythonImports.push(statement);
+  metrics.pythonImports.push(record);
 }
 
-/** Reads assignment binders without confusing attribute writes, annotations, or default parameters with new variables. */
-function assignmentNames(node: SgNode | null): string[] {
-  if (node === null) return [];
-  if (node.kind() === "identifier") return [node.text()];
-  if (
-    ["pattern_list", "tuple_pattern", "list_pattern", "list_splat_pattern"].includes(
-      String(node.kind()),
-    )
-  ) {
-    return node.namedChildren().flatMap(assignmentNames);
-  }
-  return [];
+/** Matches of `rule` whose nearest enclosing assignment is `assignment`, so a chained or nested assignment keeps its own names. */
+function ownedBy(assignment: AstGrepMatch, rule: string): AstGrepMatch[] {
+  return descendants(assignment, rule).filter(
+    (match) => ancestor(match, "python.assignment") === assignment,
+  );
 }
 
-/** Reads static __all__ members without evaluating expressions, byte strings, or interpolated values. */
-function literalExportNames(value: SgNode | null): string[] {
-  if (value === null || !["list", "tuple", "set"].includes(String(value.kind()))) return [];
+/** Reads static `__all__` members without evaluating expressions, byte strings, or interpolated values. */
+function literalExportNames(assignment: AstGrepMatch): string[] {
   const names: string[] = [];
-  for (const item of value.namedChildren()) {
-    if (item.kind() !== "string") continue;
-    const children = item.namedChildren();
-    const start = children.find((child) => child.kind() === "string_start")?.text() ?? "";
-    const end = children.find((child) => child.kind() === "string_end")?.text() ?? "";
-    if (start && end && !/[bf]/i.test(start))
-      names.push(item.text().slice(start.length, -end.length));
+  for (const item of ownedBy(assignment, "python.export_name")) {
+    const quotes = /^([A-Za-z]*)("""|'''|"|')/.exec(item.text);
+    if (quotes !== null && !/[bf]/i.test(quotes[1]!) && item.text.endsWith(quotes[2]!)) {
+      names.push(item.text.slice(quotes[0].length, -quotes[2]!.length));
+    }
   }
   return names;
 }

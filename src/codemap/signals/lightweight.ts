@@ -9,7 +9,7 @@ import {
   isGeneratedPath,
   isTestPath,
   PYTHON_SUFFIXES,
-  scanFile,
+  scanFiles,
   TYPESCRIPT_SUFFIXES,
 } from "../source/scanner/index.js";
 import { compareText } from "../text-utils.js";
@@ -142,22 +142,14 @@ function buildLightweightSignalRow(
   };
 }
 
-/** Parses only the leading files, so callers pass them largest first; a file whose parse throws keeps its line-count row. */
+/** Parses only the leading files, so callers pass them largest first. */
 function scanLightweightFiles(files: InventoryEntry[], root: string): Map<string, FileMetrics> {
-  const metricsByPath = new Map<string, FileMetrics>();
-  for (const entry of files.slice(0, LIGHTWEIGHT_SIGNAL_PARSE_LIMIT)) {
-    try {
-      metricsByPath.set(
-        entry.path,
-        scanFile(path.join(root, entry.path), {
-          displayRoot: root,
-        }),
-      );
-    } catch {
-      continue;
-    }
-  }
-  return metricsByPath;
+  const parsed = files.slice(0, LIGHTWEIGHT_SIGNAL_PARSE_LIMIT);
+  const scanned = scanFiles(
+    parsed.map((entry) => path.join(root, entry.path)),
+    { displayRoot: root },
+  );
+  return new Map(parsed.map((entry, index) => [entry.path, scanned[index]!]));
 }
 
 function lightweightFunctionRows(
