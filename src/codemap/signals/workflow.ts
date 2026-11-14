@@ -43,10 +43,6 @@ function buildWorkingTreeSignalPayload(
   const payload = buildSignalPayload(analyzedSections(root, sectionNames(section), files), {
     includeTests,
   });
-  if (section === "all") {
-    // `all` keeps the `docstrings` key but leaves full reports to the separate `docstrings` request.
-    payload.docstrings = {};
-  }
   return selectPayloadSection(payload, section);
 }
 

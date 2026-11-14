@@ -367,7 +367,8 @@ describe("signals CLI", () => {
     expect(result.stderr).toBe("");
     const payload = JSON.parse(result.stdout);
     expect(payload).not.toHaveProperty("top");
-    expect(payload.docstrings).toEqual({});
+    // Full docstring reports belong to the separate `docstrings` section; an empty one here would read as a repository without docstrings.
+    expect(payload).not.toHaveProperty("docstrings");
     expect(payload.stats).toMatchObject({
       source: "workingTree",
       functions: {
